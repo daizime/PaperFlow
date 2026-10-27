@@ -1,0 +1,27 @@
+.pdf-page {
+  position: relative;
+  flex: none;
+  margin: 0 auto 24px;
+  background: white;
+  box-shadow: 0 2px 9px rgb(42 55 77 / 13%);
+  overflow: hidden;
+  isolation: isolate;
+}
+.pdf-page-mount, .pdf-page-surface { position: absolute; inset: 0; }
+.pdf-page-surface > canvas { display: block; position: absolute; inset: 0; z-index: 0; }
+.pdf-page-surface > .textLayer { z-index: 1; }
+/* 未来高亮层使用同一 CSS viewport；不拦截现有 TextLayer 的鼠标选区。 */
+.pdf-page-surface > .pdf-highlight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.pdf-page-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 30px;
+  color: #98a3b3;
+  font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 3;
+}
+.pdf-page-error { color: #944d43; background: #fff9f8; text-align: center; line-height: 1.8; }

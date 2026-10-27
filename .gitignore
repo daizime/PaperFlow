@@ -1,0 +1,14 @@
+node_modules/
+.cache/
+src/renderer/public/pdfjs/
+out/
+dist/
+release/
+test-results/
+playwright-report/
+.eslintcache
+*.log
+*.tsbuildinfo
+项目管理/状态/
+.env*
+!.env.example

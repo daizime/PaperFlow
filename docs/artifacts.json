@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-27",
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "path": "F:\\文献阅读器\\release\\PaperFlow-0.1.0-win-x64-setup.exe",
+      "bytes": 122992594,
+      "sha256": "c2a582f7b40ca350d7e4570ab1a7009b6ed4cd2484045f691fb9b0282d64109e"
+    },
+    {
+      "path": "F:\\文献阅读器\\release\\win-unpacked\\PaperFlow.exe",
+      "bytes": 245590016,
+      "sha256": "58ab630b77e02bb234150f386eadd0349dd960f4a405b98c4361db7e92553e65"
+    }
+  ],
+  "signature": "NotSigned",
+  "bundle": {
+    "checked": 209,
+    "differences": [],
+    "hasPdfWorker": true,
+    "hasUnusedQuickJS": false,
+    "nativeCanvasPackages": 0,
+    "rootLicenseMatches": true,
+    "noticesMatch": true
+  },
+  "licenseFiles": {
+    "count": 41,
+    "mismatches": 0
+  }
+}

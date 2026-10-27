@@ -1,0 +1,29 @@
+appId: org.paperflow.desktop
+productName: PaperFlow
+electronDist: node_modules/electron/dist
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - resources/**
+  - package.json
+  - LICENSE
+  - docs/third-party-licenses.md
+asar: true
+asarUnpack:
+  - '**/*.node'
+win:
+  executableName: PaperFlow
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  artifactName: PaperFlow-${version}-win-${arch}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: PaperFlow
+npmRebuild: false

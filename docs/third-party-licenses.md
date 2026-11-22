@@ -78,7 +78,7 @@
 
 Mozilla 对应版本的 [标准字体说明](https://raw.githubusercontent.com/mozilla/pdf.js/v6.4.299/external/standard_fonts/README.md) 明确将 Liberation Sans 标为 **1.07.4**。该版本使用 GPL v2 与字体例外；后续 2.x 字体的 OFL 条款不能替代本版文件。字体例外主要针对文档嵌入，不能据此免除字体文件本身的分发条件。完整原文已保留。
 
-字体源码获取入口为 [上游 Liberation 1.7 仓库](https://github.com/liberationfonts/liberation-1.7-fonts)；其 README 所列 1.07.4 的 Pagure 源码压缩包链接，本次核查返回 404。可查阅 [Debian 保存的 1.07.4 源码目录](https://sources.debian.org/src/fonts-liberation/1:1.07.4-11/)，其中提供 `src/` 字形源文件、`Makefile`、`License.txt` 和 `COPYING`。本次没有下载、编译或证明该源码重建结果与随包 TTF 逐字节一致；正式公开分发前，需要固定并提供对应源码、构建材料及校验记录，核对 GPL v2 与附加例外要求。**保留许可证和来源链接不等于已完成全部分发义务。**
+字体源码获取入口为 [上游 Liberation 1.7 仓库](https://github.com/liberationfonts/liberation-1.7-fonts)；其 README 所列 1.07.4 的 Pagure 源码压缩包链接核查返回 404。后续多会话验证已从 [Debian 官方发行池](https://deb.debian.org/debian/pool/main/f/fonts-liberation/)保存 `fonts-liberation_1.07.4.orig.tar.gz` 与 `.dsc`，源码档案 SHA256 为 `ad98b7498dc2992f7f0868f79b65ce4a720a3acdb63ab3f1f1cb6881117a5406`，与 `.dsc` 摘要一致；PGP 未验签。该档案包含 16 份 SFD、Makefile、许可正文与 FontForge 导出脚本，当前仅保存在本机审计证据中，详见 [源码补证方案](verification/license-source-plan.md)。没有执行字体编译或证明与随包 TTF 逐字节重现；正式公开分发前，仍需落实对应源码与构建材料的实际提供方式。**已保存源码及许可证不等于已完成全部分发义务。**
 
 本阶段不启用 PDF 脚本执行。`quickjs-eval.js` 与 `quickjs-eval.wasm` 已在准备脚本中排除；不将未使用的脚本引擎混入发布资源。
 

@@ -6,6 +6,7 @@ export interface ReaderToolbarProps {
   pageCount: number
   scale: number
   disabled: boolean
+  importing: boolean
   onNavigate: (page: number) => void
   onScale: (scale: number) => void
   onFitWidth: () => void
@@ -16,7 +17,7 @@ const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 
 export function ReaderToolbar({
-  pageNumber, pageCount, scale, disabled, onNavigate, onScale, onFitWidth, onImport
+  pageNumber, pageCount, scale, disabled, importing, onNavigate, onScale, onFitWidth, onImport
 }: ReaderToolbarProps): React.JSX.Element {
   const [draftPage, setDraftPage] = useState(String(pageNumber))
   const unavailable = disabled || pageCount < 1
@@ -65,6 +66,7 @@ export function ReaderToolbar({
         disabled={unavailable || scale >= MAX_SCALE} onClick={() => changeScale(0.1)}>＋</button>
       <button type="button" disabled={unavailable} onClick={onFitWidth}>适合宽度</button>
     </div>
-    <button type="button" className="reader-toolbar__import" aria-label="打开新 PDF" onClick={onImport}>打开新 PDF</button>
+    <button type="button" className="reader-toolbar__import" aria-label="打开新 PDF" disabled={importing}
+      aria-busy={importing} onClick={onImport}>打开新 PDF</button>
   </div>
 }

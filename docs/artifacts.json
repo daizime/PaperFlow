@@ -1,16 +1,41 @@
 {
-  "date": "2026-10-27",
+  "date": "2026-11-22",
   "version": "0.1.0",
+  "task_id": "AGY-PACKAGE-001",
+  "run_id": "run-2",
+  "audited_at": "2026-11-22T18:56:19+08:00",
+  "baseline_id": "PF-ANTIGRAVITY-20261122-02",
+  "source": {
+    "kind": "uncommitted-worktree",
+    "cleanHeadBuild": false,
+    "gitHeadReferenceOnly": "0779111916f8ab3360619e5302cd83e2dd823168",
+    "branch": "init_paperflow_desktop",
+    "description": "整合最新进度、两项稳定性修复（window.ts URL 防护与阅读状态防抖稳定化）及符号/宽下标/行内居中点/连续上下行选区断白修复（selection-bridges.ts、selection-highlight.ts），经 70 单测、61 源码 E2E 与 61 打包 EXE E2E 实测通过。"
+  },
   "artifacts": [
     {
-      "path": "F:\\文献阅读器\\release\\PaperFlow-0.1.0-win-x64-setup.exe",
-      "bytes": 122992594,
-      "sha256": "c2a582f7b40ca350d7e4570ab1a7009b6ed4cd2484045f691fb9b0282d64109e"
+      "path": "release/PaperFlow-0.1.0-win-x64-setup.exe",
+      "bytes": 123011159,
+      "sha256": "a05a3979262a7383bfc27107336ae5aab633b5e2970e929457c8dcf046755163",
+      "signature": "NotSigned"
     },
     {
-      "path": "F:\\文献阅读器\\release\\win-unpacked\\PaperFlow.exe",
+      "path": "release/PaperFlow-0.1.0-win-x64-setup.exe.blockmap",
+      "bytes": 130394,
+      "sha256": "1ff30a2a2afd464f47ed7df7ca5e24b6f89446c6ef97dcdf175503d16345914e",
+      "signature": null
+    },
+    {
+      "path": "release/win-unpacked/PaperFlow.exe",
       "bytes": 245590016,
-      "sha256": "58ab630b77e02bb234150f386eadd0349dd960f4a405b98c4361db7e92553e65"
+      "sha256": "402cffed36c19b2caca26ae307acc646a19d47a089d18861b3db98e5af9f7d46",
+      "signature": "NotSigned"
+    },
+    {
+      "path": "release/win-unpacked/resources/app.asar",
+      "bytes": 33341180,
+      "sha256": "2eb40102005c90f068639bffb000c3a75d344aa7f27b4bc6dd831df5396a13df",
+      "signature": null
     }
   ],
   "signature": "NotSigned",
@@ -19,12 +44,52 @@
     "differences": [],
     "hasPdfWorker": true,
     "hasUnusedQuickJS": false,
-    "nativeCanvasPackages": 0,
+    "hasNativeCanvasInAsar": false,
+    "hasLicense": true,
+    "hasNotices": true,
+    "hasThirdPartyDoc": true,
     "rootLicenseMatches": true,
     "noticesMatch": true
   },
   "licenseFiles": {
     "count": 41,
     "mismatches": 0
-  }
+  },
+  "verification": {
+    "typecheck": "exit 0",
+    "lint": "exit 0",
+    "unit": {
+      "files": 6,
+      "passed": 70,
+      "failed": 0
+    },
+    "devHmr": "PASS（先前于同主进程/构建配置工作区实测：pnpm dev 真实窗口、React HMR 保留页面上下文、无 pageerror；本轮仅改前端选区桥接逻辑，未重复）",
+    "rebuildElectron": {
+      "electron": "44.7.2",
+      "napi": "10",
+      "sqlite": "3.53.4",
+      "note": "先前于同原生依赖工作区实测；本轮未改主进程或原生模块"
+    },
+    "sourceE2e": {
+      "passed": 61,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0
+    },
+    "packagedE2e": {
+      "executable": "release/win-unpacked/PaperFlow.exe",
+      "passed": 61,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0
+    }
+  },
+  "limitations": [
+    "本地测试包未签名（Authenticode NotSigned）；未执行 git commit / push 或 GitHub Release。",
+    "本次未重新运行 NSIS 静默安装/卸载实机脚本（仅验证 dist:win 生成与 win-unpacked/PaperFlow.exe 全套 61/61 E2E）。",
+    "E2E 导入流程仅替换系统文件框返回值，之后的解析、哈希、复制、SQLite 与渲染均真实运行。",
+    "五档 DPR 为 Electron 进程模拟参数；未覆盖多物理显示器 DPI 迁移及其他 Windows 机器。",
+    "已完成 100% 与 150% 下的字体切换正文、宽下标、行内居中点及连续 5 行纵向连贯验证；但用户原论文 PDF 未读取验证，直角旋转页跨多行公式连贯性、forced-colors、跨页公式高亮、真实磁盘满/物理断电、极长文档内存上限及 1.07.4 字体源码公开分发渠道仍未关闭。"
+  ],
+  "remotePublish": false
 }

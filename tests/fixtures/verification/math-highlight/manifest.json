@@ -1,0 +1,356 @@
+{
+  "schemaVersion": 1,
+  "source": "PaperFlow 原创合成文字、字符组合与 PDF；不复制论文、截图正文或用户文献；公式无数学事实或 LaTeX 主张。",
+  "license": "AGPL-3.0-only（同项目；依赖许可单列）",
+  "generator": "scripts/verification/generate-math-highlight-fixture.ts",
+  "fixedMetadataDate": "2026-11-22T00:00:00.000Z",
+  "file": {
+    "name": "math-selection-continuity.pdf",
+    "bytes": 2801,
+    "sha256": "b7fdd3ab14a9d315e138b9f44a8642bc4944c2b576a2834f1d39dc8917b94b31"
+  },
+  "pages": [
+    {
+      "number": 1,
+      "width": 600,
+      "height": 780,
+      "rotation": 0,
+      "view": [
+        0,
+        0,
+        600,
+        780
+      ],
+      "userUnit": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "formula-p",
+      "text": "p",
+      "font": "Times-Roman",
+      "x": 64,
+      "y": 510,
+      "size": 18,
+      "width": 9,
+      "role": "body"
+    },
+    {
+      "id": "formula-sub-i",
+      "text": "i",
+      "font": "Times-Roman",
+      "x": 73.5,
+      "y": 503,
+      "size": 12,
+      "width": 3.336,
+      "role": "subscript"
+    },
+    {
+      "id": "formula-op",
+      "text": "⊕",
+      "font": "Symbol",
+      "x": 82.836,
+      "y": 492,
+      "size": 72,
+      "width": 55.296,
+      "role": "operator"
+    },
+    {
+      "id": "formula-q",
+      "text": "q",
+      "font": "Times-Roman",
+      "x": 144.132,
+      "y": 510,
+      "size": 18,
+      "width": 9,
+      "role": "body"
+    },
+    {
+      "id": "formula-super-two",
+      "text": "2",
+      "font": "Times-Roman",
+      "x": 153.632,
+      "y": 522,
+      "size": 12,
+      "width": 6,
+      "role": "superscript"
+    },
+    {
+      "id": "formula-tail",
+      "text": " = r",
+      "font": "Times-Roman",
+      "x": 165.632,
+      "y": 510,
+      "size": 18,
+      "width": 25.146,
+      "role": "body"
+    },
+    {
+      "id": "selected-lower-body",
+      "text": "Selected lower row keeps these symbols together.",
+      "font": "Times-Roman",
+      "x": 64,
+      "y": 480,
+      "size": 18,
+      "width": 358.434,
+      "role": "body"
+    }
+  ],
+  "formula": {
+    "pageNumber": 1,
+    "start": {
+      "x": 64.4,
+      "y": 516
+    },
+    "end": {
+      "x": 190.378,
+      "y": 516
+    },
+    "expectedText": "pi ⊕q2 = r",
+    "operatorId": "formula-op",
+    "bodyIds": [
+      "formula-p",
+      "formula-q",
+      "formula-tail"
+    ],
+    "operatorProbe": {
+      "x": 82.836,
+      "y": 470,
+      "width": 55.296,
+      "height": 94
+    }
+  },
+  "selectedRows": [
+    {
+      "id": "selected-formula-row",
+      "text": "pi ⊕q2 = r",
+      "partIds": [
+        "formula-p",
+        "formula-sub-i",
+        "formula-op",
+        "formula-q",
+        "formula-super-two",
+        "formula-tail"
+      ],
+      "role": "formula"
+    },
+    {
+      "id": "selected-body-row",
+      "text": "Selected lower row keeps these symbols together.",
+      "partIds": [
+        "selected-lower-body"
+      ],
+      "role": "body"
+    }
+  ],
+  "selection": {
+    "pageNumber": 1,
+    "start": {
+      "x": 64.4,
+      "y": 516
+    },
+    "end": {
+      "x": 422.034,
+      "y": 486
+    },
+    "expectedText": "pi ⊕q2 = r\nSelected lower row keeps these symbols together.",
+    "expectedLines": [
+      "pi ⊕q2 = r",
+      "Selected lower row keeps these symbols together."
+    ],
+    "normalization": "remove-whitespace-only"
+  },
+  "bridgeCandidates": [
+    {
+      "id": "subscript-to-operator",
+      "kind": "horizontal",
+      "sourcePartIds": [
+        "formula-sub-i",
+        "formula-op"
+      ],
+      "sourceRowIds": [
+        "selected-formula-row"
+      ],
+      "pdfWindow": {
+        "x": 77.836,
+        "y": 506,
+        "width": 4,
+        "height": 4
+      }
+    },
+    {
+      "id": "operator-to-body",
+      "kind": "horizontal",
+      "sourcePartIds": [
+        "formula-op",
+        "formula-q"
+      ],
+      "sourceRowIds": [
+        "selected-formula-row"
+      ],
+      "pdfWindow": {
+        "x": 139.132,
+        "y": 514,
+        "width": 4,
+        "height": 5
+      }
+    },
+    {
+      "id": "superscript-to-tail",
+      "kind": "horizontal",
+      "sourcePartIds": [
+        "formula-super-two",
+        "formula-tail"
+      ],
+      "sourceRowIds": [
+        "selected-formula-row"
+      ],
+      "pdfWindow": {
+        "x": 160.632,
+        "y": 519,
+        "width": 4,
+        "height": 3
+      }
+    },
+    {
+      "id": "tail-to-lower-row",
+      "kind": "vertical",
+      "sourcePartIds": [
+        "formula-tail",
+        "selected-lower-body"
+      ],
+      "sourceRowIds": [
+        "selected-formula-row",
+        "selected-body-row"
+      ],
+      "pdfWindow": {
+        "x": 170.632,
+        "y": 495,
+        "width": 15,
+        "height": 9
+      }
+    }
+  ],
+  "guardWindows": [
+    {
+      "id": "after-formula-end",
+      "pdfWindow": {
+        "x": 202.778,
+        "y": 513,
+        "width": 18,
+        "height": 5
+      },
+      "reason": "公式选中末尾之外的同基线空白，不得延长"
+    },
+    {
+      "id": "wide-column-gap",
+      "pdfWindow": {
+        "x": 460,
+        "y": 492,
+        "width": 64,
+        "height": 28
+      },
+      "reason": "远离两行选中字符的宽栏缝，不得连接"
+    },
+    {
+      "id": "paragraph-gap-below",
+      "pdfWindow": {
+        "x": 90,
+        "y": 430,
+        "width": 230,
+        "height": 12
+      },
+      "reason": "第二行下方独立段落间空白，不得连接到远处哨兵"
+    }
+  ],
+  "reference": {
+    "bodyPartIds": [
+      "formula-tail",
+      "selected-lower-body"
+    ],
+    "bodyRowIds": [
+      "selected-body-row"
+    ]
+  },
+  "excludedRuns": [
+    {
+      "id": "unselected-title",
+      "text": "ORIGINAL SYNTHETIC MATH SELECTION",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 744,
+      "size": 11,
+      "width": 214.775,
+      "role": "body"
+    },
+    {
+      "id": "unselected-body",
+      "text": "Synthetic text: two selected rows, one large operator, real small scripts.",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 692,
+      "size": 12,
+      "width": 342.276,
+      "role": "body"
+    },
+    {
+      "id": "remote-sentinel",
+      "text": "UNSELECTED_REMOTE_SENTINEL_SYNTHETIC_06",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 300,
+      "size": 12,
+      "width": 286.644,
+      "role": "body"
+    }
+  ],
+  "font": {
+    "names": [
+      "Times-Roman",
+      "Symbol"
+    ],
+    "standard": "PDF Standard 14 font-name references; no font files copied or embedded",
+    "requestedOperator": "⊕",
+    "chosenOperator": "⊕",
+    "fallbackUsed": false,
+    "operatorSize": 72
+  },
+  "coordinates": {
+    "space": "PDF default user space, lower-left origin, x right, y up",
+    "widthMethod": "Sum of individual glyph advances, audited against Node PDF.js; no AFM pair kerning in plain Tj",
+    "pointMethod": "fixed authored first character x+0.4 and last character x+width−0.4; body baseline+6; never aimed from TextLayer",
+    "bridgePolicy": "Candidate windows only: require real selected source parts, before-white pixels and measured Range geometry. Never treat real scripts as blank. Vertical window uses ordinary tail x only, not the large-operator row envelope."
+  },
+  "extraction": {
+    "file": "raw-extraction.json",
+    "tool": "Node PDF.js 6.4.299",
+    "result": "passed exact non-whitespace characters/order, font size/baseline and page geometry; raw widths/x retained, leading Tj spaces may form separate items; expectedText taken from actual extraction with whitespace collapsed",
+    "serialization": "Nonfinite numeric extraction values are recorded as strings NaN/Infinity, not silently null."
+  },
+  "localReferences": [
+    {
+      "path": "node_modules/pdf-lib/es/core/embedders/StandardFontEmbedder.js",
+      "version": "1.17.1",
+      "license": "MIT",
+      "sha256": "a7660ff811c4827ae8e04b9bc710d7c15b94502cf63f92fdbe245f4dc89f4fd4"
+    },
+    {
+      "path": "node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      "version": "6.4.299",
+      "license": "Apache-2.0",
+      "sha256": "bc51f4874a66e3853189cb5d50aba4b3096afa83ed433b885d293a3d94583cdc"
+    }
+  ],
+  "verificationBoundary": {
+    "executed": [
+      "生成一页原创合成 PDF",
+      "Node PDF.js 实际提取及制作参数核对"
+    ],
+    "notExecuted": [
+      "Electron/真实鼠标选择和剪贴板",
+      "浏览器 Range 实测",
+      "蓝框连接像素与 guard 白底实测",
+      "用户原文档验证"
+    ]
+  }
+}

@@ -1,8 +1,12 @@
 import { _electron as electron } from '@playwright/test'
-import { resolve } from 'node:path'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 async function verify(): Promise<void> {
-  const app = await electron.launch({ args: [resolve('out/main/index.js')], env: { ...process.env, ELECTRON_RENDERER_URL: '' } })
+  // 原生兼容性检查也使用隔离数据，避免加载真实文献库或更新其阅读状态。
+  const dataDirectory = await mkdtemp(join(tmpdir(), 'paperflow-native-'))
+  const app = await electron.launch({ args: [resolve('out/main/index.js'), '--user-data-dir=' + dataDirectory], env: { ...process.env, ELECTRON_RENDERER_URL: '' } })
   try {
     const page = await app.firstWindow()
     await page.getByText('PaperFlow', { exact: true }).waitFor()

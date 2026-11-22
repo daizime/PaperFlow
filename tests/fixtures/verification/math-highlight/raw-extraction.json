@@ -1,0 +1,355 @@
+{
+  "file": {
+    "name": "math-selection-continuity.pdf",
+    "bytes": 2801,
+    "sha256": "b7fdd3ab14a9d315e138b9f44a8642bc4944c2b576a2834f1d39dc8917b94b31"
+  },
+  "page": {
+    "pageNumber": 1,
+    "view": [
+      0,
+      0,
+      600,
+      780
+    ],
+    "rotation": 0,
+    "userUnit": 1,
+    "viewport": {
+      "width": 600,
+      "height": 780
+    },
+    "content": {
+      "items": [
+        {
+          "str": "ORIGINAL SYNTHETIC MATH SELECTION",
+          "dir": "ltr",
+          "width": 214.77500000000003,
+          "height": 11,
+          "transform": [
+            11,
+            0,
+            0,
+            11,
+            48,
+            744
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "",
+          "dir": "ltr",
+          "width": 0,
+          "height": 0,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            692
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": true
+        },
+        {
+          "str": "Synthetic text: two selected rows, one large operator, real small scripts.",
+          "dir": "ltr",
+          "width": 342.27600000000007,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            692
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "",
+          "dir": "ltr",
+          "width": 0,
+          "height": 0,
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            64,
+            510
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": true
+        },
+        {
+          "str": "p",
+          "dir": "ltr",
+          "width": 9.000000000000002,
+          "height": 18,
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            64,
+            510
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "i",
+          "dir": "ltr",
+          "width": 3.336,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            73.5,
+            503
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": " ",
+          "dir": "ltr",
+          "width": 6,
+          "height": 0,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            76.836,
+            503
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "⊕",
+          "dir": "ltr",
+          "width": 55.29600000000001,
+          "height": 72,
+          "transform": [
+            72,
+            0,
+            0,
+            72,
+            82.836,
+            492
+          ],
+          "fontName": "g_d0_f2",
+          "hasEOL": false
+        },
+        {
+          "str": "q",
+          "dir": "ltr",
+          "width": 9.000000000000002,
+          "height": 18,
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            144.132,
+            510
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "2",
+          "dir": "ltr",
+          "width": 6,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            153.632,
+            522
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": " ",
+          "dir": "ltr",
+          "width": 10.5,
+          "height": 0,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            159.632,
+            522
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "= r",
+          "dir": "ltr",
+          "width": 20.646,
+          "height": 18,
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            170.132,
+            510
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": true
+        },
+        {
+          "str": "Selected lower row keeps these symbols together.",
+          "dir": "ltr",
+          "width": 358.43400000000014,
+          "height": 18,
+          "transform": [
+            18,
+            0,
+            0,
+            18,
+            64,
+            480
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        },
+        {
+          "str": "",
+          "dir": "ltr",
+          "width": 0,
+          "height": 0,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            300
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": true
+        },
+        {
+          "str": "UNSELECTED_REMOTE_SENTINEL_SYNTHETIC_06",
+          "dir": "ltr",
+          "width": 286.6439999999999,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            300
+          ],
+          "fontName": "g_d0_f1",
+          "hasEOL": false
+        }
+      ],
+      "styles": {
+        "g_d0_f1": {
+          "fontFamily": "serif",
+          "ascent": "NaN",
+          "descent": "NaN",
+          "vertical": false
+        },
+        "g_d0_f2": {
+          "fontFamily": "sans-serif",
+          "ascent": "NaN",
+          "descent": "NaN",
+          "vertical": false
+        }
+      },
+      "lang": null
+    },
+    "matchedItems": [
+      {
+        "partId": "unselected-title",
+        "itemIndex": 0,
+        "str": "ORIGINAL SYNTHETIC MATH SELECTION",
+        "width": 214.77500000000003,
+        "height": 11
+      },
+      {
+        "partId": "unselected-body",
+        "itemIndex": 2,
+        "str": "Synthetic text: two selected rows, one large operator, real small scripts.",
+        "width": 342.27600000000007,
+        "height": 12
+      },
+      {
+        "partId": "formula-p",
+        "itemIndex": 4,
+        "str": "p",
+        "width": 9.000000000000002,
+        "height": 18
+      },
+      {
+        "partId": "formula-sub-i",
+        "itemIndex": 5,
+        "str": "i",
+        "width": 3.336,
+        "height": 12
+      },
+      {
+        "partId": "formula-op",
+        "itemIndex": 7,
+        "str": "⊕",
+        "width": 55.29600000000001,
+        "height": 72
+      },
+      {
+        "partId": "formula-q",
+        "itemIndex": 8,
+        "str": "q",
+        "width": 9.000000000000002,
+        "height": 18
+      },
+      {
+        "partId": "formula-super-two",
+        "itemIndex": 9,
+        "str": "2",
+        "width": 6,
+        "height": 12
+      },
+      {
+        "partId": "formula-tail",
+        "itemIndex": 11,
+        "str": "= r",
+        "width": 20.646,
+        "height": 18
+      },
+      {
+        "partId": "selected-lower-body",
+        "itemIndex": 12,
+        "str": "Selected lower row keeps these symbols together.",
+        "width": 358.43400000000014,
+        "height": 18
+      },
+      {
+        "partId": "remote-sentinel",
+        "itemIndex": 14,
+        "str": "UNSELECTED_REMOTE_SENTINEL_SYNTHETIC_06",
+        "width": 286.6439999999999,
+        "height": 12
+      }
+    ]
+  },
+  "formulaExtracted": "pi ⊕q2 = r",
+  "lowerExtracted": "Selected lower row keeps these symbols together."
+}

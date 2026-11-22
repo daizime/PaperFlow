@@ -21,7 +21,7 @@ function friendlyFileError(error: unknown): Error {
     const code = String(error.code)
     if (['EACCES', 'EPERM', 'EBUSY', 'ETXTBSY'].includes(code)) return new Error('无法访问 PDF：文件可能被占用，或没有读取权限。请关闭占用程序后重试。')
     if (code === 'ENOENT') return new Error('PDF 文件不存在或已被移动，请重新选择文件。')
-    if (code === 'ENOSPC') return new Error('磁盘空间不足，无法保存文献。请释放空间后重试。')
+    if (code === 'ENOSPC' || code === 'SQLITE_FULL') return new Error('磁盘空间不足，无法保存文献。请释放空间后重试。')
     if (code === 'EIO') return new Error('读取或保存 PDF 时发生磁盘错误，请检查磁盘后重试。')
     if (code === 'EEXIST' || code === 'ENOTDIR') return new Error('文献库存储目录不可用，请检查本地文献库后重试。')
     if (code === 'EISDIR') return new Error('所选项目不是普通 PDF 文件。')

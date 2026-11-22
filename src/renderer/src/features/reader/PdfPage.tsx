@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from './pdf-engine'
 import type { PageGeometry, PageTextContent } from './pdf-geometry'
+import { attachSelectionHighlight } from './selection-highlight'
+import { attachTextSelection } from './text-selection'
+import { alignSingleCharacterAdvances } from './text-layer-layout'
 import 'pdfjs-dist/web/pdf_viewer.css'
 import './page.css'
 
@@ -59,6 +62,8 @@ export function PdfPage({ pdf, pageNumber, scale, scrollRoot, estimatedSize, onT
     let canvas: HTMLCanvasElement | undefined
     let page: PDFPageProxy | undefined
     let completed = false
+    let releaseSelection: (() => void) | undefined
+    let releaseHighlight: (() => void) | undefined
     const tasks: Promise<unknown>[] = []
     setStatus('loading')
 
@@ -106,8 +111,14 @@ export function PdfPage({ pdf, pageNumber, scale, scrollRoot, estimatedSize, onT
         tasks.push(textLayer.render())
         await Promise.all(tasks)
         if (cancelled) return
+        alignSingleCharacterAdvances(textContent, textLayer.textDivs, viewport)
+        const geometry = { pageNumber, viewport, outputScale }
+        if (scrollRoot) {
+          releaseSelection = attachTextSelection(textElement, textLayer.textDivs, scrollRoot)
+          releaseHighlight = attachSelectionHighlight(surface, canvas, textElement, scrollRoot, geometry, textContent, textLayer.textDivs)
+        }
         callbacks.current.onTextStatus(pageNumber, textContent.items.some(item => 'str' in item && item.str.trim().length > 0))
-        callbacks.current.onPageData?.(pageNumber, { geometry: { pageNumber, viewport, outputScale }, textContent, textLayer, element })
+        callbacks.current.onPageData?.(pageNumber, { geometry, textContent, textLayer, element })
         completed = true
         setStatus('ready')
       } catch (error: unknown) {
@@ -121,6 +132,8 @@ export function PdfPage({ pdf, pageNumber, scale, scrollRoot, estimatedSize, onT
       } finally {
         await Promise.allSettled(tasks)
         if (cancelled || !completed) {
+          releaseHighlight?.()
+          releaseSelection?.()
           surface?.remove()
           if (canvas) { canvas.width = 0; canvas.height = 0 }
         }
@@ -131,6 +144,8 @@ export function PdfPage({ pdf, pageNumber, scale, scrollRoot, estimatedSize, onT
     renderQueue.current = work.catch(() => {})
     return () => {
       cancelled = true
+      releaseHighlight?.()
+      releaseSelection?.()
       renderTask?.cancel()
       textLayer?.cancel()
       surface?.remove()
@@ -138,7 +153,7 @@ export function PdfPage({ pdf, pageNumber, scale, scrollRoot, estimatedSize, onT
       // 成功任务已离开 finally，离屏时仍需释放其物理像素。
       void work.finally(() => { if (canvas) { canvas.width = 0; canvas.height = 0 } }).catch(() => {})
     }
-  }, [pdf, pageNumber, scale, nearViewport])
+  }, [pdf, pageNumber, scale, nearViewport, scrollRoot])
 
   const style: CSSProperties = { width: size.width * scale, height: size.height * scale }
   return <div ref={elementRef} className="pdf-page" style={style} data-page-number={pageNumber} data-rendered={status === 'ready'} role="region" aria-label={'PDF 第 ' + pageNumber + ' 页'}>

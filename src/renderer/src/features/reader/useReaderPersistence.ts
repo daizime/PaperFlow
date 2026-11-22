@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { ReaderState } from '../../../../shared/contracts'
 import { ReaderStateWriter } from './reader-state-writer'
 export interface CloseFlushDetail { promises: Promise<void>[] }
-export function useReaderPersistence(state: ReaderState | null): string | null {
+export type ReaderStateInput = Omit<ReaderState, 'updatedAt'>
+
+export function useReaderPersistence(state: ReaderState | ReaderStateInput | null): string | null {
   const latest = useRef(state)
   const [writer] = useState(() => new ReaderStateWriter(snapshot => window.paperflow.saveReaderState(snapshot)))
   const [error, setError] = useState<string | null>(null)
@@ -10,12 +12,21 @@ export function useReaderPersistence(state: ReaderState | null): string | null {
   const flush = useCallback((): Promise<void> => {
     const snapshot = latest.current
     if (!snapshot) return Promise.resolve()
-    return writer.save(snapshot).then(() => { setError(null) }, () => { setError('阅读进度保存失败，请检查本地文献库。') })
+    return writer.save({
+      documentId: snapshot.documentId,
+      pageNumber: snapshot.pageNumber,
+      scale: snapshot.scale,
+      updatedAt: new Date().toISOString()
+    }).then(() => { setError(null) }, () => { setError('阅读进度保存失败，请检查本地文献库。') })
   }, [writer])
+  const documentId = state?.documentId
+  const pageNumber = state?.pageNumber
+  const scale = state?.scale
   useEffect(() => {
+    if (documentId === undefined || pageNumber === undefined || scale === undefined) return
     const timer = setTimeout(() => { void flush() }, 450)
     return () => clearTimeout(timer)
-  }, [state, flush])
+  }, [documentId, pageNumber, scale, flush])
   useEffect(() => {
     const onClose = (event: Event): void => {
       const detail = (event as CustomEvent<CloseFlushDetail>).detail

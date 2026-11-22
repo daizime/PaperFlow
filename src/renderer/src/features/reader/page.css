@@ -10,6 +10,32 @@
 .pdf-page-mount, .pdf-page-surface { position: absolute; inset: 0; }
 .pdf-page-surface > canvas { display: block; position: absolute; inset: 0; z-index: 0; }
 .pdf-page-surface > .textLayer { z-index: 1; }
+.pdf-page-surface > .pdf-selection-shape {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  fill: rgb(0 90 255);
+  fill: AccentColor;
+  fill-opacity: 0.36;
+}
+/* 先把不透明选区合成一层，再对整个文字层施加透明度，重叠的行盒不会重复着色。 */
+@media (forced-colors: none) {
+  .pdf-page-surface > .pdf-selection-shape { display: block; }
+  .pdf-page-surface > .textLayer { opacity: 0.36; }
+  .pdf-page-surface > .textLayer ::selection {
+    background: rgb(0 90 255);
+    background: AccentColor;
+    color: transparent;
+  }
+  .pdf-page-surface > .textLayer[data-continuous-selection] ::selection { background: transparent; }
+  .pdf-page-surface > .textLayer br::selection { background: transparent; }
+}
 /* 未来高亮层使用同一 CSS viewport；不拦截现有 TextLayer 的鼠标选区。 */
 .pdf-page-surface > .pdf-highlight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .pdf-page-status {

@@ -6,10 +6,15 @@ export function installSessionSecurity(): void {
   session.defaultSession.setPermissionCheckHandler(() => false)
   const dev = developmentUrl() !== null
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const url = new URL(details.url)
-    const allowed = url.protocol === 'app:' && url.host === 'bundle' ||
-      dev && (url.origin === DEV_ORIGIN || url.origin === 'ws://127.0.0.1:5173') ||
-      ['devtools:', 'blob:', 'data:'].includes(url.protocol)
+    let allowed = false
+    try {
+      const url = new URL(details.url)
+      allowed = url.protocol === 'app:' && url.host === 'bundle' ||
+        dev && (url.origin === DEV_ORIGIN || url.origin === 'ws://127.0.0.1:5173') ||
+        ['devtools:', 'blob:', 'data:'].includes(url.protocol)
+    } catch {
+      allowed = false
+    }
     callback({ cancel: !allowed })
   })
   if (dev) session.defaultSession.webRequest.onHeadersReceived((details, callback) => {

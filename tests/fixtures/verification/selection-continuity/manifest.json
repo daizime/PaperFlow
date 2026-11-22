@@ -1,0 +1,1336 @@
+{
+  "schemaVersion": 1,
+  "source": "PaperFlow 原创合成文字、字符组合与 PDF；不复制论文、截图正文或用户文献；公式无数学事实或 LaTeX 主张。",
+  "license": "AGPL-3.0-only（同项目；依赖许可单列）",
+  "generator": "scripts/verification/generate-selection-continuity-fixture.ts",
+  "fixedMetadataDate": "2026-11-22T00:00:00.000Z",
+  "file": {
+    "name": "selection-continuity-regression.pdf",
+    "bytes": 4425,
+    "sha256": "4c686458a8ceb11f00a5657e20434134120fa48d8402c2d677486c1d87c89a04"
+  },
+  "pages": [
+    {
+      "number": 1,
+      "width": 600,
+      "height": 780,
+      "rotation": 0,
+      "view": [
+        0,
+        0,
+        600,
+        780
+      ],
+      "userUnit": 1
+    }
+  ],
+  "parts": [
+    {
+      "id": "r1-blocks",
+      "rowId": "row-1",
+      "text": "blocks",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 602,
+      "size": 12,
+      "width": 31.332,
+      "role": "body",
+      "drawOrder": 2
+    },
+    {
+      "id": "r1-m1",
+      "rowId": "row-1",
+      "text": "M",
+      "font": "Times-Italic",
+      "x": 83.832,
+      "y": 602,
+      "size": 12,
+      "width": 9.996,
+      "role": "body",
+      "drawOrder": 3
+    },
+    {
+      "id": "r1-and1",
+      "rowId": "row-1",
+      "text": "and",
+      "font": "Times-Roman",
+      "x": 98.328,
+      "y": 602,
+      "size": 12,
+      "width": 17.328,
+      "role": "body",
+      "drawOrder": 4
+    },
+    {
+      "id": "r1-n1",
+      "rowId": "row-1",
+      "text": "N",
+      "font": "Times-Italic",
+      "x": 120.156,
+      "y": 602,
+      "size": 12,
+      "width": 8.004,
+      "role": "body",
+      "drawOrder": 5
+    },
+    {
+      "id": "r1-match",
+      "rowId": "row-1",
+      "text": "match grids",
+      "font": "Times-Roman",
+      "x": 132.66,
+      "y": 602,
+      "size": 12,
+      "width": 56.328,
+      "role": "body",
+      "drawOrder": 6
+    },
+    {
+      "id": "r1-m2",
+      "rowId": "row-1",
+      "text": "M",
+      "font": "Helvetica",
+      "x": 193.488,
+      "y": 602,
+      "size": 12,
+      "width": 9.996,
+      "role": "body",
+      "drawOrder": 7
+    },
+    {
+      "id": "r1-and2",
+      "rowId": "row-1",
+      "text": "and",
+      "font": "Times-Roman",
+      "x": 207.984,
+      "y": 602,
+      "size": 12,
+      "width": 17.328,
+      "role": "body",
+      "drawOrder": 8
+    },
+    {
+      "id": "r1-n2",
+      "rowId": "row-1",
+      "text": "N",
+      "font": "Helvetica",
+      "x": 229.812,
+      "y": 602,
+      "size": 12,
+      "width": 8.664,
+      "role": "body",
+      "drawOrder": 9
+    },
+    {
+      "id": "r1-tail",
+      "rowId": "row-1",
+      "text": ". Each step",
+      "font": "Times-Roman",
+      "x": 242.976,
+      "y": 602,
+      "size": 12,
+      "width": 52.32,
+      "role": "body",
+      "drawOrder": 10
+    },
+    {
+      "id": "r2-body",
+      "rowId": "row-2",
+      "text": "passes into:",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 585,
+      "size": 12,
+      "width": 55.668,
+      "role": "body",
+      "drawOrder": 11
+    },
+    {
+      "id": "r3-left",
+      "rowId": "row-3",
+      "text": "V[ ] =",
+      "font": "Times-Roman",
+      "x": 68,
+      "y": 556,
+      "size": 12,
+      "width": 29.424,
+      "role": "body",
+      "drawOrder": 12
+    },
+    {
+      "id": "r3-op",
+      "rowId": "row-3",
+      "text": "⊕",
+      "font": "Symbol",
+      "x": 117.424,
+      "y": 553,
+      "size": 20,
+      "width": 15.36,
+      "role": "operator",
+      "drawOrder": 13
+    },
+    {
+      "id": "r3-underscript",
+      "rowId": "row-3",
+      "text": "A,B,C,D,E",
+      "font": "Times-Roman",
+      "x": 107.548,
+      "y": 542,
+      "size": 8,
+      "width": 35.112,
+      "role": "subscript",
+      "drawOrder": 14
+    },
+    {
+      "id": "r3-term1",
+      "rowId": "row-3",
+      "text": "F[A, B]",
+      "font": "Times-Roman",
+      "x": 152.784,
+      "y": 556,
+      "size": 12,
+      "width": 37.332,
+      "role": "body",
+      "drawOrder": 15
+    },
+    {
+      "id": "r3-otimes1",
+      "rowId": "row-3",
+      "text": "⊗",
+      "font": "Symbol",
+      "x": 194.316,
+      "y": 556,
+      "size": 12,
+      "width": 9.216,
+      "role": "operator",
+      "drawOrder": 16
+    },
+    {
+      "id": "r3-term2",
+      "rowId": "row-3",
+      "text": "G[A, C, E]",
+      "font": "Times-Roman",
+      "x": 207.732,
+      "y": 556,
+      "size": 12,
+      "width": 52.656,
+      "role": "body",
+      "drawOrder": 17
+    },
+    {
+      "id": "r3-otimes2",
+      "rowId": "row-3",
+      "text": "⊗",
+      "font": "Symbol",
+      "x": 264.588,
+      "y": 556,
+      "size": 12,
+      "width": 9.216,
+      "role": "operator",
+      "drawOrder": 18
+    },
+    {
+      "id": "r3-term3",
+      "rowId": "row-3",
+      "text": "H[C, D]",
+      "font": "Times-Roman",
+      "x": 278.004,
+      "y": 556,
+      "size": 12,
+      "width": 39.324,
+      "role": "body",
+      "drawOrder": 19
+    },
+    {
+      "id": "r4-here",
+      "rowId": "row-4",
+      "text": "here",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 524,
+      "size": 12,
+      "width": 20.652,
+      "role": "body",
+      "drawOrder": 20
+    },
+    {
+      "id": "r4-op1",
+      "rowId": "row-4",
+      "text": "⊕",
+      "font": "Symbol",
+      "x": 86.652,
+      "y": 523,
+      "size": 16,
+      "width": 12.288,
+      "role": "operator",
+      "drawOrder": 21
+    },
+    {
+      "id": "r4-underscript",
+      "rowId": "row-4",
+      "text": "A,B,C,D,E",
+      "font": "Times-Roman",
+      "x": 75.24,
+      "y": 514,
+      "size": 8,
+      "width": 35.112,
+      "role": "subscript",
+      "drawOrder": 22
+    },
+    {
+      "id": "r4-denotes",
+      "rowId": "row-4",
+      "text": "denotes",
+      "font": "Times-Roman",
+      "x": 116.94,
+      "y": 524,
+      "size": 12,
+      "width": 36.66,
+      "role": "body",
+      "drawOrder": 23
+    },
+    {
+      "id": "r4-op2",
+      "rowId": "row-4",
+      "text": "⊕",
+      "font": "Symbol",
+      "x": 157.8,
+      "y": 523,
+      "size": 15,
+      "width": 11.52,
+      "role": "operator",
+      "drawOrder": 24
+    },
+    {
+      "id": "r4-sub-a",
+      "rowId": "row-4",
+      "text": "A",
+      "font": "Times-Roman",
+      "x": 169.82,
+      "y": 518.5,
+      "size": 8,
+      "width": 5.776,
+      "role": "subscript",
+      "drawOrder": 25
+    },
+    {
+      "id": "r4-dots",
+      "rowId": "row-4",
+      "text": "⋅⋅⋅",
+      "font": "Symbol",
+      "x": 179.796,
+      "y": 525.5,
+      "size": 14,
+      "width": 10.5,
+      "role": "dots",
+      "drawOrder": 26
+    },
+    {
+      "id": "r4-op3",
+      "rowId": "row-4",
+      "text": "⊕",
+      "font": "Symbol",
+      "x": 194.496,
+      "y": 523,
+      "size": 15,
+      "width": 11.52,
+      "role": "operator",
+      "drawOrder": 27
+    },
+    {
+      "id": "r4-sub-e",
+      "rowId": "row-4",
+      "text": "E",
+      "font": "Times-Roman",
+      "x": 206.516,
+      "y": 518.5,
+      "size": 8,
+      "width": 4.888,
+      "role": "subscript",
+      "drawOrder": 28
+    },
+    {
+      "id": "r4-tail",
+      "rowId": "row-4",
+      "text": ". Every local link",
+      "font": "Times-Roman",
+      "x": 215.604,
+      "y": 524,
+      "size": 12,
+      "width": 82.656,
+      "role": "body",
+      "drawOrder": 29
+    },
+    {
+      "id": "r5-body",
+      "rowId": "row-5",
+      "text": "holds bounded weights at all nodes. Next",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 500,
+      "size": 12,
+      "width": 197.652,
+      "role": "body",
+      "drawOrder": 30
+    }
+  ],
+  "selectedRows": [
+    {
+      "id": "row-1",
+      "text": "blocks M and N match grids M and N . Each step",
+      "partIds": [
+        "r1-blocks",
+        "r1-m1",
+        "r1-and1",
+        "r1-n1",
+        "r1-match",
+        "r1-m2",
+        "r1-and2",
+        "r1-n2",
+        "r1-tail"
+      ],
+      "role": "prose"
+    },
+    {
+      "id": "row-2",
+      "text": "passes into:",
+      "partIds": [
+        "r2-body"
+      ],
+      "role": "prose"
+    },
+    {
+      "id": "row-3",
+      "text": "V[ ] = ⊕A,B,C,D,EF[A, B] ⊗ G[A, C, E] ⊗ H[C, D]",
+      "partIds": [
+        "r3-left",
+        "r3-op",
+        "r3-underscript",
+        "r3-term1",
+        "r3-otimes1",
+        "r3-term2",
+        "r3-otimes2",
+        "r3-term3"
+      ],
+      "role": "display-math"
+    },
+    {
+      "id": "row-4",
+      "text": "here ⊕A,B,C,D,Edenotes ⊕A ⋅⋅⋅ ⊕E . Every local link",
+      "partIds": [
+        "r4-here",
+        "r4-op1",
+        "r4-underscript",
+        "r4-denotes",
+        "r4-op2",
+        "r4-sub-a",
+        "r4-dots",
+        "r4-op3",
+        "r4-sub-e",
+        "r4-tail"
+      ],
+      "role": "inline-math"
+    },
+    {
+      "id": "row-5",
+      "text": "holds bounded weights at all nodes. Next",
+      "partIds": [
+        "r5-body"
+      ],
+      "role": "prose"
+    }
+  ],
+  "selections": {
+    "fullFiveRows": {
+      "pageNumber": 1,
+      "start": {
+        "x": 48.4,
+        "y": 608
+      },
+      "end": {
+        "x": 245.252,
+        "y": 506
+      },
+      "expectedText": "blocks M and N match grids M and N . Each step\npasses into:\nV[ ] = ⊕A,B,C,D,EF[A, B] ⊗ G[A, C, E] ⊗ H[C, D]\nhere ⊕A,B,C,D,Edenotes ⊕A ⋅⋅⋅ ⊕E . Every local link\nholds bounded weights at all nodes. Next",
+      "expectedLines": [
+        "blocks M and N match grids M and N . Each step",
+        "passes into:",
+        "V[ ] = ⊕A,B,C,D,EF[A, B] ⊗ G[A, C, E] ⊗ H[C, D]",
+        "here ⊕A,B,C,D,Edenotes ⊕A ⋅⋅⋅ ⊕E . Every local link",
+        "holds bounded weights at all nodes. Next"
+      ],
+      "normalization": "remove-whitespace-only"
+    },
+    "proseTwoRows": {
+      "pageNumber": 1,
+      "start": {
+        "x": 48.4,
+        "y": 608
+      },
+      "end": {
+        "x": 103.268,
+        "y": 591
+      },
+      "expectedText": "blocks M and N match grids M and N . Each step\npasses into:",
+      "expectedLines": [
+        "blocks M and N match grids M and N . Each step",
+        "passes into:"
+      ],
+      "normalization": "remove-whitespace-only"
+    }
+  },
+  "bridgeCandidates": [
+    {
+      "id": "r1-gap-1-r1-blocks-to-r1-m1",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-blocks",
+        "r1-m1"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 79.632,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-blocks (Times-Roman) and r1-m1 (Times-Italic)"
+    },
+    {
+      "id": "r1-gap-2-r1-m1-to-r1-and1",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-m1",
+        "r1-and1"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 94.128,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-m1 (Times-Italic) and r1-and1 (Times-Roman)"
+    },
+    {
+      "id": "r1-gap-3-r1-and1-to-r1-n1",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-and1",
+        "r1-n1"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 115.956,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-and1 (Times-Roman) and r1-n1 (Times-Italic)"
+    },
+    {
+      "id": "r1-gap-4-r1-n1-to-r1-match",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-n1",
+        "r1-match"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 128.46,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-n1 (Times-Italic) and r1-match (Times-Roman)"
+    },
+    {
+      "id": "r1-gap-5-r1-match-to-r1-m2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-match",
+        "r1-m2"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 189.288,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-match (Times-Roman) and r1-m2 (Helvetica)"
+    },
+    {
+      "id": "r1-gap-6-r1-m2-to-r1-and2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-m2",
+        "r1-and2"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 203.784,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-m2 (Helvetica) and r1-and2 (Times-Roman)"
+    },
+    {
+      "id": "r1-gap-7-r1-and2-to-r1-n2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-and2",
+        "r1-n2"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 225.612,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-and2 (Times-Roman) and r1-n2 (Helvetica)"
+    },
+    {
+      "id": "r1-gap-8-r1-n2-to-r1-tail",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-n2",
+        "r1-tail"
+      ],
+      "sourceRowIds": [
+        "row-1"
+      ],
+      "pdfWindow": {
+        "x": 238.776,
+        "y": 602.5,
+        "width": 3.9,
+        "height": 5.5
+      },
+      "description": "Row 1 font-switch horizontal gap between r1-n2 (Helvetica) and r1-tail (Times-Roman)"
+    },
+    {
+      "id": "r3-left-of-oplus",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-left",
+        "r3-op"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 98.424,
+        "y": 557,
+        "width": 18,
+        "height": 7
+      },
+      "description": "Row 3 >1.25em gap left of wide-underscript circled-plus"
+    },
+    {
+      "id": "r3-right-of-oplus",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-op",
+        "r3-term1"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 133.784,
+        "y": 557,
+        "width": 18,
+        "height": 7
+      },
+      "description": "Row 3 >1.25em gap right of wide-underscript circled-plus"
+    },
+    {
+      "id": "r3-gap-term1-otimes1",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-term1",
+        "r3-otimes1"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 190.366,
+        "y": 557,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 3 horizontal gap before first otimes"
+    },
+    {
+      "id": "r3-gap-otimes1-term2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-otimes1",
+        "r3-term2"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 203.782,
+        "y": 557,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 3 horizontal gap after first otimes"
+    },
+    {
+      "id": "r3-gap-term2-otimes2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-term2",
+        "r3-otimes2"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 260.638,
+        "y": 557,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 3 horizontal gap before second otimes"
+    },
+    {
+      "id": "r3-gap-otimes2-term3",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-otimes2",
+        "r3-term3"
+      ],
+      "sourceRowIds": [
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 274.054,
+        "y": 557,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 3 horizontal gap after second otimes"
+    },
+    {
+      "id": "r4-left-of-oplus",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-here",
+        "r4-op1"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 69.652,
+        "y": 525,
+        "width": 16,
+        "height": 7
+      },
+      "description": "Row 4 >1.25em gap left of inline wide-underscript circled-plus"
+    },
+    {
+      "id": "r4-right-of-oplus",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-op1",
+        "r4-denotes"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 99.94,
+        "y": 525,
+        "width": 16,
+        "height": 7
+      },
+      "description": "Row 4 >1.25em gap right of inline wide-underscript circled-plus"
+    },
+    {
+      "id": "r4-gap-denotes-op2",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-denotes",
+        "r4-op2"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 153.85,
+        "y": 525,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 4 horizontal gap before oplus_A"
+    },
+    {
+      "id": "r4-gap-sub-a-dots",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-sub-a",
+        "r4-dots"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 175.846,
+        "y": 525,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 4 horizontal gap between right-adjacent subscript A and raised dots"
+    },
+    {
+      "id": "r4-gap-dots-op3",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-dots",
+        "r4-op3"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 190.546,
+        "y": 525,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 4 horizontal gap between raised dots and oplus_E"
+    },
+    {
+      "id": "r4-gap-sub-e-tail",
+      "kind": "horizontal",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-sub-e",
+        "r4-tail"
+      ],
+      "sourceRowIds": [
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 211.654,
+        "y": 525,
+        "width": 3.7,
+        "height": 6
+      },
+      "description": "Row 4 horizontal gap between right-adjacent subscript E and trailing period/prose"
+    },
+    {
+      "id": "v-row1-to-row2",
+      "kind": "vertical",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "sourcePartIds": [
+        "r1-blocks",
+        "r2-body"
+      ],
+      "sourceRowIds": [
+        "row-1",
+        "row-2"
+      ],
+      "pdfWindow": {
+        "x": 52,
+        "y": 595,
+        "width": 48,
+        "height": 4.5
+      },
+      "description": "Vertical gap between ordinary prose Row 1 and Row 2"
+    },
+    {
+      "id": "v-row2-to-row3",
+      "kind": "vertical",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r2-body",
+        "r3-left"
+      ],
+      "sourceRowIds": [
+        "row-2",
+        "row-3"
+      ],
+      "pdfWindow": {
+        "x": 70,
+        "y": 569,
+        "width": 32,
+        "height": 11
+      },
+      "description": "Vertical gap between prose Row 2 and indented display equation Row 3"
+    },
+    {
+      "id": "v-row3-to-row4-underscript",
+      "kind": "vertical",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-underscript",
+        "r4-denotes"
+      ],
+      "sourceRowIds": [
+        "row-3",
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 109.548,
+        "y": 534,
+        "width": 31.112,
+        "height": 5
+      },
+      "description": "Vertical gap beneath Row 3 wide underscript A,B,C,D,E down to Row 4"
+    },
+    {
+      "id": "v-row3-to-row4-terms",
+      "kind": "vertical",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r3-term1",
+        "r4-op2"
+      ],
+      "sourceRowIds": [
+        "row-3",
+        "row-4"
+      ],
+      "pdfWindow": {
+        "x": 156.784,
+        "y": 538,
+        "width": 80,
+        "height": 14
+      },
+      "description": "Vertical gap beneath Row 3 right-hand terms F[A,B] otimes ... down to Row 4"
+    },
+    {
+      "id": "v-row4-to-row5-outside-underscript",
+      "kind": "vertical",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "sourcePartIds": [
+        "r4-denotes",
+        "r5-body"
+      ],
+      "sourceRowIds": [
+        "row-4",
+        "row-5"
+      ],
+      "pdfWindow": {
+        "x": 116.352,
+        "y": 512,
+        "width": 96,
+        "height": 5.5
+      },
+      "description": "Vertical gap between Row 4 and Row 5 outside Row 4 wide underscript x-range"
+    }
+  ],
+  "guardWindows": [
+    {
+      "id": "wide-column-gap",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "pdfWindow": {
+        "x": 365,
+        "y": 524,
+        "width": 60,
+        "height": 60
+      },
+      "reason": "左侧主栏与右栏 (x>=460) 之间的宽栏缝，不得跨栏连接"
+    },
+    {
+      "id": "after-row1-end",
+      "cases": [
+        "proseTwoRows"
+      ],
+      "pdfWindow": {
+        "x": 309.296,
+        "y": 603,
+        "width": 42,
+        "height": 8
+      },
+      "reason": "仅选中前两行时，Row 1 末尾之外的同基线空白不得延长"
+    },
+    {
+      "id": "after-row2-end",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "pdfWindow": {
+        "x": 121.668,
+        "y": 586,
+        "width": 96,
+        "height": 8
+      },
+      "reason": "Row 2 末尾之外的同基线空白（上方有 Row 1，下方有 Row 3），不得越界填充"
+    },
+    {
+      "id": "after-row5-end",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "pdfWindow": {
+        "x": 259.652,
+        "y": 501,
+        "width": 56,
+        "height": 8
+      },
+      "reason": "Row 5 末尾之外的同基线空白，不得向右延长"
+    },
+    {
+      "id": "paragraph-gap-below",
+      "cases": [
+        "fullFiveRows"
+      ],
+      "pdfWindow": {
+        "x": 60,
+        "y": 452,
+        "width": 200,
+        "height": 14
+      },
+      "reason": "Row 5 下方独立段落空白，不得向远处哨兵延长"
+    },
+    {
+      "id": "unselected-title-above",
+      "cases": [
+        "fullFiveRows",
+        "proseTwoRows"
+      ],
+      "pdfWindow": {
+        "x": 48,
+        "y": 690,
+        "width": 200,
+        "height": 11
+      },
+      "reason": "Row 1 上方独立未选标题背景，不得高亮"
+    },
+    {
+      "id": "unselected-row3",
+      "cases": [
+        "proseTwoRows"
+      ],
+      "pdfWindow": {
+        "x": 68,
+        "y": 556,
+        "width": 160,
+        "height": 12
+      },
+      "reason": "仅选 Row 1 -> Row 2 时，下方未选的 Row 3 公式必须保持白底"
+    }
+  ],
+  "reference": {
+    "fullFiveRowsBodyPartIds": [
+      "r1-match",
+      "r1-tail",
+      "r2-body",
+      "r4-tail",
+      "r5-body"
+    ],
+    "proseTwoRowsBodyPartIds": [
+      "r1-match",
+      "r1-tail",
+      "r2-body"
+    ]
+  },
+  "excludedRuns": [
+    {
+      "id": "unselected-title",
+      "rowId": "excluded-before",
+      "text": "ORIGINAL SYNTHETIC SELECTION CONTINUITY",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 690,
+      "size": 11,
+      "width": 250.206,
+      "role": "body",
+      "drawOrder": 0
+    },
+    {
+      "id": "unselected-intro",
+      "rowId": "excluded-before",
+      "text": "Synthetic prose, wide underscripts, and inline symbols for continuity audit.",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 656,
+      "size": 12,
+      "width": 360.648,
+      "role": "body",
+      "drawOrder": 1
+    },
+    {
+      "id": "col2-row1",
+      "rowId": "excluded-after",
+      "text": "Col two item alpha.",
+      "font": "Times-Roman",
+      "x": 460,
+      "y": 602,
+      "size": 12,
+      "width": 94.668,
+      "role": "body",
+      "drawOrder": 31
+    },
+    {
+      "id": "col2-row2",
+      "rowId": "excluded-after",
+      "text": "Col two item beta.",
+      "font": "Times-Roman",
+      "x": 460,
+      "y": 585,
+      "size": 12,
+      "width": 88.668,
+      "role": "body",
+      "drawOrder": 32
+    },
+    {
+      "id": "col2-row3",
+      "rowId": "excluded-after",
+      "text": "Col two item gamma.",
+      "font": "Times-Roman",
+      "x": 460,
+      "y": 556,
+      "size": 12,
+      "width": 104.004,
+      "role": "body",
+      "drawOrder": 33
+    },
+    {
+      "id": "col2-row4",
+      "rowId": "excluded-after",
+      "text": "Col two item delta.",
+      "font": "Times-Roman",
+      "x": 460,
+      "y": 524,
+      "size": 12,
+      "width": 92.004,
+      "role": "body",
+      "drawOrder": 34
+    },
+    {
+      "id": "remote-sentinel",
+      "rowId": "excluded-after",
+      "text": "UNSELECTED_REMOTE_SENTINEL_CONTINUITY_07",
+      "font": "Times-Roman",
+      "x": 48,
+      "y": 240,
+      "size": 12,
+      "width": 293.964,
+      "role": "body",
+      "drawOrder": 35
+    }
+  ],
+  "geometryAudit": {
+    "maxSelectedX": 317.328,
+    "secondColumnX": 460,
+    "gutterWidth": 142.672,
+    "rowBaselines": {
+      "row1": 602,
+      "row2": 585,
+      "row3": 556,
+      "row4": 524,
+      "row5": 500
+    }
+  },
+  "dotAudit": {
+    "chosenId": "symbol-dotmath-tight",
+    "chosenFont": "Symbol",
+    "chosenText": "⋅⋅⋅",
+    "chosenBaselineShift": 1.5,
+    "chosenSize": 14,
+    "candidates": [
+      {
+        "id": "symbol-dotmath-spaced",
+        "font": "Symbol",
+        "text": "⋅ ⋅ ⋅",
+        "codePoints": [
+          "U+22C5",
+          "U+0020",
+          "U+22C5",
+          "U+0020",
+          "U+22C5"
+        ],
+        "encodable": true,
+        "widthAt12": 15
+      },
+      {
+        "id": "symbol-dotmath-tight",
+        "font": "Symbol",
+        "text": "⋅⋅⋅",
+        "codePoints": [
+          "U+22C5",
+          "U+22C5",
+          "U+22C5"
+        ],
+        "encodable": true,
+        "widthAt12": 9
+      },
+      {
+        "id": "times-middledot-tight",
+        "font": "Times-Roman",
+        "text": "···",
+        "codePoints": [
+          "U+00B7",
+          "U+00B7",
+          "U+00B7"
+        ],
+        "encodable": true,
+        "widthAt12": 9
+      },
+      {
+        "id": "times-periods-raised",
+        "font": "Times-Roman",
+        "text": "...",
+        "codePoints": [
+          "U+002E",
+          "U+002E",
+          "U+002E"
+        ],
+        "encodable": true,
+        "widthAt12": 9
+      }
+    ]
+  },
+  "font": {
+    "names": [
+      "Times-Roman",
+      "Times-Italic",
+      "Helvetica",
+      "Symbol"
+    ],
+    "standard": "PDF Standard 14 font-name references; no font files copied or embedded"
+  },
+  "coordinates": {
+    "space": "PDF default user space, lower-left origin, x right, y up",
+    "widthMethod": "Sum of individual glyph advances, audited against Node PDF.js; no AFM pair kerning in plain Tj",
+    "pointMethod": "Fixed authored first character x+0.4 and last character x+width-0.4; baseline+6; never aimed from TextLayer"
+  },
+  "extraction": {
+    "file": "raw-extraction.json",
+    "tool": "Node PDF.js 6.4.299",
+    "result": "passed exact non-whitespace characters/order, font size/baseline, page geometry, and excluded-run containment",
+    "serialization": "Nonfinite numeric extraction values are recorded as strings NaN/Infinity, not silently null."
+  },
+  "localReferences": [
+    {
+      "path": "node_modules/pdf-lib/es/core/embedders/StandardFontEmbedder.js",
+      "version": "1.17.1",
+      "license": "MIT",
+      "sha256": "a7660ff811c4827ae8e04b9bc710d7c15b94502cf63f92fdbe245f4dc89f4fd4"
+    },
+    {
+      "path": "node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      "version": "6.4.299",
+      "license": "Apache-2.0",
+      "sha256": "bc51f4874a66e3853189cb5d50aba4b3096afa83ed433b885d293a3d94583cdc"
+    }
+  ],
+  "verificationBoundary": {
+    "executed": [
+      "生成一页原创合成 PDF",
+      "Node PDF.js 实际提取、流顺序隔离与制作参数核对"
+    ],
+    "notExecuted": [
+      "Electron/真实鼠标拖选和 Ctrl+C 剪贴板",
+      "浏览器 Range 实测",
+      "DPR 1 CSS 蓝框连贯像素与 guard 白底实测",
+      "用户原文档验证"
+    ]
+  }
+}

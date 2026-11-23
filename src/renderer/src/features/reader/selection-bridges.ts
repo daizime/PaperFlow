@@ -1,4 +1,62 @@
+import type { PageViewport } from './pdf-engine'
 import type { PageRect } from './pdf-geometry'
+
+export type AffineMatrix = readonly [number, number, number, number, number, number]
+
+export interface VisualRunProjection {
+  baseline: number
+  em: number
+  horizontal: boolean
+}
+
+export function composeAffine(m1: readonly number[], m2: readonly number[]): AffineMatrix {
+  return [
+    m1[0] * m2[0] + m1[2] * m2[1],
+    m1[1] * m2[0] + m1[3] * m2[1],
+    m1[0] * m2[2] + m1[2] * m2[3],
+    m1[1] * m2[2] + m1[3] * m2[3],
+    m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+    m1[1] * m2[4] + m1[3] * m2[5] + m1[5]
+  ]
+}
+
+export function displayScaleForViewport(viewport: Pick<PageViewport, 'scale' | 'userUnit'>): number {
+  const userUnit = Number.isFinite(viewport.userUnit) && viewport.userUnit > 0 ? viewport.userUnit : 1
+  return viewport.scale * userUnit
+}
+
+export function projectVisualRun(
+  viewportTransform: readonly number[],
+  itemTransform: readonly number[],
+  displayScale: number,
+  dir?: string
+): VisualRunProjection | undefined {
+  if (!Number.isFinite(displayScale) || displayScale <= 0) return
+  const [va, vb, vc, vd, , vBaseline] = composeAffine(viewportTransform, itemTransform)
+  const em = Math.hypot(vc, vd) / displayScale
+  const baseline = vBaseline / displayScale
+  if (!Number.isFinite(em) || em <= 0 || !Number.isFinite(baseline)) return
+  const horizontal = dir !== 'ttb' && va > 0 && Math.abs(vb) <= va * 0.01
+  return { baseline, em, horizontal }
+}
+
+export function viewportToDisplayRect(rect: PageRect, displayScale: number): PageRect {
+  return {
+    x: rect.x / displayScale,
+    y: rect.y / displayScale,
+    width: rect.width / displayScale,
+    height: rect.height / displayScale
+  }
+}
+
+export function displayToViewportRect(rect: PageRect, displayScale: number): PageRect {
+  return {
+    x: rect.x * displayScale,
+    y: rect.y * displayScale,
+    width: rect.width * displayScale,
+    height: rect.height * displayScale
+  }
+}
 
 export interface SelectionRun {
   rect: PageRect

@@ -1,6 +1,7 @@
 appId: org.paperflow.desktop
 productName: PaperFlow
 electronDist: node_modules/electron/dist
+afterPack: scripts/linux-after-pack.mjs
 directories:
   buildResources: build
   output: release
@@ -26,4 +27,12 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: PaperFlow
+linux:
+  executableName: paperflow
+  icon: build/icon.png
+  category: Office;Education;Science
+  artifactName: PaperFlow-${version}-linux-${arch}.${ext}
+  target:
+    - target: tar.gz
+      arch: [x64]
 npmRebuild: false

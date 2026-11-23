@@ -29,6 +29,7 @@ app.whenReady().then(async () => {
   mkdirSync(userData, { recursive: true })
   database = new LibraryDatabase(join(userData, 'paperflow.sqlite'))
   const documents = new DocumentService(database, join(userData, 'library'), validatePdfInSandbox)
+  await documents.cleanupOrphanFiles()
   registerIpc(() => mainWindow, database, documents)
   const remember = (window: BrowserWindow): void => { mainWindow = window; window.on('closed', () => { mainWindow = null }) }
   await createWindow(remember)

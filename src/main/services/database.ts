@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { z } from 'zod'
 import type { DocumentRecord, ReaderState } from '../../shared/contracts'
-import { documentIdSchema, pageNumberSchema, readerStateSchema } from '../../shared/schemas'
+import { displayTitleSchema, documentIdSchema, pageNumberSchema, readerStateSchema } from '../../shared/schemas'
 
 export interface StoredDocumentRecord extends DocumentRecord {
   sha256: string
@@ -104,6 +104,11 @@ export class LibraryDatabase {
     return rows.map(row => toPublicDocument(toStoredDocument(row)))
   }
 
+  listStoredFilenames(): Set<string> {
+    const rows = this.database.prepare('SELECT stored_filename FROM documents').all() as Array<{ stored_filename: string }>
+    return new Set(rows.map(row => row.stored_filename))
+  }
+
   getDocument(id: string): StoredDocumentRecord | null {
     const documentId = documentIdSchema.parse(id)
     const row = this.database.prepare('SELECT * FROM documents WHERE id = ?').get(documentId) as DocumentRow | undefined
@@ -140,6 +145,21 @@ export class LibraryDatabase {
       this.database.prepare('UPDATE reader_state SET page_number = ? WHERE document_id = ? AND page_number > ?')
         .run(count, document.id, count)
     })()
+  }
+
+  renameDocument(id: string, displayTitle: string): DocumentRecord {
+    const document = this.requireDocument(id)
+    const title = displayTitleSchema.parse(displayTitle)
+    const result = this.database.prepare('UPDATE documents SET display_title = ? WHERE id = ?').run(title, document.id)
+    if (result.changes !== 1) throw new Error('文献不存在，请重新选择文献。')
+    return toPublicDocument(this.requireDocument(document.id))
+  }
+
+  deleteDocument(id: string): StoredDocumentRecord {
+    const document = this.requireDocument(id)
+    const result = this.database.prepare('DELETE FROM documents WHERE id = ?').run(document.id)
+    if (result.changes !== 1) throw new Error('文献不存在，请重新选择文献。')
+    return document
   }
 
   getReaderState(id: string): ReaderState | null {

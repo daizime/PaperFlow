@@ -111,3 +111,57 @@ computer-use 实测原生文件框成功打开，显示 PDF 扩展名过滤；�
    - Windows 打包与实机 `.exe` E2E（`pnpm dist:win` → `release/win-unpacked/PaperFlow.exe`）：**61/61 通过**。
    - 产物一致性与许可校验：`out/` 与 `release/win-unpacked/resources/app.asar` 中 **209/209** 文件逐字节一致，Worker 随包，无 QuickJS 或多余 Canvas 原生依赖；`resources/licenses/manifest.json` 40 份组件许可证与 1 份脚手架许可证（共 **41/41**）SHA-256 一致；`PaperFlow.exe` 与 NSIS 安装包 Authenticode 均为 `NotSigned`。注：`pnpm dev` 热更新与 `pnpm rebuild:electron` 均已于本工作区先前通过验证且本轮未改动主进程、原生依赖或构建配置。
 5. **仍未验证的边界**：未读取或直接测试用户原始论文 PDF 文件；未重新运行 NSIS 静默安装/卸载实机脚本；直角旋转页上的跨多行连续公式、跨页选区连接、Windows 高对比度（forced-colors）模式、多物理显示器 DPI 迁移、物理磁盘满/断电及 Liberation 1.07.4 字体源码公开分发渠道仍未验证。
+
+## 2026-11-22 纯本地阅读器体验、文献库管理与选区边界加固
+
+在完成上述选区连贯修复并合入 `main`（基线 `ecb90f3`）后，继续在当前 worktree `init_paperflow_desktop` 内以 Antigravity Swarm 协同推进纯本地科研阅读器完善，保持 T01–T03 安全与完全离线约束（仍无 LLM、云服务、OCR、Python 翻译依赖或自动发布）：
+
+1. **三路并行功能实现与边界加固**：
+   - **本地文献库管理（`library-dev`）**：`PaperFlowAPI` / `CHANNELS` 扩展至 9 个方法（新增 `importPdfBytes`、`renameDocument`、`deleteDocument`），严格经 `Zod` 校验且不向渲染进程暴露本地路径；`App.tsx` `.workspace` 阻止默认文件跳转并呈现拖拽导入覆盖层（`释放以导入 PDF 文献`）；`DocumentService` 共用 `commitPdfBytes()`、实现基于 UUID/非符号链接/`realpath` 检查的安全删除（外键 `ON DELETE CASCADE` 清理 `reader_state`）、逐文件详细中文失败提示与 `关闭提示`，以及启动建窗前 `cleanupOrphanFiles()` 自动回收孤立 `<uuid>.pdf` / `.<uuid>.tmp`。
+   - **阅读器核心体验（`reader-dev`）**：新增目录书签抽屉（`pdf-outline.ts`、`PdfOutline.tsx`，仅解析文档内 `getDestination` + `getPageIndex`，忽略纯外部 `item.url`，空目录显示“此 PDF 未包含目录书签”）；新增 `Ctrl+F` 取消式惰性全文搜索（`pdf-search.ts`、`PdfSearchBar.tsx`，按页惰性缓存 `getTextContent()` 不触发离屏 Canvas，支持区分大小写、`Enter`/`Shift+Enter`/`Escape` 与 `.pdf-highlight-layer` 命中定位）；支持 `.pdf-scroll` `Ctrl+滚轮`缩放及 `.reader-panel` 快捷键（`Ctrl+=`/`-`/`0`、`ArrowLeft`/`ArrowRight`/`PageUp`/`PageDown`/`Home`/`End`）；新增本地白边裁剪阅读（`margin-crop.ts`、`裁剪白边` 联动 `适合宽度` 重算且保持 `PageViewport` 与 `attachSelectionHighlight` 精准对齐）；顶部标题栏适配自定义重命名标题展示。
+   - **选区边界加固（`selection-hardener`）**：扩展 `selection-bridges.ts` 仿射投影工具（`composeAffine`、`displayScaleForViewport`、`projectVisualRun`、`viewportToDisplayRect`、`displayToViewportRect`），在 0°/90°/180°/270° 旋转、`CropBox` 与 `UserUnit` 下将运行段映射至未缩放视觉显示空间；`selection-highlight.ts` 保留 `attachSelectionHighlight` 7 参签名，强化 `selectedPart` 的 `comparePoint` 叶节点守卫并支持跨页连选统一 `.pdf-selection-shape` SVG 高亮；新增 `forced-colors.css` 在 `@media (forced-colors: active)` 下以 `forced-color-adjust: none` 保留字形墨迹清晰度并增强列表/搜索/按钮可读性。
+2. **新增原创合成素材与自动化验证**：
+   - 生成三页原创合成阅读器 UX PDF [reader-ux-fixture.pdf](../tests/fixtures/verification/reader-ux/reader-ux-fixture.pdf)（`5685` 字节，SHA-256 `01c9a16c7aa163bea91a9023165022df7623362c1c029ea94a7fb304989a1221`，≥135pt 白边、嵌套 3+3 目录、6/3 处 `QUANTUM_BENCHMARK`）与三页原创合成边界 PDF [selection-boundary-fixture.pdf](../tests/fixtures/verification/selection-boundary/selection-boundary-fixture.pdf)（`4819` 字节，SHA-256 `be9d23bd2b80e2663e1a75f5849dda2d2ac8464ee40d9b766d4ce7f217c35a73`，页 1–2 跨页连选 + 页 3 90° 旋转多行公式 `⊕_{A,B,C,D,E}`），经 `pdfjs-dist` 6.4.299 审计。
+   - 新增单测 `tests/unit/reader-ux.test.ts`（8 项）、扩展 `selection-bridges.test.ts` 至 14 项及 `schemas.test.ts`/`library.test.ts`（单测共 **7 个文件 89 项**）；新增端到端 spec `tests/e2e/library-management.spec.ts`（4 项）、`tests/e2e/reader-ux.spec.ts`（1 项）及 `tests/e2e/selection-boundary.spec.ts`（3 项），全套 E2E 共 **69 项**。
+3. **本轮排查与修复的问题**：
+   - `tests/e2e/bootstrap.spec.ts:9` 硬编码 6 个旧 IPC 方法断言，由主控同步更新为 9 个已排序业务 API 名称。
+   - `tests/e2e/library-management.spec.ts` 拖拽导入断言初版检查 `BrowserWindow.getAllWindows()[0]`（后续改为 `find(w => w.isVisible())`），因紧随 drop 触发的隐藏沙盒校验窗口尚未 `loadURL` 提交且主窗体在无头测试启动期 `isVisible()` 可能为 `false` 导致两次失败；改为校验存在标题为 `PaperFlow` 且 URL 为 `app://bundle/index.html` 的主窗口并结合 `page.url()` 与导入完成后单一窗口 `expect.poll` 后通过。
+   - 测试汇总时 `qa-verifier` 发现首次并行阶段的构建结果尚未收尾，清理 `out/` 重建并以 `--workers=1 --retries=0` 独立重新运行全量源码与打包 E2E，得到无污染的连续全绿结果。
+4. **最终实测结果（`--workers=1 --retries=0`，0 失败 / 0 跳过 / 0 重试）**：
+   - 静态与单元测试：`pnpm typecheck`、`pnpm lint` 全部退出 0；`pnpm test` **7 个文件 89/89 通过**。
+   - 生产构建与 Preload 检查：`pnpm build` 通过，`out/preload/index.js`（25 行，1.27 kB）与 `out/preload/validation.js`（8 行，0.32 kB）确认为仅 `require("electron")` 的单文件 CJS（已在打包后复验）。
+   - 源码与打包实机 E2E：源码构建 E2E **69/69 通过**；`pnpm dist:win`（`--publish never`）打包后对 `release/win-unpacked/PaperFlow.exe` 执行全套 E2E **69/69 通过**；已人工视觉审阅目录+检索+白边裁剪截图与 90° 旋转多行公式连选截图。
+   - 产物一致性与许可校验：`out/` 与 `app.asar` 中 **209/209** 构建文件逐字节一致，`resources/licenses/manifest.json` **41/41** 份许可证 SHA-256 在磁盘与 `app.asar` 内完全一致；两份 `.exe` Authenticode 均为 `NotSigned`。注：`pnpm dev` 热更新、`pnpm rebuild:electron` 与 NSIS 静默装卸脚本本轮未重复执行。
+5. **未验证与保留边界**：真实用户论文 PDF 未读取测试；180°/270° 旋转页面公式仅由单测几何投影验证，未单独做 E2E 像素验收；`forced-colors` 仅在 Playwright/Chromium 模拟条件下验收，未覆盖真实 Windows 高对比度系统切换、多物理显示器 DPI 迁移、物理磁盘满/断电、600+ 页 DOM 总体内存上限及 Liberation 1.07.4 字体源码公开分发渠道。
+
+## 2026-11-23 高对比度选区描边修复、跨页取舍与 Linux x64 跨平台构建
+
+基于用户真机论文验证反馈与 Linux 运行需求，完成以下修改与验证：
+
+1. **高对比度选区交叉线修复与跨页取舍**：
+   - **选区描边根因修复**：用户在 Windows 真机切换高对比度主题时，[forced-colors.css](../src/renderer/src/features/reader/forced-colors.css) 对 `.pdf-selection-shape` 设置的 `stroke: Highlight; stroke-width: 1px;` 会在单一合并 SVG `<path>` 内部每个重叠字符框/补间矩形周围描出边线，形成网状交叉线。现已改为 `stroke: none;` 仅保留 `fill: Highlight; fill-opacity: 0.36;`，并在 [selection-boundary.spec.ts](../tests/e2e/selection-boundary.spec.ts) 新增 `shapeStroke === 'none'` 断言及人工视觉截图核验（无交叉描边、字形清晰）。
+   - **跨页选中页眉/页尾取舍**：按用户确认采用方案 A，保留标准 PDF/浏览器线性 DOM 选区行为，不过滤未标注 `/Artifact` 的页眉/页脚文本节点，避免误伤正文顶行、公式或脚注。
+2. **Linux x64 便携包配置与跨平台打包（`dist:linux`）**：
+   - 在 [electron-builder.yml](../electron-builder.yml) 新增 `linux` 目标（`executableName: paperflow`，`target: tar.gz`，`arch: [x64]`）与 `package.json` 的 `pnpm dist:linux` 脚本。
+   - 新增 [scripts/dist-linux.ts](../scripts/dist-linux.ts)：从可信镜像下载并按 `node_modules/electron/checksums.json` SHA-256（`777b26a64aee3d185acb9f93c04782bb51eae7c2c61c793963ef24374e5a1539`）校验 `electron-v44.7.2-linux-x64.zip`，核查 ZIP 中央目录确认无 POSIX 符号链接损坏风险；调用 `electron-builder --linux tar.gz --x64 --publish never` 后在 Windows 下按 USTAR/PAX 规范修正目录与 ELF/`*.so*`/`*.node`/ZIP 可执行文件 POSIX 权限为 `0755`、其余数据文件为 `0644` 并重算校验和，随后全量遍历 TAR 校验 `paperflow`、`chrome-sandbox`、`chrome_crashpad_handler` 与 `better-sqlite3/prebuilds/linux-x64.node` 的 ELF 魔数及权限。
+3. **本轮实测与静态核验结果（`--workers=1 --retries=0`，0 失败 / 0 跳过 / 0 重试）**：
+   - 静态与单元测试：`pnpm typecheck`、`pnpm lint` 退出 `0`；`pnpm test` **7 个文件 89/89 通过**。
+   - Windows 源码与打包 E2E：`pnpm build` 退出 `0`（Preload 单文件 CJS 仅 `require("electron")`）；源码构建 E2E **69/69 通过**；`pnpm dist:win` 后打包版 `release/win-unpacked/PaperFlow.exe` 全套 E2E **69/69 通过**，Authenticode 仍为 `NotSigned`。
+   - Linux 便携包静态审计：`pnpm dist:linux` 生成 `release/PaperFlow-0.1.0-linux-x64.tar.gz`（`141707524` 字节，SHA-256 `aeb93425620b0606de81165184fb39a154832dea1aabceefae7192768498e188`，顶层目录 `PaperFlow-0.1.0-linux-x64/`，共 171 项）；Windows 与 Linux 两份 `app.asar` 均为 `33412086` 字节且内容完全一致（`209/209` 构建文件逐字节匹配、`41/41` 份许可证 SHA-256 一致、包含本地 PDF.js Worker、无 QuickJS/多余 Canvas 原生包）。
+4. **未验证与跨平台约束**：
+   - 因本机为 Windows 且无 WSL/Docker，未在 Windows 上构建 `.deb` 或 `.AppImage`，**也未在真实 Linux 操作系统上启动运行 `paperflow` 或执行 Linux E2E**；Ubuntu 24.04+ 或开启 AppArmor 限制的发行版如遇沙盒提示，需保持安全配置不变并对 `chrome-sandbox` 设置 root SUID（或直接在 Linux 环境执行 `pnpm install --frozen-lockfile && pnpm build && pnpm exec electron-builder --linux deb AppImage --x64 --publish never`）。
+   - 未重新运行 `pnpm dev` 热更新、`pnpm rebuild:electron` 与 NSIS 安装/卸载实机脚本；高对比度真机切换（修复后）亦待在虚拟机或真机复验。
+
+## 2026-11-23 高对比度选区、Ubuntu 26.04.1 LTS 实机启动与窗口自适应修复
+
+1. **高对比度选区与跨页规则确认**：
+   - 跨页选区按用户确认的方案 A 保留标准 PDF / 浏览器线性 DOM 选区行为，不拦截上下页页眉/页尾。
+   - [src/renderer/src/features/reader/forced-colors.css](../src/renderer/src/features/reader/forced-colors.css)：移除 `.pdf-page .pdf-page-surface > .pdf-selection-shape` 在 `forced-colors: active` 下的内部 `1px` `Highlight` 描边，改为 `stroke: none;`，消除连续选区内部的网格交叉线；已在 [tests/e2e/selection-boundary.spec.ts](../tests/e2e/selection-boundary.spec.ts) 增加 `shapeStroke` 断言，并由用户在 Windows 真实高对比度桌面环境复验确认无交叉内框线。
+2. **Linux 实机启动、X11 启动包装与窗口自适应修复（保持沙盒与安全边界不变）**：
+   - 在 Ubuntu 26.04.1 LTS（GNOME Wayland + VMware `vmwgfx`、`kernel.apparmor_restrict_unprivileged_userns = 1`）实机排查中确认：(a) 需确保 `chrome-sandbox` 具备 `root:root 4755` SUID 权限；(b) Electron Linux 主程序入口运行 JS 前即已初始化 Ozone/Zygote，因此 `src/main/index.ts` 中后置 `app.commandLine.appendSwitch` 不能解决 Wayland + `vmwgfx` 默认隐藏窗口不可见问题；(c) 早期固定的 `1080×680` / `1440×900` 尺寸在高缩放（如 `125%`）下的逻辑工作区接近或超过桌面可用高度时，窗口无法自由缩窄与最大化。
+   - [scripts/linux-after-pack.mjs](../scripts/linux-after-pack.mjs) 与 [electron-builder.yml](../electron-builder.yml) / [scripts/dist-linux.ts](../scripts/dist-linux.ts)：通过 `afterPack` 钩子将包内二进制改名为 `paperflow.bin` 并生成 POSIX `/bin/sh` 包装脚本 `paperflow`（当 `$DISPLAY` 存在且未显式传入 `--ozone-platform*` 时默认附加 `--ozone-platform=x11`），由 `dist-linux.ts` 在 Windows 主机端统一校验 LF、USTAR/PAX 路径、`0755`/`0644` 权限及 `linux-x64.node` 等原生产物魔数；同时移除 `src/main/index.ts` 中失效的后置 Ozone switch。
+   - [src/main/window.ts](../src/main/window.ts) 与 [src/renderer/src/assets/main.css](../src/renderer/src/assets/main.css)：保持 Windows 默认 `1440×900` 与最小 `1080×680` 不变；在 Linux 下基于 `screen.getPrimaryDisplay().workAreaSize` 动态计算初始宽高与最小宽高（`minWidth` 取 `640..1080`、初始宽度取 `workAreaSize.width * 0.92`，高度同理），显式设置 `resizable: true`、`maximizable: true` 并补充 400ms 幂等 `ready-to-show` 兜底；在 `main.css` 补充 `@media (max-width: 1120px)` 三栏紧凑布局（`212px minmax(0, 1fr) 212px`）。
+3. **验证与未测边界（严格区分已测与未测）**：
+   - **已实测通过**：`pnpm typecheck` / `pnpm lint`（退出 `0`）、`pnpm test`（**7 文件 89/89**）、`pnpm build`（Preload 单文件 CJS 仅 `require("electron")`）、Windows 源码构建 E2E（**69/69**，`--workers=1 --retries=0`）、`pnpm dist:win` 与打包版 `release/win-unpacked/PaperFlow.exe` 全套 E2E（**69/69**，`0` 残留进程）、双端 `app.asar` 与 `out/` `209/209` 及 `41/41` 许可证一致（含 `LICENSE`、`resources/THIRD-PARTY-NOTICES.txt`），`pnpm dist:linux` 静态审计 TAR `172` 项及 ELF/权限校验通过。
+   - **实机验证记录**：在 Ubuntu 26.04.1 LTS 实机配置 `chrome-sandbox` 权限后，验证无参 `./paperflow` 自动以 `--ozone-platform=x11` 拉起可见窗口（`Map State: IsViewable`、`1130×632` DIP / `1411×790` X11 px，具备 `_NET_WM_ACTION_RESIZE` / `MAXIMIZE_HORZ` / `MAXIMIZE_VERT` 属性并完成程序化宽高调节）、拖拽导入与 PDF.js 渲染，并由用户实机鼠标拖拽窗口边框扩缩与最大化确认通过；Windows 高对比度选区效果已由用户在真实高对比度桌面环境确认通过。
+   - **未复测项**：Linux 平台 69 项 Playwright 全套 E2E、本轮 `pnpm dev` HMR、`pnpm rebuild:electron` 与 Windows NSIS 静默安装/卸载实机脚本未重新运行。

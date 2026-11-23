@@ -7,7 +7,8 @@
   overflow: hidden;
   isolation: isolate;
 }
-.pdf-page-mount, .pdf-page-surface { position: absolute; inset: 0; }
+.pdf-page-mount { position: absolute; top: 0; left: 0; }
+.pdf-page-surface { position: relative; }
 .pdf-page-surface > canvas { display: block; position: absolute; inset: 0; z-index: 0; }
 .pdf-page-surface > .textLayer { z-index: 1; }
 .pdf-page-surface > .pdf-selection-shape {

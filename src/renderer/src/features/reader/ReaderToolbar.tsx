@@ -7,9 +7,15 @@ export interface ReaderToolbarProps {
   scale: number
   disabled: boolean
   importing: boolean
+  outlineOpen: boolean
+  searchOpen: boolean
+  cropMargins: boolean
   onNavigate: (page: number) => void
   onScale: (scale: number) => void
   onFitWidth: () => void
+  onToggleOutline: () => void
+  onToggleSearch: () => void
+  onToggleCropMargins: () => void
   onImport: () => void
 }
 
@@ -17,7 +23,21 @@ const MIN_SCALE = 0.5
 const MAX_SCALE = 3
 
 export function ReaderToolbar({
-  pageNumber, pageCount, scale, disabled, importing, onNavigate, onScale, onFitWidth, onImport
+  pageNumber,
+  pageCount,
+  scale,
+  disabled,
+  importing,
+  outlineOpen,
+  searchOpen,
+  cropMargins,
+  onNavigate,
+  onScale,
+  onFitWidth,
+  onToggleOutline,
+  onToggleSearch,
+  onToggleCropMargins,
+  onImport
 }: ReaderToolbarProps): React.JSX.Element {
   const [draftPage, setDraftPage] = useState(String(pageNumber))
   const unavailable = disabled || pageCount < 1
@@ -42,6 +62,11 @@ export function ReaderToolbar({
 
   return <div className="reader-toolbar" role="toolbar" aria-label="PDF 阅读工具栏">
     <div className="reader-toolbar__group">
+      <button type="button" className={outlineOpen ? 'is-active' : undefined} aria-label="文档目录" aria-expanded={outlineOpen}
+        disabled={unavailable} onClick={onToggleOutline}>目录</button>
+    </div>
+    <span className="reader-toolbar__divider" aria-hidden="true" />
+    <div className="reader-toolbar__group">
       <button type="button" className="reader-toolbar__icon" aria-label="上一页" title="上一页"
         disabled={unavailable || pageNumber <= 1} onClick={() => onNavigate(pageNumber - 1)}>‹</button>
       <label className="reader-toolbar__page">
@@ -65,6 +90,13 @@ export function ReaderToolbar({
       <button type="button" className="reader-toolbar__icon" aria-label="放大" title="放大"
         disabled={unavailable || scale >= MAX_SCALE} onClick={() => changeScale(0.1)}>＋</button>
       <button type="button" disabled={unavailable} onClick={onFitWidth}>适合宽度</button>
+      <button type="button" className={cropMargins ? 'is-active' : undefined} aria-label="裁剪白边" aria-pressed={cropMargins}
+        disabled={unavailable} onClick={onToggleCropMargins}>裁剪白边</button>
+    </div>
+    <span className="reader-toolbar__divider" aria-hidden="true" />
+    <div className="reader-toolbar__group">
+      <button type="button" className={searchOpen ? 'is-active' : undefined} aria-label="文内搜索" aria-expanded={searchOpen}
+        disabled={unavailable} onClick={onToggleSearch}>搜索</button>
     </div>
     <button type="button" className="reader-toolbar__import" aria-label="打开新 PDF" disabled={importing}
       aria-busy={importing} onClick={onImport}>打开新 PDF</button>

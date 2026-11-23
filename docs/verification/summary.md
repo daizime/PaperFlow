@@ -1,10 +1,9 @@
 # PaperFlow T01–T03 多会话补充验收
 
-> **2026-11-22 接续与选区连贯修复验证更新（Worktree: `init_paperflow_desktop`）**：在同步 `2026-11-22 15:00:59` 源码并合入两项稳定性修复（`window.ts` URL 防护与 `useReaderPersistence`/`PdfViewer` 防抖状态稳定化）后，又经 `/swarm` 协作完成符号、字体切换段落、宽下标 ($\bigoplus_{A,B,C,D,E}$)、行内居中点与连续上下行选区断白修复，最终实测结果如下（全部 `--workers=1 --retries=0`，0 失败/0 跳过/0 重试）：
-> - 静态与单测：`pnpm typecheck` / `pnpm lint` 通过；`pnpm test` **6 文件 70/70 通过**（含 `selection-bridges.test.ts` **11 项**）。
-> - 开发热更新与原生检查：`pnpm dev` + `scripts/dev-smoke.ts` 与 `pnpm rebuild:electron`（`Electron 44.7.2 / NAPI 10 / SQLite 3.53.4`）于先前同配置工作区实测通过，本轮未改主进程/原生模块/构建配置。
-> - 源码 E2E（`out/main/index.js`）：**61/61 通过**（含 `selection-continuity.spec.ts` 4/4、`math-highlight.spec.ts` 3/3、`selection-overlap.spec.ts` 6/6、`selection-verification.spec.ts` 26/26、`workspace-ui.spec.ts` 2/2）。
-> - Windows 打包与实机 `.exe` E2E（`release/win-unpacked/PaperFlow.exe`）：**61/61 通过**；209/209 构建文件与 `app.asar` 逐字节一致，41/41 许可证 SHA-256 一致，产物 `NotSigned`，摘要见 [artifacts.json](../artifacts.json) 与 [实施记录](../implementation-notes.md)。以下保留 2026-10-28 历史记录与未验证边界。
+> **2026-11-23 Windows/Linux 双端收口与真机实测更新（Worktree: `init_paperflow_desktop`，基线 `cb199c1`）**：针对真机高对比度反馈移除 [forced-colors.css](../../src/renderer/src/features/reader/forced-colors.css) 内描边（`stroke: none`），跨页选区按方案 A 保持标准 PDF 行为；通过 [scripts/linux-after-pack.mjs](../../scripts/linux-after-pack.mjs) 为 Linux 包注入 POSIX 启动包装脚本（`DISPLAY` 存在且未显式指定 Ozone 参数时附加 `--ozone-platform=x11`），并在 [src/main/window.ts](../../src/main/window.ts) 与 [main.css](../../src/renderer/src/assets/main.css) 中补充 Linux 工作区自适应尺寸、`resizable`/`maximizable`、400ms `ready-to-show` 兜底及窄窗三栏响应式布局。最新实测与校验结果（`--workers=1 --retries=0`，0 失败 / 0 跳过 / 0 重试）：
+> - 静态与单测：`pnpm typecheck` / `pnpm lint` 退出 `0`；`pnpm test` **7 文件 89/89 通过**。
+> - Windows 构建、源码与实机 E2E：`pnpm build` 退出 `0`；Windows 源码构建 E2E **69/69 通过**；`pnpm dist:win` 后 `release/win-unpacked/PaperFlow.exe` 全套 E2E **69/69 通过**（`0` 残留进程），产物 `NotSigned`；用户已于 Windows 真实高对比度桌面环境复验确认无交叉内框线。
+> - Linux x64 便携包（`release/PaperFlow-0.1.0-linux-x64.tar.gz`）：TAR 内 172 项通过 USTAR/PAX、POSIX 权限、ELF 魔数、`out/` `209/209` 逐字节一致及 `41/41` 许可证一致性校验（双端 `app.asar` 哈希一致）；已于 Ubuntu 26.04.1 LTS（Wayland + VMware `vmwgfx`，配置 `chrome-sandbox` `root:root 4755`）实测无参 `./paperflow` 启动、程序化/鼠标拖拽窗口扩缩与最大化、拖拽导入与 PDF.js 渲染。**未验证边界**：Linux 原生 69 项 Playwright 全套 E2E、本轮 `pnpm dev` HMR、`pnpm rebuild:electron` 与 Windows NSIS 静默安装/卸载实机脚本未重新运行（详情见 [artifacts.json](../artifacts.json) 与 [实施记录](../implementation-notes.md)）。以下保留历史记录与边界说明。
 
 日期：2026-10-28，Asia/Shanghai。此前基础功能的指定自动化与本机隔离安装验证通过；后续选区反馈仍在修复，不能称为全部场景验证或正式发布。
 

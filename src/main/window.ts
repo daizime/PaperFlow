@@ -1,4 +1,4 @@
-import { BrowserWindow, session } from 'electron'
+import { BrowserWindow, screen, session } from 'electron'
 import { join } from 'node:path'
 import { APP_URL, DEV_ORIGIN, contentSecurityPolicy, developmentUrl } from './services/app-protocol'
 export function installSessionSecurity(): void {
@@ -22,8 +22,19 @@ export function installSessionSecurity(): void {
   })
 }
 export async function createWindow(onCreated?: (window: BrowserWindow) => void): Promise<BrowserWindow> {
+  let width = 1440
+  let height = 900
+  let minWidth = 1080
+  let minHeight = 680
+  if (process.platform === 'linux') {
+    const workArea = screen.getPrimaryDisplay().workAreaSize
+    minWidth = Math.min(1080, Math.max(640, Math.floor(workArea.width * 0.7)))
+    minHeight = Math.min(680, Math.max(440, Math.floor(workArea.height * 0.7)))
+    width = Math.min(1440, Math.max(minWidth, Math.floor(workArea.width * 0.92)))
+    height = Math.min(900, Math.max(minHeight, Math.floor(workArea.height * 0.92)))
+  }
   const window = new BrowserWindow({
-    title: 'PaperFlow', width: 1440, height: 900, minWidth: 1080, minHeight: 680,
+    title: 'PaperFlow', width, height, minWidth, minHeight, resizable: true, maximizable: true,
     show: false, autoHideMenuBar: true, backgroundColor: '#f5f6f8',
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
@@ -55,7 +66,27 @@ export async function createWindow(onCreated?: (window: BrowserWindow) => void):
       if (!window.isDestroyed()) window.close()
     })
   })
-  window.once('ready-to-show', () => window.show())
+  let shown = false
+  let fallbackShowTimer: ReturnType<typeof setTimeout> | undefined
+  const showOnce = (): void => {
+    if (fallbackShowTimer) {
+      clearTimeout(fallbackShowTimer)
+      fallbackShowTimer = undefined
+    }
+    if (shown || window.isDestroyed()) return
+    shown = true
+    window.show()
+  }
+  window.once('ready-to-show', showOnce)
+  window.once('closed', () => {
+    if (fallbackShowTimer) {
+      clearTimeout(fallbackShowTimer)
+      fallbackShowTimer = undefined
+    }
+  })
   await window.loadURL(developmentUrl() ?? APP_URL)
+  if (process.platform === 'linux' && !shown && !window.isDestroyed()) {
+    fallbackShowTimer = setTimeout(showOnce, 400)
+  }
   return window
 }

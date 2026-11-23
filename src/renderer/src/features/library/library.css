@@ -128,6 +128,59 @@
   overflow-wrap: anywhere;
 }
 
+.library-panel .library-error-banner {
+  margin-top: 12px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.library-panel .library-error-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.library-panel .library-error-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.library-panel .library-error-dismiss {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-color: #dfb8b1;
+  border-radius: 5px;
+  background: #fffaf9;
+  color: #943d31;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.library-panel .library-error-details {
+  list-style: disc;
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.library-panel .library-error-details li strong {
+  display: block;
+  font-weight: 600;
+  color: #7c2d23;
+}
+
+.library-panel .library-error-details li span {
+  display: block;
+}
+
 .library-panel .library-load-error button {
   margin-top: 8px;
   padding: 4px 8px;
@@ -172,6 +225,102 @@
   align-self: flex-start;
   color: #4b6d9e;
   font-size: 10px;
+}
+
+.library-panel .document-entry {
+  border-radius: 8px;
+}
+
+.library-panel .document-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px 6px 39px;
+}
+
+.library-panel .document-action-link {
+  padding: 2px 6px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #5b6b84;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.library-panel .document-action-link:hover:enabled {
+  background: #eef2f8;
+  border-color: #d7e0ee;
+  color: #2f4365;
+}
+
+.library-panel .document-action-link--danger:hover:enabled {
+  background: #fff0ee;
+  border-color: #ebc9c4;
+  color: #943d31;
+}
+
+.library-panel .document-rename-form,
+.library-panel .document-confirm-delete {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 9px 8px;
+  margin-top: 2px;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  background: #f8fafd;
+}
+
+.library-panel .document-rename-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #c9d4e6;
+  border-radius: 5px;
+  background: #fff;
+  color: #263143;
+  font-size: 12px;
+}
+
+.library-panel .document-confirm-delete span {
+  font-size: 11px;
+  color: #84372c;
+}
+
+.library-panel .document-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-panel .document-action-buttons button {
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.library-panel .document-action-primary {
+  background: #3864b5;
+  border-color: #3864b5;
+  color: #fff;
+}
+
+.library-panel .document-action-primary:hover:enabled {
+  background: #2c529a;
+  border-color: #2c529a;
+}
+
+.library-panel .document-action-danger {
+  background: #b93d2f;
+  border-color: #b93d2f;
+  color: #fff;
+}
+
+.library-panel .document-action-danger:hover:enabled {
+  background: #9c3125;
+  border-color: #9c3125;
 }
 
 .library-panel .library-empty-symbol {

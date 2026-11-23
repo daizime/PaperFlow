@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { PDFDocument, StandardFonts, degrees } from 'pdf-lib'
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { resolve } from 'node:path'
 import { selectionBridges, type SelectionRun } from '../../src/renderer/src/features/reader/selection-bridges'
+import {
+  composeAffine,
+  displayScaleForViewport,
+  displayToViewportRect,
+  projectVisualRun,
+  selectedPart,
+  viewportToDisplayRect,
+  type TextSelectionRange
+} from '../../src/renderer/src/features/reader/selection-highlight'
 
 describe('公式与相邻行的选区连接', () => {
   it('用同一行带覆盖公式中分开的小段', () => {
@@ -177,3 +189,174 @@ describe('公式与相邻行的选区连接', () => {
     expect(bridges[0].height).toBeCloseTo(40.4, 5)
   })
 })
+
+describe('旋转页面仿射显示空间投影与跨页边界守卫', () => {
+  const standardFontDataUrl = resolve('node_modules/pdfjs-dist/standard_fonts').replaceAll('\\', '/') + '/'
+
+  it('在 0/90/180/270 度旋转、CropBox 与 UserUnit 下保持一致的显示基线与字号', async () => {
+    const doc = await PDFDocument.create({ updateMetadata: false })
+    const font = await doc.embedFont(StandardFonts.TimesRoman)
+    const configs = [
+      { rotation: 0, width: 600, height: 780, crop: [20, 30, 580, 750], x: 80, y: 650, rotateText: 0 },
+      { rotation: 90, width: 780, height: 600, crop: [30, 20, 750, 580], x: 160, y: 90, rotateText: 90 },
+      { rotation: 180, width: 600, height: 780, crop: [20, 30, 580, 750], x: 480, y: 120, rotateText: 180 },
+      { rotation: 270, width: 780, height: 600, crop: [30, 20, 750, 580], x: 600, y: 490, rotateText: 270 }
+    ] as const
+
+    for (const cfg of configs) {
+      const page = doc.addPage([cfg.width, cfg.height])
+      page.setCropBox(cfg.crop[0], cfg.crop[1], cfg.crop[2] - cfg.crop[0], cfg.crop[3] - cfg.crop[1])
+      page.setRotation(degrees(cfg.rotation))
+      page.drawText('alpha', { x: cfg.x, y: cfg.y, size: 12, font, rotate: degrees(cfg.rotateText) })
+      page.drawText('beta', {
+        x: cfg.rotation === 0 ? cfg.x : cfg.rotation === 90 ? cfg.x + 20 : cfg.rotation === 180 ? cfg.x : cfg.x - 20,
+        y: cfg.rotation === 0 ? cfg.y - 20 : cfg.rotation === 90 ? cfg.y : cfg.rotation === 180 ? cfg.y + 20 : cfg.y,
+        size: 12,
+        font,
+        rotate: degrees(cfg.rotateText)
+      })
+    }
+
+    const bytes = await doc.save({ useObjectStreams: false })
+    const task = getDocument({ data: new Uint8Array(bytes), standardFontDataUrl, useSystemFonts: false })
+    try {
+      const pdf = await task.promise
+      for (let pageNumber = 1; pageNumber <= configs.length; pageNumber++) {
+        const page = await pdf.getPage(pageNumber)
+        for (const scale of [1, 1.5]) {
+          const viewport = page.getViewport({ scale })
+          const displayScale = displayScaleForViewport(viewport)
+          expect(displayScale).toBeCloseTo(scale * (page.userUnit || 1), 8)
+          const content = await page.getTextContent()
+          const textItems = content.items.filter(
+            (item): item is Extract<(typeof content.items)[number], { str: string }> => 'str' in item && item.str.trim().length > 0
+          )
+          expect(textItems).toHaveLength(2)
+          const first = projectVisualRun(viewport.transform, textItems[0].transform, displayScale, textItems[0].dir)
+          const second = projectVisualRun(viewport.transform, textItems[1].transform, displayScale, textItems[1].dir)
+          expect(first?.horizontal).toBe(true)
+          expect(second?.horizontal).toBe(true)
+          expect(first!.em).toBeCloseTo(12, 4)
+          expect(second!.em).toBeCloseTo(12, 4)
+          expect(second!.baseline - first!.baseline).toBeCloseTo(20, 4)
+        }
+        page.cleanup()
+      }
+    } finally {
+      await task.destroy()
+    }
+  })
+
+  it('将 90/180/270 度旋转页上的宽下标与连续行投影到显示空间并无损还原回视口坐标', () => {
+    const rotations = [
+      { rotation: 90, viewportTransform: [0, 1.5, 1.5, 0, -45, -30], scale: 1.5, userUnit: 1 },
+      { rotation: 180, viewportTransform: [-2, 0, 0, 2, 1160, -60], scale: 1, userUnit: 2 },
+      { rotation: 270, viewportTransform: [0, -1.25, -1.25, 0, 725, 937.5], scale: 1.25, userUnit: 1 }
+    ] as const
+
+    for (const cfg of rotations) {
+      const displayScale = displayScaleForViewport({ scale: cfg.scale, userUnit: cfg.userUnit })
+      // 模拟视口下同一公式 + 宽下标 + 下一行正文的局部框与变换
+      const runsInVisual = [
+        { rect: { x: 68, y: 160, width: 42, height: 14 }, baseline: 171, em: 12, math: false },
+        { rect: { x: 130, y: 155, width: 16, height: 22 }, baseline: 173, em: 20, math: true },
+        { rect: { x: 112, y: 180, width: 52, height: 9 }, baseline: 187, em: 8, math: false },
+        { rect: { x: 166, y: 160, width: 58, height: 14 }, baseline: 171, em: 12, math: false },
+        { rect: { x: 48, y: 196, width: 210, height: 14 }, baseline: 207, em: 12, math: false }
+      ]
+      // 构造使 composeAffine(viewportTransform, itemTransform) 产生正水平向量的矩阵
+      const itemTransform =
+        cfg.rotation === 90
+          ? [0, 12, -12, 0, 171, 68]
+          : cfg.rotation === 180
+            ? [-12, 0, 0, -12, 512, 171]
+            : [0, -12, 12, 0, 600, 512]
+      const projected = projectVisualRun(cfg.viewportTransform, itemTransform, displayScale, 'ltr')
+      expect(projected?.horizontal).toBe(true)
+      expect(projected?.em).toBeCloseTo(12, 6)
+
+      const unscaledRuns: SelectionRun[] = runsInVisual.map(run => ({
+        ...run,
+        rect: viewportToDisplayRect(displayToViewportRect(run.rect, displayScale), displayScale)
+      }))
+      const bridges = selectionBridges(unscaledRuns)
+      expect(bridges).toEqual(
+        expect.arrayContaining([
+          { x: 68, y: 160, width: 156, height: 14 },
+          { x: 112, y: 174, width: 52, height: 6 },
+          { x: 68, y: 174, width: 156, height: 22 }
+        ])
+      )
+      const scaledBack = bridges.map(bridge => displayToViewportRect(bridge, displayScale))
+      for (let i = 0; i < bridges.length; i++) {
+        expect(scaledBack[i].x).toBeCloseTo(bridges[i].x * displayScale, 6)
+        expect(scaledBack[i].y).toBeCloseTo(bridges[i].y * displayScale, 6)
+        expect(scaledBack[i].width).toBeCloseTo(bridges[i].width * displayScale, 6)
+        expect(scaledBack[i].height).toBeCloseTo(bridges[i].height * displayScale, 6)
+      }
+      expect(composeAffine(cfg.viewportTransform, [1, 0, 0, 1, 0, 0])).toEqual(cfg.viewportTransform)
+    }
+  })
+
+  it('selectedPart 精确过滤零长度边界、折叠选区以及元素锚定越界节点', () => {
+    const textNode = { length: 10 } as unknown as Text
+    const otherNode = {} as Node
+    const makeRange = (overrides: Partial<TextSelectionRange>): TextSelectionRange => ({
+      collapsed: false,
+      startContainer: otherNode,
+      startOffset: 0,
+      endContainer: otherNode,
+      endOffset: 1,
+      intersectsNode: () => true,
+      ...overrides
+    })
+
+    // 起止零长度边界
+    expect(selectedPart(makeRange({ startContainer: textNode, startOffset: 10 }), textNode)).toBeUndefined()
+    expect(selectedPart(makeRange({ endContainer: textNode, endOffset: 0 }), textNode)).toBeUndefined()
+    expect(selectedPart(makeRange({ collapsed: true, startContainer: textNode, startOffset: 2, endContainer: textNode, endOffset: 2 }), textNode)).toBeUndefined()
+    expect(selectedPart(makeRange({}), { length: 0 })).toBeUndefined()
+
+    // 元素包装器边界：intersectsNode 误返回 true，但 comparePoint 指出文本节点整体在选区外
+    expect(
+      selectedPart(
+        makeRange({
+          comparePoint: (_node, offset) => (offset === 0 ? -1 : -1)
+        }),
+        textNode
+      )
+    ).toBeUndefined()
+    expect(
+      selectedPart(
+        makeRange({
+          comparePoint: (_node, offset) => (offset === 10 ? 1 : 1)
+        }),
+        textNode
+      )
+    ).toBeUndefined()
+
+    // 元素包装器完整包围文本节点
+    expect(
+      selectedPart(
+        makeRange({
+          comparePoint: () => 0
+        }),
+        textNode
+      )
+    ).toEqual({ start: 0, end: 10 })
+
+    // 部分文本节点选区
+    expect(
+      selectedPart(
+        makeRange({
+          startContainer: textNode,
+          startOffset: 3,
+          endContainer: textNode,
+          endOffset: 7
+        }),
+        textNode
+      )
+    ).toEqual({ start: 3, end: 7 })
+  })
+})
+

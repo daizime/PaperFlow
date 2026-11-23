@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, truncate, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { PDFDocument } from 'pdf-lib'
 import { LibraryDatabase, type StoredDocumentRecord } from '../../src/main/services/database'
 import { DocumentService, MAX_PDF_BYTES, validatePdfHeader, validatePdfSize } from '../../src/main/services/document-service'
+import { formatDocumentTitle } from '../../src/renderer/src/features/library/useLibrary'
 import { documentIdArgsSchema, noArgsSchema, pageCountArgsSchema, readerStateSchema } from '../../src/shared/schemas'
 
 let root: string
@@ -175,5 +176,148 @@ describe('数据库、进度和参数边界', () => {
     database.insertDocument(record)
     expect(database.listDocuments()[0].displayTitle).toBe(record.displayTitle)
     expect(database.listDocuments()).toHaveLength(1)
+  })
+})
+
+describe('缓冲区导入、重命名、删除与孤立文件清理', () => {
+  it('importBuffer 原子落盘并与 importFile 共享 SHA-256 去重', async () => {
+    const validBytes = new Uint8Array(await readFile(join(fixtures, 'valid.pdf')))
+    const first = await service.importBuffer('dropped-valid.pdf', validBytes)
+    expect(first.status).toBe('imported')
+    expect(first.document).toMatchObject({ originalFilename: 'dropped-valid.pdf', displayTitle: 'dropped-valid', pageCount: 3 })
+    expect(await readdir(join(root, 'library'))).toEqual([`${first.document.id}.pdf`])
+
+    const duplicate = await service.importFile(join(fixtures, 'valid.pdf'))
+    expect(duplicate.status).toBe('existing')
+    expect(duplicate.document.id).toBe(first.document.id)
+    expect(database.listDocuments()).toHaveLength(1)
+  })
+
+  it('importBuffer 拒绝路径分隔符、控制字符与各类无效文件并给出具体文件名和大小错误', async () => {
+    const validBytes = new Uint8Array(await readFile(join(fixtures, 'valid.pdf')))
+    await expect(service.importBuffer('sub/evil.pdf', validBytes)).rejects.toThrow('路径分隔符')
+    await expect(service.importBuffer('..\\evil.pdf', validBytes)).rejects.toThrow('路径分隔符')
+    await expect(service.importBuffer('bad\nname.pdf', validBytes)).rejects.toThrow('路径分隔符')
+    await expect(service.importBuffer('.pdf', validBytes)).rejects.toThrow('扩展名')
+    await expect(service.importBuffer('notes.txt', validBytes)).rejects.toThrow(/notes\.txt.*扩展名/)
+    await expect(service.importBuffer('empty.pdf', new Uint8Array(0))).rejects.toThrow(/empty\.pdf.*为空/)
+    await expect(service.importBuffer('huge.pdf', new Uint8Array(MAX_PDF_BYTES + 1))).rejects.toThrow(/huge\.pdf.*100 MiB/)
+
+    const badHeader = new Uint8Array(await readFile(join(fixtures, 'invalid-header.pdf')))
+    await expect(service.importBuffer('fake-header.pdf', badHeader)).rejects.toThrow(/fake-header\.pdf.*文件头/)
+
+    const corruptBytes = new Uint8Array(await readFile(join(fixtures, 'corrupt.pdf')))
+    await expect(service.importBuffer('broken-doc.pdf', corruptBytes)).rejects.toThrow(/broken-doc\.pdf.*损坏/)
+
+    expect(database.listDocuments()).toEqual([])
+    expect(await readdir(root)).not.toContain('library')
+  })
+
+  it('renameDocument 更新标题、防注入并在重启后持久保留', async () => {
+    const imported = await service.importFile(join(fixtures, 'valid.pdf'))
+    const renamed = database.renameDocument(imported.document.id, "  My Paper'; DROP TABLE documents;--  ")
+    expect(renamed.displayTitle).toBe("My Paper'; DROP TABLE documents;--")
+    expect(renamed.originalFilename).toBe('valid.pdf')
+
+    database.close()
+    database = new LibraryDatabase(filename)
+    expect(database.listDocuments()).toEqual([renamed])
+    expect(() => database.renameDocument(randomUUID(), '不存在')).toThrow('文献不存在')
+    expect(() => database.renameDocument(imported.document.id, '   ')).toThrow()
+    expect(() => database.renameDocument(imported.document.id, 'bad\x00title')).toThrow()
+  })
+
+  it('deleteDocument 删除数据库记录、级联清理阅读进度并移除本地 PDF 副本', async () => {
+    const imported = await service.importFile(join(fixtures, 'valid.pdf'))
+    const second = await service.importFile(join(fixtures, 'same-name-b/paper.pdf'))
+    database.saveReaderState({ documentId: imported.document.id, pageNumber: 2, scale: 1.5, updatedAt: new Date().toISOString() })
+    database.saveReaderState({ documentId: second.document.id, pageNumber: 1, scale: 1.0, updatedAt: new Date().toISOString() })
+
+    await service.deleteDocument(imported.document.id)
+    expect(database.listDocuments().map(item => item.id)).toEqual([second.document.id])
+    expect(await readdir(join(root, 'library'))).toEqual([`${second.document.id}.pdf`])
+
+    const { default: Database } = await import('better-sqlite3')
+    const inspection = new Database(filename, { readonly: true })
+    try {
+      const states = inspection.prepare('SELECT document_id FROM reader_state').all() as Array<{ document_id: string }>
+      expect(states).toEqual([{ document_id: second.document.id }])
+    } finally { inspection.close() }
+
+    // 磁盘文件已丢失时仍允许删除残余记录（忽略 ENOENT）。
+    await rm(join(root, 'library', `${second.document.id}.pdf`))
+    await service.deleteDocument(second.document.id)
+    expect(database.listDocuments()).toEqual([])
+    await expect(service.deleteDocument(randomUUID())).rejects.toThrow('文献不存在')
+  })
+
+  it('cleanupOrphanFiles 安全处理缺失目录，仅清理未登记的 UUID 副本与临时文件，保留无关文件、子目录与符号链接', async () => {
+    await expect(service.cleanupOrphanFiles()).resolves.toBeUndefined()
+    expect(await readdir(root)).not.toContain('library')
+
+    const imported = await service.importFile(join(fixtures, 'valid.pdf'))
+    const libraryDir = join(root, 'library')
+    const orphanPdf = '11111111-1111-4111-8111-111111111111.pdf'
+    const orphanTmp = '.22222222-2222-4222-8222-222222222222.tmp'
+    const unrelatedPdf = 'user-custom-notes.pdf'
+    const unrelatedTxt = 'readme.txt'
+    const uuidFolder = '33333333-3333-4333-8333-333333333333.pdf'
+    const outsideTarget = join(root, 'outside-secret.pdf')
+
+    await copyFile(join(fixtures, 'valid.pdf'), join(libraryDir, orphanPdf))
+    await writeFile(join(libraryDir, orphanTmp), '%PDF-1.7')
+    await writeFile(join(libraryDir, unrelatedPdf), 'keep pdf')
+    await writeFile(join(libraryDir, unrelatedTxt), 'keep text')
+    await mkdir(join(libraryDir, uuidFolder))
+    await writeFile(outsideTarget, 'outside data')
+
+    const symlinkName = '44444444-4444-4444-8444-444444444444.pdf'
+    let createdSymlink = false
+    try {
+      await symlink(outsideTarget, join(libraryDir, symlinkName), 'file')
+      createdSymlink = true
+    } catch {
+      // 未开启符号链接权限的 Windows 环境允许跳过文件符号链接构造。
+    }
+
+    await service.cleanupOrphanFiles()
+
+    const expectedKept = [
+      `${imported.document.id}.pdf`,
+      unrelatedPdf,
+      unrelatedTxt,
+      uuidFolder,
+      ...(createdSymlink ? [symlinkName] : [])
+    ].sort()
+    expect((await readdir(libraryDir)).sort()).toEqual(expectedKept)
+    expect(await readFile(outsideTarget, 'utf8')).toBe('outside data')
+    expect(database.listStoredFilenames()).toEqual(new Set([`${imported.document.id}.pdf`]))
+  })
+
+  it('deleteDocument 拒绝删除指向文献库外部的符号链接，且标题展示规则兼容默认文件名与自定义标题', async () => {
+    const imported = await service.importFile(join(fixtures, 'valid.pdf'))
+    expect(formatDocumentTitle(imported.document)).toBe('valid.pdf')
+    const renamed = database.renameDocument(imported.document.id, '自定义论文标题')
+    expect(formatDocumentTitle(renamed)).toBe('自定义论文标题')
+
+    const storedPath = join(root, 'library', `${imported.document.id}.pdf`)
+    const outsideTarget = join(root, 'do-not-delete.pdf')
+    await writeFile(outsideTarget, 'protected outside content')
+    await rm(storedPath)
+
+    let createdSymlink = false
+    try {
+      await symlink(outsideTarget, storedPath, 'file')
+      createdSymlink = true
+    } catch {
+      // 未开启符号链接权限的 Windows 环境允许改用目录覆盖边界验证。
+      await mkdir(storedPath)
+    }
+
+    await expect(service.deleteDocument(imported.document.id)).rejects.toThrow('不是普通 PDF 文件')
+    expect(database.listDocuments()).toHaveLength(1)
+    expect(await readFile(outsideTarget, 'utf8')).toBe('protected outside content')
+    if (createdSymlink) await rm(storedPath)
+    else await rm(storedPath, { recursive: true })
   })
 })

@@ -1,7 +1,10 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { ZodError } from 'zod'
 import { CHANNELS } from '../../shared/contracts'
-import { documentIdArgsSchema, noArgsSchema, pageCountArgsSchema, readerStateArgsSchema } from '../../shared/schemas'
+import {
+  documentIdArgsSchema, importPdfBytesArgsSchema, noArgsSchema, pageCountArgsSchema,
+  readerStateArgsSchema, renameDocumentArgsSchema
+} from '../../shared/schemas'
 import { APP_URL, developmentUrl } from '../services/app-protocol'
 import type { LibraryDatabase } from '../services/database'
 import type { DocumentService } from '../services/document-service'
@@ -28,9 +31,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, database: Lib
     if (selection.canceled || !selection.filePaths[0]) return null
     return documents.importFile(selection.filePaths[0])
   })
+  handle(CHANNELS.importPdfBytes, (_window, args) => {
+    const [{ originalFilename, bytes }] = importPdfBytesArgsSchema.parse(args)
+    return documents.importBuffer(originalFilename, bytes)
+  })
   handle(CHANNELS.listDocuments, (_window, args) => { noArgsSchema.parse(args); return database.listDocuments() })
   handle(CHANNELS.readPdfBytes, (_window, args) => { const [id] = documentIdArgsSchema.parse(args); return documents.readPdfBytes(id) })
   handle(CHANNELS.updatePageCount, (_window, args) => { const [id, count] = pageCountArgsSchema.parse(args); database.updatePageCount(id, count) })
+  handle(CHANNELS.renameDocument, (_window, args) => {
+    const [id, displayTitle] = renameDocumentArgsSchema.parse(args)
+    return database.renameDocument(id, displayTitle)
+  })
+  handle(CHANNELS.deleteDocument, (_window, args) => {
+    const [id] = documentIdArgsSchema.parse(args)
+    return documents.deleteDocument(id)
+  })
   handle(CHANNELS.getReaderState, (_window, args) => { const [id] = documentIdArgsSchema.parse(args); return database.getReaderState(id) })
   handle(CHANNELS.saveReaderState, (_window, args) => { const [state] = readerStateArgsSchema.parse(args); database.saveReaderState({ ...state, updatedAt: new Date().toISOString() }) })
 }

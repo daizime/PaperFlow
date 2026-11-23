@@ -1,0 +1,1564 @@
+{
+  "file": {
+    "name": "selection-boundary-fixture.pdf",
+    "bytes": 4819,
+    "sha256": "be9d23bd2b80e2663e1a75f5849dda2d2ac8464ee40d9b766d4ce7f217c35a73"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "view": [
+        0,
+        0,
+        600,
+        780
+      ],
+      "rotation": 0,
+      "userUnit": 1,
+      "viewport": {
+        "width": 600,
+        "height": 780,
+        "transform": [
+          1,
+          0,
+          0,
+          -1,
+          0,
+          780
+        ]
+      },
+      "content": {
+        "items": [
+          {
+            "str": "SYNTHETIC BOUNDARY FIXTURE PAGE ONE",
+            "dir": "ltr",
+            "width": 232.199,
+            "height": 11,
+            "transform": [
+              11,
+              0,
+              0,
+              11,
+              48,
+              710
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "",
+            "dir": "ltr",
+            "width": 0,
+            "height": 0,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              420
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Unselected middle block on page one for scroll isolation.",
+            "dir": "ltr",
+            "width": 274.2960000000001,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              420
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Boundary flow starts near page one bottom and keeps",
+            "dir": "ltr",
+            "width": 257.952,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              108
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "font",
+            "dir": "ltr",
+            "width": 19.332,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              90
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.499999999999986,
+            "height": 0,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              67.33200000000001,
+              90
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "M",
+            "dir": "ltr",
+            "width": 9.996,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              71.832,
+              90
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.500000000000014,
+            "height": 0,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              81.82799999999999,
+              90
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": "wrapped before crossing cleanly onto page two.",
+            "dir": "ltr",
+            "width": 229.60800000000006,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              86.328,
+              90
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          }
+        ],
+        "styles": {
+          "g_d0_f1": {
+            "fontFamily": "serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          },
+          "g_d0_f2": {
+            "fontFamily": "serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          }
+        },
+        "lang": null
+      },
+      "matchedItems": [
+        {
+          "partId": "p1-header",
+          "rowId": "p1-excluded-before",
+          "itemIndex": 0,
+          "str": "SYNTHETIC BOUNDARY FIXTURE PAGE ONE",
+          "width": 232.199,
+          "height": 11,
+          "transform": [
+            11,
+            0,
+            0,
+            11,
+            48,
+            710
+          ],
+          "viewportComposed": [
+            11,
+            0,
+            0,
+            -11,
+            48,
+            70
+          ],
+          "projected": {
+            "baseline": 70,
+            "em": 11,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p1-middle",
+          "rowId": "p1-excluded-before",
+          "itemIndex": 2,
+          "str": "Unselected middle block on page one for scroll isolation.",
+          "width": 274.2960000000001,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            420
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            360
+          ],
+          "projected": {
+            "baseline": 360,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p1-line1",
+          "rowId": "p1-row-1",
+          "itemIndex": 3,
+          "str": "Boundary flow starts near page one bottom and keeps",
+          "width": 257.952,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            108
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            672
+          ],
+          "projected": {
+            "baseline": 672,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p1-line2-a",
+          "rowId": "p1-row-2",
+          "itemIndex": 4,
+          "str": "font",
+          "width": 19.332,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            90
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            690
+          ],
+          "projected": {
+            "baseline": 690,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p1-line2-b",
+          "rowId": "p1-row-2",
+          "itemIndex": 6,
+          "str": "M",
+          "width": 9.996,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            71.832,
+            90
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            71.832,
+            690
+          ],
+          "projected": {
+            "baseline": 690,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p1-line2-c",
+          "rowId": "p1-row-2",
+          "itemIndex": 8,
+          "str": "wrapped before crossing cleanly onto page two.",
+          "width": 229.60800000000006,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            86.328,
+            90
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            86.328,
+            690
+          ],
+          "projected": {
+            "baseline": 690,
+            "em": 12,
+            "horizontal": true
+          }
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "view": [
+        0,
+        0,
+        600,
+        780
+      ],
+      "rotation": 0,
+      "userUnit": 1,
+      "viewport": {
+        "width": 600,
+        "height": 780,
+        "transform": [
+          1,
+          0,
+          0,
+          -1,
+          0,
+          780
+        ]
+      },
+      "content": {
+        "items": [
+          {
+            "str": "Continuing smoothly across the top of page two with",
+            "dir": "ltr",
+            "width": 254.66400000000004,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              710
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "multiple lines and zero white gaps between pages.",
+            "dir": "ltr",
+            "width": 240.62400000000005,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              692
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Unselected paragraph below page two boundary.",
+            "dir": "ltr",
+            "width": 234.60000000000002,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              636
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "UNSELECTED_BOUNDARY_SENTINEL_PAGE2",
+            "dir": "ltr",
+            "width": 257.9759999999999,
+            "height": 12,
+            "transform": [
+              12,
+              0,
+              0,
+              12,
+              48,
+              320
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          }
+        ],
+        "styles": {
+          "g_d0_f1": {
+            "fontFamily": "serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          }
+        },
+        "lang": null
+      },
+      "matchedItems": [
+        {
+          "partId": "p2-line1",
+          "rowId": "p2-row-1",
+          "itemIndex": 0,
+          "str": "Continuing smoothly across the top of page two with",
+          "width": 254.66400000000004,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            710
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            70
+          ],
+          "projected": {
+            "baseline": 70,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p2-line2",
+          "rowId": "p2-row-2",
+          "itemIndex": 1,
+          "str": "multiple lines and zero white gaps between pages.",
+          "width": 240.62400000000005,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            692
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            88
+          ],
+          "projected": {
+            "baseline": 88,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p2-unselected",
+          "rowId": "p2-excluded-after",
+          "itemIndex": 2,
+          "str": "Unselected paragraph below page two boundary.",
+          "width": 234.60000000000002,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            636
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            144
+          ],
+          "projected": {
+            "baseline": 144,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p2-sentinel",
+          "rowId": "p2-excluded-after",
+          "itemIndex": 3,
+          "str": "UNSELECTED_BOUNDARY_SENTINEL_PAGE2",
+          "width": 257.9759999999999,
+          "height": 12,
+          "transform": [
+            12,
+            0,
+            0,
+            12,
+            48,
+            320
+          ],
+          "viewportComposed": [
+            12,
+            0,
+            0,
+            -12,
+            48,
+            460
+          ],
+          "projected": {
+            "baseline": 460,
+            "em": 12,
+            "horizontal": true
+          }
+        }
+      ]
+    },
+    {
+      "pageNumber": 3,
+      "view": [
+        0,
+        0,
+        780,
+        600
+      ],
+      "rotation": 90,
+      "userUnit": 1,
+      "viewport": {
+        "width": 600,
+        "height": 780,
+        "transform": [
+          0,
+          1,
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      "content": {
+        "items": [
+          {
+            "str": "ROTATED 90 DEG SYNTHETIC BOUNDARY FIXTURE",
+            "dir": "ltr",
+            "width": 268.55400000000003,
+            "height": 11,
+            "transform": [
+              6.735557395310444e-16,
+              11,
+              -11,
+              6.735557395310444e-16,
+              76,
+              48
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "",
+            "dir": "ltr",
+            "width": 0,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              48
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "alpha",
+            "dir": "ltr",
+            "width": 25.992,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              48
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.5,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              73.992
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "S",
+            "dir": "ltr",
+            "width": 6,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              78.492
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.5,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              84.492
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": "and",
+            "dir": "ltr",
+            "width": 17.328,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              88.992
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.499999999999986,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              106.32000000000001
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "T",
+            "dir": "ltr",
+            "width": 6.672,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              110.82
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.5,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              117.49199999999999
+            ],
+            "fontName": "g_d0_f2",
+            "hasEOL": false
+          },
+          {
+            "str": "map rotated vectors:",
+            "dir": "ltr",
+            "width": 97.98,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              121.992
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Q[ ] =",
+            "dir": "ltr",
+            "width": 29.424,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              68
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 19.999999999999986,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              97.42399999999999
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "⊕",
+            "dir": "ltr",
+            "width": 15.36,
+            "height": 20,
+            "transform": [
+              1.2246467991473535e-15,
+              20,
+              -20,
+              1.2246467991473535e-15,
+              181,
+              117.424
+            ],
+            "fontName": "g_d0_f3",
+            "hasEOL": false
+          },
+          {
+            "str": "",
+            "dir": "ltr",
+            "width": 0,
+            "height": 0,
+            "transform": [
+              4.898587196589414e-16,
+              8,
+              -8,
+              4.898587196589414e-16,
+              192,
+              107.548
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "A,B,C,D,E",
+            "dir": "ltr",
+            "width": 35.112,
+            "height": 8,
+            "transform": [
+              4.898587196589414e-16,
+              8,
+              -8,
+              4.898587196589414e-16,
+              192,
+              107.548
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "",
+            "dir": "ltr",
+            "width": 0,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              152.784
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "F[A, B]",
+            "dir": "ltr",
+            "width": 37.332,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              152.784
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.500000000000028,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              190.11599999999999
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          },
+          {
+            "str": "⊗",
+            "dir": "ltr",
+            "width": 9.216000000000001,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              194.616
+            ],
+            "fontName": "g_d0_f3",
+            "hasEOL": false
+          },
+          {
+            "str": " ",
+            "dir": "ltr",
+            "width": 4.499999999999972,
+            "height": 0,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              203.83200000000002
+            ],
+            "fontName": "g_d0_f3",
+            "hasEOL": false
+          },
+          {
+            "str": "G[C, D, E]",
+            "dir": "ltr",
+            "width": 52.656000000000006,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              208.332
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "stays continuous across rotated rows and symbols.",
+            "dir": "ltr",
+            "width": 241.6440000000001,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              210,
+              48
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Col2 rotated alpha.",
+            "dir": "ltr",
+            "width": 91.656,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              148,
+              440
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Col2 rotated beta.",
+            "dir": "ltr",
+            "width": 85.656,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              178,
+              440
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "Col2 rotated gamma.",
+            "dir": "ltr",
+            "width": 100.992,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              210,
+              440
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": true
+          },
+          {
+            "str": "UNSELECTED_ROTATED_SENTINEL_PAGE3",
+            "dir": "ltr",
+            "width": 245.9759999999999,
+            "height": 12,
+            "transform": [
+              7.347880794884121e-16,
+              12,
+              -12,
+              7.347880794884121e-16,
+              480,
+              48
+            ],
+            "fontName": "g_d0_f1",
+            "hasEOL": false
+          }
+        ],
+        "styles": {
+          "g_d0_f1": {
+            "fontFamily": "serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          },
+          "g_d0_f2": {
+            "fontFamily": "serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          },
+          "g_d0_f3": {
+            "fontFamily": "sans-serif",
+            "ascent": "NaN",
+            "descent": "NaN",
+            "vertical": false
+          }
+        },
+        "lang": null
+      },
+      "matchedItems": [
+        {
+          "partId": "p3-header",
+          "rowId": "p3-excluded-before",
+          "itemIndex": 0,
+          "str": "ROTATED 90 DEG SYNTHETIC BOUNDARY FIXTURE",
+          "width": 268.55400000000003,
+          "height": 11,
+          "transform": [
+            6.735557395310444e-16,
+            11,
+            -11,
+            6.735557395310444e-16,
+            76,
+            48
+          ],
+          "viewportComposed": [
+            11,
+            6.735557395310444e-16,
+            6.735557395310444e-16,
+            -11,
+            48,
+            76
+          ],
+          "projected": {
+            "baseline": 76,
+            "em": 11,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r1-alpha",
+          "rowId": "p3-row-1",
+          "itemIndex": 2,
+          "str": "alpha",
+          "width": 25.992,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            48
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            48,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r1-s",
+          "rowId": "p3-row-1",
+          "itemIndex": 4,
+          "str": "S",
+          "width": 6,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            78.492
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            78.492,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r1-and",
+          "rowId": "p3-row-1",
+          "itemIndex": 6,
+          "str": "and",
+          "width": 17.328,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            88.992
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            88.992,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r1-t",
+          "rowId": "p3-row-1",
+          "itemIndex": 8,
+          "str": "T",
+          "width": 6.672,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            110.82
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            110.82,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r1-tail",
+          "rowId": "p3-row-1",
+          "itemIndex": 10,
+          "str": "map rotated vectors:",
+          "width": 97.98,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            121.992
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            121.992,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-left",
+          "rowId": "p3-row-2",
+          "itemIndex": 11,
+          "str": "Q[ ] =",
+          "width": 29.424,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            178,
+            68
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            68,
+            178
+          ],
+          "projected": {
+            "baseline": 178,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-op",
+          "rowId": "p3-row-2",
+          "itemIndex": 13,
+          "str": "⊕",
+          "width": 15.36,
+          "height": 20,
+          "transform": [
+            1.2246467991473535e-15,
+            20,
+            -20,
+            1.2246467991473535e-15,
+            181,
+            117.424
+          ],
+          "viewportComposed": [
+            20,
+            1.2246467991473535e-15,
+            1.2246467991473535e-15,
+            -20,
+            117.424,
+            181
+          ],
+          "projected": {
+            "baseline": 181,
+            "em": 20,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-underscript",
+          "rowId": "p3-row-2",
+          "itemIndex": 15,
+          "str": "A,B,C,D,E",
+          "width": 35.112,
+          "height": 8,
+          "transform": [
+            4.898587196589414e-16,
+            8,
+            -8,
+            4.898587196589414e-16,
+            192,
+            107.548
+          ],
+          "viewportComposed": [
+            8,
+            4.898587196589414e-16,
+            4.898587196589414e-16,
+            -8,
+            107.548,
+            192
+          ],
+          "projected": {
+            "baseline": 192,
+            "em": 8,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-term1",
+          "rowId": "p3-row-2",
+          "itemIndex": 17,
+          "str": "F[A, B]",
+          "width": 37.332,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            178,
+            152.784
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            152.784,
+            178
+          ],
+          "projected": {
+            "baseline": 178,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-otimes",
+          "rowId": "p3-row-2",
+          "itemIndex": 19,
+          "str": "⊗",
+          "width": 9.216000000000001,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            178,
+            194.616
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            194.616,
+            178
+          ],
+          "projected": {
+            "baseline": 178,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r2-term2",
+          "rowId": "p3-row-2",
+          "itemIndex": 21,
+          "str": "G[C, D, E]",
+          "width": 52.656000000000006,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            178,
+            208.332
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            208.332,
+            178
+          ],
+          "projected": {
+            "baseline": 178,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-r3-body",
+          "rowId": "p3-row-3",
+          "itemIndex": 22,
+          "str": "stays continuous across rotated rows and symbols.",
+          "width": 241.6440000000001,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            210,
+            48
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            48,
+            210
+          ],
+          "projected": {
+            "baseline": 210,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-col2-r1",
+          "rowId": "p3-excluded-after",
+          "itemIndex": 23,
+          "str": "Col2 rotated alpha.",
+          "width": 91.656,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            148,
+            440
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            440,
+            148
+          ],
+          "projected": {
+            "baseline": 148,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-col2-r2",
+          "rowId": "p3-excluded-after",
+          "itemIndex": 24,
+          "str": "Col2 rotated beta.",
+          "width": 85.656,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            178,
+            440
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            440,
+            178
+          ],
+          "projected": {
+            "baseline": 178,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-col2-r3",
+          "rowId": "p3-excluded-after",
+          "itemIndex": 25,
+          "str": "Col2 rotated gamma.",
+          "width": 100.992,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            210,
+            440
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            440,
+            210
+          ],
+          "projected": {
+            "baseline": 210,
+            "em": 12,
+            "horizontal": true
+          }
+        },
+        {
+          "partId": "p3-sentinel",
+          "rowId": "p3-excluded-after",
+          "itemIndex": 26,
+          "str": "UNSELECTED_ROTATED_SENTINEL_PAGE3",
+          "width": 245.9759999999999,
+          "height": 12,
+          "transform": [
+            7.347880794884121e-16,
+            12,
+            -12,
+            7.347880794884121e-16,
+            480,
+            48
+          ],
+          "viewportComposed": [
+            12,
+            7.347880794884121e-16,
+            7.347880794884121e-16,
+            -12,
+            48,
+            480
+          ],
+          "projected": {
+            "baseline": 480,
+            "em": 12,
+            "horizontal": true
+          }
+        }
+      ]
+    }
+  ]
+}

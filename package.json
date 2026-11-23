@@ -20,6 +20,7 @@
     "build": "pnpm typecheck && tsx scripts/prepare-pdf-assets.ts && electron-vite build",
     "dist:win": "pnpm build && electron-builder --win nsis --x64 --publish never",
     "pack:win": "pnpm build && electron-builder --win --x64 --dir --publish never",
+    "dist:linux": "pnpm build && tsx scripts/dist-linux.ts",
     "postinstall": "install-electron",
     "rebuild:electron": "tsx scripts/verify-native.ts",
     "fixtures": "tsx scripts/generate-fixtures.ts"

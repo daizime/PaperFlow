@@ -1,6 +1,6 @@
 # PaperFlow 架构说明
 
-本说明对应 T01–T03 源码，日期为 2026-10-27；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 的实际命令和结果为准。
+本说明对应当前 PaperFlow 源码（T01–T03 基础及纯本地科研阅读器增强，更新日期 2026-11-22）；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
 
 ## 进程与模块
 
@@ -8,33 +8,34 @@
 
 ```mermaid
 flowchart LR
-  UI[React 文献库与阅读 UI] --> API[window.paperflow 六个业务 API]
+  UI[React 文献库与阅读 UI] --> API[window.paperflow 九个业务 API]
   API --> IPC[主进程：来源检查 + Zod]
-  IPC --> DOC[DocumentService：有界快照/哈希/复制]
+  IPC --> DOC[DocumentService：有界快照/字节导入/哈希/复制/删除/清理]
   IPC --> DB[LibraryDatabase：参数绑定 SQLite]
   DOC --> VALID[隐藏沙盒校验窗口]
   VALID --> VW[本地 PDF.js Worker：逐页操作列表校验]
-  UI --> READER[PdfViewer 生命周期与进度]
-  READER --> PAGE[PdfPage：Canvas + TextLayer]
+  UI --> READER[PdfViewer：目录/检索/白边裁剪/导航/缩放/进度]
+  READER --> PAGE[PdfPage：Canvas + TextLayer + 选区与检索高亮]
   READER --> RW[本地 PDF.js Worker]
 ```
 
 | 目录/文件 | 责任 |
 | --- | --- |
-| `src/main/index.ts` | 应用启动、userData 路径、服务装配与数据库关闭 |
+| `src/main/index.ts` | 应用启动、`userData` 路径、启动孤立副本回收（`cleanupOrphanFiles`）、服务装配与关闭 |
 | `src/main/window.ts` | 1440×900 主窗口、最小尺寸、安全策略、关闭前进度刷新 |
 | `src/main/services/app-protocol.ts` | 注册 `app://`、构建资源清单与 CSP |
-| `src/main/ipc/index.ts` | 六个业务 handler；校验受信窗口、mainFrame、精确 URL、参数 |
-| `src/main/services/document-service.ts` | 文件快照、扩展名/头/大小检查、SHA-256、去重、临时文件与库副本 |
-| `src/main/services/database.ts` | 业务表、迁移、持久化与参数绑定 SQL |
+| `src/main/ipc/index.ts` | 九个业务 handler；校验受信窗口、`mainFrame`、精确 URL、参数 |
+| `src/main/services/document-service.ts` | 文件快照/字节导入、扩展名/头/大小检查、SHA-256、去重、临时文件、库副本、级联删除与孤立文件清理 |
+| `src/main/services/database.ts` | 业务表、迁移、重命名/删除持久化与参数绑定 SQL |
 | `src/main/services/pdf-validation.ts` | 隐藏校验窗口、20 秒超时、专用返回信道与资源销毁 |
 | `src/preload/index.ts` | 仅暴露 `window.paperflow`，没有原始 IPC、路径或 Node API |
 | `src/preload/validation.ts` | 校验窗口专用一次性字节接收与结果报告，不暴露业务 API |
 | `src/renderer/validation.ts` | 调用 PDF.js，逐页获取操作列表，报告页数/友好错误 |
-| `src/renderer/src/features/library/` | 文献列表、导入状态、错误提示与最近选择 |
-| `src/renderer/src/features/reader/` | PDF 生命周期、真实 Canvas/TextLayer、导航、缩放、坐标和进度 |
+| `src/renderer/src/App.tsx` | 三栏布局与 `.workspace` 文件拖拽拦截/释放导入覆盖层 |
+| `src/renderer/src/features/library/` | 文献列表、导入/拖拽批量反馈、搜索过滤、内联重命名、确认删除与最近选择 |
+| `src/renderer/src/features/reader/` | PDF 生命周期、真实 Canvas/TextLayer、目录抽屉、惰性全文搜索、`Ctrl+滚轮`/快捷键、白边裁剪、跨页/旋转连选 SVG 与 `forced-colors` 适配 |
 | `src/renderer/src/features/translation/` | 独立滚动的“尚未翻译”容器 |
-| `src/shared/` | 业务契约与 Zod 输入模型，避免进程间重复定义 |
+| `src/shared/` | 业务契约（含共享字节格式化与控制字符检查）与 Zod 输入模型 |
 
 不引入全局大型状态框架；React 状态按文献库、文档、单页分开。当前无翻译、OCR、账户、网络同步或外部论文服务。
 
@@ -57,9 +58,12 @@ flowchart LR
 | API | channel | 校验与行为 |
 | --- | --- | --- |
 | `importPdf()` | `document:import` | 无参数；系统文件框取消返回 null；成功返回 imported/existing 与公开文献记录 |
+| `importPdfBytes(input)` | `document:import-bytes` | `{ originalFilename, bytes }`；校验 1–260 字符不含路径分隔符或控制字符的 `.pdf` 文件名、IPC 有界 `Uint8Array`（≤105 MiB 上限，实际 PDF 上限仍为 100 MiB）与 PDF 头，供拖拽导入复用同一提交与沙盒校验路径 |
 | `listDocuments()` | `document:list` | 无参数；按导入时间返回公开记录 |
 | `readPdfBytes(documentId)` | `document:read` | UUID；只读已入库文献，验证库副本和哈希 |
 | `updatePageCount(documentId, pageCount)` | `document:page-count` | UUID、1–1,000,000 的整数；更新页数并约束已有进度 |
+| `renameDocument(documentId, displayTitle)` | `document:rename` | UUID 与 1–200 字符去首尾空白且不含控制字符（`0x00–0x1F` / `0x7F`）的显示标题；返回更新后的公开记录 |
+| `deleteDocument(documentId)` | `document:delete` | UUID；删除 SQLite 记录（外键 `ON DELETE CASCADE` 联动清除 `reader_state`），并校验 `storedFilename === <id>.pdf`、非符号链接与 `realpath` 在 `library/` 内后移除副本 |
 | `getReaderState(documentId)` | `reader:get` | UUID 且文献存在；返回状态或 null |
 | `saveReaderState(state)` | `reader:save` | 严格对象；UUID、有效页码、0.5–3 的有限倍率、ISO 时间；数据库使用主进程时间 |
 
@@ -88,9 +92,9 @@ userData/
 
 导入串行排队。主进程以一个有界快照读取源文件，限制 **100 MiB（104,857,600 字节）**，检查普通文件、`.pdf` 扩展名与 `%PDF-1.x`/`%PDF-2.x` 文件头，并比较读取前后大小和修改时间。哈希与写入使用同一份字节，源文件不修改。
 
-相同 SHA-256 返回现有记录，并先检查已有副本可读；同名不同内容按不同 UUID 共存。新文件先交隐藏沙盒 PDF.js 校验器逐页构造操作列表，拒绝已加密、无法解析或超时的文件；校验成功后写入排他创建的临时文件、flush、重命名，再写数据库。可捕获的复制/数据库失败会清理临时文件及未提交副本，并提供可理解错误。进程断电或磁盘失效不属于该异常清理保证，未来可增启动时孤立文件回收。
+相同 SHA-256 返回现有记录，并先检查已有副本可读；同名不同内容按不同 UUID 共存。新文件（无论来自原生文件框 `importFile` 还是渲染层拖拽读取字节 `importBuffer`）均共用 `commitPdfBytes()`：先交隐藏沙盒 PDF.js 校验器逐页构造操作列表，拒绝已加密、无法解析或超时的文件，校验成功后写入排他创建的临时文件、flush、重命名，再写数据库。可捕获的复制/数据库失败会清理临时文件及未提交副本，并在错误文本中保留原文件名与可读超限大小。此外，`main/index.ts` 在启动创建主窗口前运行 `cleanupOrphanFiles()`，仅清理 `library/` 下未入库的 `<uuid>.pdf` 与残留 `.<uuid>.tmp` 普通文件，不触碰其他用户文件。
 
-库存读取要求数据库命名匹配 `<id>.pdf`，拒绝符号链接和非普通文件，检查 realpath 范围、大小、文件头及 SHA-256。PDF.js 仍可能修复或容忍部分非标准结构；导入校验不等同于 PDF 标准全项一致性验证。合法但复杂的文件也可能因 20 秒时限被拒绝。
+库存读取与删除均要求数据库命名匹配 `<id>.pdf`，拒绝符号链接和非普通文件，检查 `realpath` 位于 `library/` 目录内；读取另核对大小、文件头及 SHA-256。PDF.js 仍可能修复或容忍部分非标准结构；导入校验不等同于 PDF 标准全项一致性验证。合法但复杂的文件也可能因 20 秒时限被拒绝。
 
 better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并自带平台预编译模块。当前工程采用 Node-API 兼容路径，非传统每个 Electron V8 ABI 都重新编译；`npmRebuild: false` 避免误触发旧式 rebuild。`pnpm rebuild:electron` 是实际加载与 SQLite 查询验证脚本，并非假装执行原生重编译。未来换版本、平台或架构必须重新检查二进制存在性和运行兼容性；`.node` 在打包时解包到 ASAR 外。
 
@@ -98,7 +102,11 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 
 `pdf-engine.ts` 为每个文档显式创建本地模块 Worker，再用 `PDFWorker.create({ port })` 传给 `getDocument`。原因是标准 URL API 对 `app://` 的 origin 返回 null，单靠 `workerSrc` 会触发 PDF.js 跨源 blob 包装并与严格 Worker CSP 冲突。销毁封装幂等调用 loading task 销毁、PDFWorker 销毁和物理 Worker terminate，不长期退化成 fake Worker。CMaps、标准字体、ICC profile 和图像解码 WASM 均随包，不依赖 CDN。
 
-`PdfViewer` 从 IPC 获取字节与保存状态，维护 PDFDocumentProxy、当前页、缩放、加载/错误状态。首次未保存状态时按可用宽度计算倍率，普通缩放限制在 50%–300%。连续纵向滚动更新当前页；工具栏提供前后页、页码输入、缩放、适合宽度与打开新 PDF。组件按文献 ID 挂载，切换或卸载销毁文档资源，异步结果在取消后不再回写状态。
+`PdfViewer` 从 IPC 获取字节与保存状态，维护 `PDFDocumentProxy`、当前页、缩放、加载/错误状态，并在顶部栏按自定义标题优先展示文献名（`displayTitle`）。首次未保存状态时按可用宽度计算倍率，普通缩放限制在 50%–300%。连续纵向滚动更新当前页；工具栏与快捷键支持：
+- **目录书签抽屉**（`pdf-outline.ts`、`PdfOutline.tsx`）：仅解析 PDF 内部目标（`getDestination` + `getPageIndex`），忽略纯外部 `item.url` 链接，空目录显式提示“此 PDF 未包含目录书签”。
+- **文内检索**（`pdf-search.ts`、`PdfSearchBar.tsx`，`Ctrl+F`）：`PdfSearchService` 按页通过 `getTextContent()` 惰性缓存 UTF-16 索引与 `spans`，不触发离屏 Canvas 渲染；支持异步取消、`yieldEvery` 分片让出事件循环、大小写切换、`Enter`/`Shift+Enter`/`Escape` 切换与关闭，并在每页 `.pdf-highlight-layer` 绘制 `.pdf-search-match` / `.pdf-search-match--active` 与自动居中滚动。
+- **缩放与键盘操作**：支持阅读区 `Ctrl/Meta + 滚轮`缩放，以及焦点在 `.reader-panel` 时的 `Ctrl+=`/`-`/`0`、`ArrowLeft`/`ArrowRight`/`PageUp`/`PageDown`/`Home`/`End`（输入框等可编辑元素内保持原行为）。
+- **白边裁剪阅读**（`margin-crop.ts`）：在页面首个可用 Canvas 上执行 `measureCanvasCropInsets` 扫描非空白 ink 包围盒（单边上限 `0.35`、单轴上限 `0.65`），开启“裁剪白边”时仅调整 `.pdf-page` 裁剪视框与 `.pdf-page-mount` 偏移，并在「适合宽度」计算中折减水平白边，不改动 `PageViewport` 与双坐标投影。
 
 `PdfPage` 用 IntersectionObserver 在阅读视口上下 800px 范围内渲染，离屏销毁物理像素与文字层 DOM。每页保留布局占位，按实际 page viewport 修正不同尺寸；当前实现是 Canvas 按需渲染，并非完整的页面 DOM 虚拟列表。极端超长文档的占位 DOM 开销仍需后续性能验收。
 
@@ -125,9 +133,14 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 | `clientPointToPdf` | 客户区鼠标坐标减页面边界并转换回 PDF 坐标 |
 | `selectionToPdfRects` | 将真实 DOM Selection 分页裁剪，输出 `{ pageNumber, rect }` 的 PDF 坐标矩形 |
 
-### 空白区域的鼠标选择边界
+### 空白区域的鼠标选择边界与跨页/旋转/高对比度连续高亮
 
 `text-selection.ts` 在已渲染页面注册官方 TextLayer 的公开文字节点，保留原始 `textContent`、DOM 顺序及 `onPageData` 借用接口。主键从阅读区空白起拖时不建立文字选区；文字起拖后进入空白，将端点限制到实际指针路径经过的最后一个文字节点。字符 Range 用于验证命中，避免把透明整页或整行的外框当成文字。
+
+针对公式、旋转页面与跨页连选场景，`selection-bridges.ts` 与 `selection-highlight.ts` 在同页统一 SVG 路径 `.pdf-selection-shape`（`fill-opacity: 0.36`）内合并原始字符框与补间矩形：
+- **视觉显示投影与旋转支持**：通过 `composeAffine(viewport.transform, item.transform)`、`displayScaleForViewport`（`viewport.scale * viewport.userUnit`）、`projectVisualRun`、`viewportToDisplayRect` 与 `displayToViewportRect` 将文字运行与选区矩形映射至未缩放的视觉显示空间，统一处理 0°/90°/180°/270° 页面旋转、`CropBox` 与 `UserUnit`，保持宽高下标与行内公式的连续桥接。
+- **跨页与端点守卫**：`selectedPart()` 增加 `comparePoint` 叶节点守卫；当选区跨越两页及以上（`activePages > 1 || startPage !== endPage`）时，即使某页仅选中单行文字、`bridges.length === 0`，也统一启用 `.pdf-selection-shape` 绘制。
+- **高对比度适配**：`forced-colors.css` 在 `@media (forced-colors: active)` 下为 `.pdf-selection-shape` 设置 `forced-color-adjust: none`、`fill: Highlight`、`fill-opacity: 0.36`、`stroke: Highlight`，并抑制冗余原生背景涂抹，在系统高对比度主题下保留下层 PDF Canvas 字符清晰度，同时增强选中列表项、聚焦环、搜索命中与工具栏按钮边界。
 
 已观察到 PointerEvent 保留小数坐标而兼容 MouseEvent 截为整数的情况。控制器仅给紧随其后、类型/目标/按钮/可信状态匹配的兼容事件消费一次准确指针坐标；不匹配则使用原鼠标坐标，失焦、取消和最终注销会清理缓存。这项处理不扩大字符框容差。
 
@@ -135,6 +148,6 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 
 页面离屏、缩放或卸载时幂等撤销注册，最后一页撤销时终止共享事件监听器；有效手势绑定实际起拖文字层，灰色页外空白绑定阅读根容器。具体行为是否通过以本轮 QA 的真实鼠标记录为准，静态架构说明不代替测试结果。
 
-实现位置为 `pdf-geometry.ts`、`PdfPage.tsx` 与 `PdfViewer.tsx`。未来高亮层放到每页 `.pdf-page-surface` 中，与 Canvas/TextLayer 共用 viewport；存储坐标以未缩放 PDF 坐标为准，显示时实时转换。句子 ID、阅读顺序、跨文字项聚合、多栏分段与译文对齐关系仍是后续独立设计项。
+实现位置为 `pdf-geometry.ts`、`selection-bridges.ts`、`selection-highlight.ts`、`forced-colors.css`、`PdfPage.tsx` 与 `PdfViewer.tsx`。未来高亮层仍以未缩放 PDF 坐标为准，显示时实时转换。句子 ID、阅读顺序、跨文字项聚合、多栏分段与译文对齐关系仍是后续独立设计项。
 
 架构依据：[Electron 安全建议](https://www.electronjs.org/docs/latest/tutorial/security/)、[Electron 自定义协议](https://www.electronjs.org/docs/latest/api/protocol)、[electron-vite 依赖处理](https://electron-vite.org/guide/dependency-handling)、[PDF.js 官方示例](https://mozilla.github.io/pdf.js/examples/)。具体行为以本项目锁定版本源码和测试为准。

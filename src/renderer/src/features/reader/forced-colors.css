@@ -1,0 +1,70 @@
+/* Windows 高对比度模式适配：半透明选区叠层保留画布字形墨迹，并确保聚焦与搜索状态可辨识。 */
+@media (forced-colors: active) {
+  .pdf-page .pdf-page-surface > .pdf-selection-shape {
+    display: block;
+    forced-color-adjust: none;
+    fill: Highlight;
+    fill-opacity: 0.36;
+    stroke: none;
+  }
+
+  .pdf-page .pdf-page-surface > .textLayer {
+    opacity: 0.36;
+    forced-color-adjust: none;
+  }
+
+  .pdf-page .pdf-page-surface > .textLayer ::selection {
+    background: Highlight;
+    color: transparent;
+  }
+
+  .pdf-page .pdf-page-surface > .textLayer[data-continuous-selection] ::selection {
+    background: transparent;
+    color: transparent;
+  }
+
+  .pdf-page .pdf-page-surface > .textLayer br::selection {
+    background: transparent;
+  }
+
+  .library-panel .document-item.selected {
+    forced-color-adjust: auto;
+    border-color: Highlight;
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .library-panel .document-item:focus-visible,
+  .library-panel > .library-import-button:focus-visible,
+  .reader-panel .reader-toolbar button:focus-visible {
+    forced-color-adjust: auto;
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .pdf-page .pdf-highlight-layer .pdf-search-match {
+    forced-color-adjust: auto;
+    background: transparent;
+    border: 1px solid CanvasText;
+  }
+
+  .pdf-page .pdf-highlight-layer .pdf-search-match.pdf-search-match--active {
+    forced-color-adjust: auto;
+    background: transparent;
+    border: 2px solid Highlight;
+    outline: 1px solid Highlight;
+  }
+
+  .reader-panel .reader-toolbar button,
+  .library-panel > .library-import-button {
+    forced-color-adjust: auto;
+    border: 1px solid ButtonText;
+  }
+
+  .reader-panel .reader-toolbar button:disabled,
+  .library-panel > .library-import-button:disabled {
+    border-color: GrayText;
+    color: GrayText;
+    opacity: 1;
+  }
+}

@@ -1,16 +1,16 @@
 {
   "date": "2026-11-23",
   "version": "0.1.0",
-  "task_id": "AGY-PACKAGE-005",
+  "task_id": "AGY-PACKAGE-006",
   "run_id": "run-6",
-  "audited_at": "2026-11-23T17:37:01+08:00",
-  "baseline_id": "PF-ANTIGRAVITY-20261123-03",
+  "audited_at": "2026-11-23T22:58:30+08:00",
+  "baseline_id": "PF-ANTIGRAVITY-20261123-04",
   "source": {
-    "kind": "uncommitted-worktree",
-    "cleanHeadBuild": false,
-    "gitHeadReferenceOnly": "cb199c1d1ceb04226304278be60e0864b67abb1b",
+    "kind": "doc-closure-over-v0.1.0",
+    "cleanHeadBuild": true,
+    "gitHeadReferenceOnly": "a3a67ee71492552e179703403dc548618fb16c99",
     "branch": "init_paperflow_desktop",
-    "description": "完善 Linux Wayland + VMware vmwgfx 便携启动、窗口自适应与高对比度选区收口：通过 scripts/linux-after-pack.mjs 在包内注入 POSIX 启动包装脚本（DISPLAY 存在且未显式指定 Ozone 参数时附加 --ozone-platform=x11），在 src/main/window.ts 对 Linux 按工作区自适应初始/最小尺寸并显式启用 resizable/maximizable 及 400ms ready-to-show 兜底，在 main.css 添加 <=1120px 紧凑栏宽，并在 forced-colors.css 修复高对比度选区内描边。Windows（69 打包 E2E / 89 单测）与 Linux（Ubuntu 26.04.1 LTS 无参启动、窗口扩缩/最大化及用户真机高对比度复验）均已验证，双端 app.asar 209/209 与 41/41 许可证一致。"
+    "description": "在 v0.1.0 (a3a67ee) 同源构建产物上补齐三项实测闭环：(1) Windows NSIS 静默当前用户安装、151 文件逐字节一致校验、安装版 11/11 E2E 与干净卸载（用户默认数据目录 154 文件零改动）；(2) 600 页合成长文档真实多进程内存曲线采样（WorkingSet 284.18 -> 348.89 -> 321.14 MB，Canvas 常驻始终 2-3 个）；(3) 180°/270° 合成旋转页单页原生选区与第 3->4 页跨页 SVG 高亮、像素变化及系统剪贴板验证，并归档 release 产物、推送 GitHub 私有仓库与 v0.1.0 草稿 Release（含 Liberation 1.07.4 源码包）。"
   },
   "artifacts": [
     {
@@ -95,6 +95,55 @@
       "skipped": 0,
       "flaky": 0
     },
+    "nsisRegression": {
+      "installer": "release/PaperFlow-0.1.0-win-x64-setup.exe",
+      "installExitCode": 0,
+      "payloadMatchedFiles": 151,
+      "uninstallKey": "935403b3-5b9e-5598-9b80-7266b3e79f5e",
+      "shortcutsVerified": 2,
+      "installedE2e": {
+        "passed": 11,
+        "failed": 0,
+        "specs": [
+          "tests/e2e/bootstrap.spec.ts",
+          "tests/e2e/verification.spec.ts",
+          "tests/e2e/reader-ux.spec.ts",
+          "tests/e2e/selection-boundary.spec.ts"
+        ]
+      },
+      "uninstallClean": true,
+      "appDataPreservedFiles": 154,
+      "lingeringProcesses": 0
+    },
+    "longDocumentMemoryCurve": {
+      "fixture": "tests/fixtures/verification/reader/long-600.pdf",
+      "synthetic": true,
+      "stops": [1, 100, 200, 300, 400, 500, 600, 450, 150, 1],
+      "maxCanvasCount": 3,
+      "maxTotalCanvasPixels": 4015116,
+      "initialWorkingSetMB": 284.18,
+      "peakWorkingSetMB": 348.89,
+      "finalWorkingSetMB": 321.14,
+      "initialPrivateMB": 362.06,
+      "peakPrivateMB": 403.37,
+      "finalPrivateMB": 403.37
+    },
+    "rotatedSelection180And270": {
+      "fixture": "tests/fixtures/verification/reader/geometry.pdf",
+      "synthetic": true,
+      "singlePageNativeSelectionAndClipboardPassed": [3, 4, 15, 16],
+      "crossPage180To270SvgAndClipboard": {
+        "fromPage": 3,
+        "fromRotation": 180,
+        "toPage": 4,
+        "toRotation": 270,
+        "zoom": "50%",
+        "p3PathLength": 154,
+        "p4PathLength": 63,
+        "clipboardVerified": true,
+        "screenshotInspected": true
+      }
+    },
     "linuxPackageAudit": {
       "artifact": "release/PaperFlow-0.1.0-linux-x64.tar.gz",
       "topDir": "PaperFlow-0.1.0-linux-x64",
@@ -112,11 +161,12 @@
     }
   },
   "limitations": [
-    "本地 Windows 测试包未签名（Authenticode NotSigned）；未执行 git commit / push 或 GitHub Release。",
-    "Linux x64 便携包已在 Ubuntu 26.04.1 LTS（GNOME Wayland + VMware vmwgfx，需先满足 chrome-sandbox root:root 4755 SUID 权限）完成无参 ./paperflow 启动、窗口扩缩/最大化（含用户鼠标拖拽实机确认）与渲染运行验证，但尚未在 Linux 原生操作系统上运行 69 项 Playwright 全套 E2E。",
-    "本轮未重新运行 pnpm dev 热更新、pnpm rebuild:electron 与 NSIS 静默安装/卸载实机脚本（已通过 pnpm dist:win 出包及 win-unpacked/PaperFlow.exe 全套 69/69 E2E 验证）。",
+    "本地 Windows 测试包未签名（Authenticode NotSigned）；代码已推送至 GitHub 私有仓库（main 与 v0.1.0），v0.1.0 Release 当前仍保持 Draft 草稿态（已附 Liberation Sans 1.07.4 源码包 fonts-liberation_1.07.4.orig.tar.gz），未公开发布。",
+    "Linux x64 便携包已在 Ubuntu 26.04.1 LTS 完成无参启动、窗口扩缩/最大化（含用户鼠标拖拽实机确认）与渲染运行验证；当前因 Ubuntu 虚拟机离线（SSH 超时），原生 Linux 单元测试与 69 项 Playwright 全套 E2E 仍未执行。",
+    "当前测试机仅连接单块物理显示器（2048x1152），无法实测多物理显示器硬件 DPI 拖动迁移；600 页内存曲线与 180°/270° 旋转页实测均基于项目原创合成 PDF，物理磁盘满/断电、真实外部长论文内存上限与本轮 pnpm dev / pnpm rebuild:electron 仍未重测。",
     "跨页选区按用户确认的方案 A 保留标准 PDF/浏览器线性 DOM 选区行为，因此从上页尾拖至下页首时仍会按内容流顺序包含页面页眉/页尾。",
-    "五档 DPR 与 forced-colors E2E 为 Playwright/Chromium 进程模拟参数（其中高对比度选区无交叉内框线已另由用户在 Windows 真实桌面确认）；未覆盖多物理显示器 DPI 硬件迁移及真实用户论文的 180°/270° 旋转像素 E2E，物理磁盘满/断电、极长文档总内存上限及 Liberation 1.07.4 字体源码公开分发渠道仍未关闭。"
+    "五档 DPR 与 forced-colors E2E 为 Playwright/Chromium 进程模拟参数（其中高对比度选区无交叉内框线已另由用户在 Windows 真实桌面确认）。"
   ],
+  "draftReleaseCreated": true,
   "remotePublish": false
 }

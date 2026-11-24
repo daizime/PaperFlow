@@ -21,6 +21,7 @@
     "dist:win": "pnpm build && electron-builder --win nsis --x64 --publish never",
     "pack:win": "pnpm build && electron-builder --win --x64 --dir --publish never",
     "dist:linux": "pnpm build && tsx scripts/dist-linux.ts",
+    "dist:linux:deb": "pnpm dist:linux && tsx scripts/dist-linux-deb.ts",
     "postinstall": "install-electron",
     "rebuild:electron": "tsx scripts/verify-native.ts",
     "fixtures": "tsx scripts/generate-fixtures.ts"

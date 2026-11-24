@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import { appendFile, copyFile, mkdir, mkdtemp, open, readFile, readdir, rm, stat, truncate, utimes, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import Sqlite from 'better-sqlite3'
 import { PDFDocument } from 'pdf-lib'
@@ -109,7 +109,7 @@ beforeEach(async () => {
 afterEach(async () => {
   resetFaults()
   database?.close()
-  if (!root.startsWith(join(cacheRoot, 'cases') + '\\')) throw new Error('Unsafe test cleanup path')
+  if (!root.startsWith(join(cacheRoot, 'cases') + sep)) throw new Error('Unsafe test cleanup path')
   await rm(root, { recursive: true, force: true })
   await writeFile(join(cacheRoot, 'fault-observations.json'), JSON.stringify(observed, null, 2) + '\n')
 })

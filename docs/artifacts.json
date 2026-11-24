@@ -1,52 +1,59 @@
 {
-  "date": "2026-11-23",
+  "date": "2026-11-24",
   "version": "0.1.0",
-  "task_id": "AGY-PACKAGE-006",
-  "run_id": "run-6",
-  "audited_at": "2026-11-23T22:58:30+08:00",
-  "baseline_id": "PF-ANTIGRAVITY-20261123-04",
+  "task_id": "AGY-PACKAGE-007",
+  "run_id": "run-7",
+  "audited_at": "2026-11-24T15:34:40+08:00",
+  "baseline_id": "PF-ANTIGRAVITY-20261124-01",
   "source": {
-    "kind": "doc-closure-over-v0.1.0",
+    "kind": "cross-platform-closure-v0.1.0",
     "cleanHeadBuild": true,
-    "gitHeadReferenceOnly": "a3a67ee71492552e179703403dc548618fb16c99",
+    "gitHeadReferenceOnly": "final-closure-commit-on-main",
     "branch": "init_paperflow_desktop",
-    "description": "在 v0.1.0 (a3a67ee) 同源构建产物上补齐三项实测闭环：(1) Windows NSIS 静默当前用户安装、151 文件逐字节一致校验、安装版 11/11 E2E 与干净卸载（用户默认数据目录 154 文件零改动）；(2) 600 页合成长文档真实多进程内存曲线采样（WorkingSet 284.18 -> 348.89 -> 321.14 MB，Canvas 常驻始终 2-3 个）；(3) 180°/270° 合成旋转页单页原生选区与第 3->4 页跨页 SVG 高亮、像素变化及系统剪贴板验证，并归档 release 产物、推送 GitHub 私有仓库与 v0.1.0 草稿 Release（含 Liberation 1.07.4 源码包）。"
+    "description": "在 v0.1.0 上完成全平台窗口工作区自适应、窄屏工具栏与三栏布局、FreeType 次像素渲染亮度计算与跨平台路径修复；实现 Windows 宿主机、Ubuntu 26.04.1 LTS 虚拟机与纯净 Windows 11 Build 26300 虚拟机三端 69/69 E2E 全绿，补齐 Ubuntu .deb 原生安装包并经用户亲测安装与运行确认后，更新归档、文档并发布 GitHub Release v0.1.0。"
   },
   "artifacts": [
     {
       "path": "release/PaperFlow-0.1.0-win-x64-setup.exe",
-      "bytes": 123017109,
-      "sha256": "d827d00caa9a0e1a6d2dde66fe55d9d004af418600abd968d3a7df7cefe062ec",
+      "bytes": 123016215,
+      "sha256": "32b8d7d7d816a10169e66ac69e5b9451fdf9d5c106ca8ecce81237394b40d63e",
       "signature": "NotSigned"
     },
     {
       "path": "release/PaperFlow-0.1.0-win-x64-setup.exe.blockmap",
-      "bytes": 130503,
-      "sha256": "7f12789a8c588df343c2788c0eb57601b39335fd7292669be97efe3af1261b44",
+      "bytes": 130311,
+      "sha256": "56193f1c1f96769d53d4c1435b6bac52135f05cd04f996c81b2464085e771c87",
       "signature": null
     },
     {
       "path": "release/win-unpacked/PaperFlow.exe",
       "bytes": 245590016,
-      "sha256": "bf8f683a1b42e59cbee3207ecf544a7f4b635b19f36a59c0d84dd0607f3153a3",
+      "sha256": "91cc177d24e0555892fa208966c6492b3f132187e6be61c92835623ee8a683ff",
       "signature": "NotSigned"
     },
     {
       "path": "release/win-unpacked/resources/app.asar",
-      "bytes": 33413208,
-      "sha256": "1e1cb05f19dc0e8f2ae9018ce3ca338065c361eff07f795c1c4a5361613bf63e",
+      "bytes": 33413413,
+      "sha256": "e84ea6e5f0cc6363c752a51f0390dd7a9fd199faca9b3518b6392b2409c494a6",
       "signature": null
     },
     {
       "path": "release/PaperFlow-0.1.0-linux-x64.tar.gz",
-      "bytes": 141708666,
-      "sha256": "c960372740ad33e18f1ede35b8537abb90d7f7a417147c9a3632670f30851590",
+      "bytes": 141709134,
+      "sha256": "60e3f48a6ffe96ad3ac539f0e73f469515fa8febc5f44ded771dc3cc82d6398d",
       "signature": null
     },
     {
+      "path": "release/PaperFlow-0.1.0-linux-x64.deb",
+      "bytes": 101985176,
+      "sha256": "78f83c7568a2476f656d2f4c0425ff7c443ed7a7d42035eee410bd1d31f2bd04",
+      "signature": null,
+      "note": "基于同源 Linux 载荷（app.asar e84ea6e5...）于 Ubuntu 26.04.1 LTS 使用 dpkg-deb --root-owner-group 封装。"
+    },
+    {
       "path": "release/linux-unpacked/resources/app.asar",
-      "bytes": 33413208,
-      "sha256": "1e1cb05f19dc0e8f2ae9018ce3ca338065c361eff07f795c1c4a5361613bf63e",
+      "bytes": 33413413,
+      "sha256": "e84ea6e5f0cc6363c752a51f0390dd7a9fd199faca9b3518b6392b2409c494a6",
       "signature": null
     }
   ],
@@ -61,7 +68,9 @@
     "hasNotices": true,
     "hasThirdPartyDoc": true,
     "rootLicenseMatches": true,
-    "noticesMatch": true
+    "noticesMatch": true,
+    "preloadBytes": [1272, 326],
+    "preloadRequires": ["\"electron\""]
   },
   "licenseFiles": {
     "count": 41,
@@ -75,27 +84,79 @@
       "passed": 89,
       "failed": 0
     },
-    "devHmr": "UNVERIFIED_IN_RUN_6（先前于同 Electron/Vite 构建基线实测通过；本轮未重复执行 pnpm dev 热更新验证）",
+    "devHmr": "UNVERIFIED_IN_RUN_7（先前于同 Electron/Vite 构建基线实测通过；本轮未重复执行 pnpm dev 热更新验证）",
     "rebuildElectron": {
       "electron": "44.7.2",
       "napi": "10",
       "sqlite": "3.53.4",
-      "note": "先前于同原生依赖工作区实测通过；Linux prebuilds/linux-x64.node（ELF 0755）已打入便携包并在 Ubuntu 26.04.1 LTS 实机启动通过（本轮未重复执行 pnpm rebuild:electron）"
-    },
-    "sourceE2e": {
-      "passed": 69,
-      "failed": 0,
-      "skipped": 0,
-      "flaky": 0
+      "note": "先前于同原生依赖工作区实测通过；Linux prebuilds/linux-x64.node（ELF 0755）与 Windows 原生节点均已在多台实机/虚拟机通过（本轮未重复执行 pnpm rebuild:electron）"
     },
     "packagedE2e": {
       "executable": "release/win-unpacked/PaperFlow.exe",
       "passed": 69,
       "failed": 0,
       "skipped": 0,
-      "flaky": 0
+      "flaky": 0,
+      "lingeringProcesses": 0
     },
-    "nsisRegression": {
+    "ubuntu2604Verification": {
+      "os": "Ubuntu 26.04.1 LTS (Xwayland :0, VMware)",
+      "typecheck": "exit 0",
+      "lint": "exit 0",
+      "unit": {
+        "files": 7,
+        "passed": 88,
+        "skipped": 1,
+        "failed": 0,
+        "skipReason": "tests/unit/library-robustness.test.ts Windows FileShare.None test skipped on non-win32"
+      },
+      "packagedE2e": {
+        "executable": "PaperFlow-0.1.0-linux-x64/paperflow",
+        "passed": 69,
+        "failed": 0,
+        "skipped": 0,
+        "lingeringProcesses": 0
+      },
+      "debPackaging": {
+        "artifact": "release/PaperFlow-0.1.0-linux-x64.deb",
+        "bytes": 101985176,
+        "sha256": "78f83c7568a2476f656d2f4c0425ff7c443ed7a7d42035eee410bd1d31f2bd04",
+        "installedSizeKiB": 349032,
+        "aptSimulateExitCode": 0,
+        "userHandsOnInstallAndRun": true
+      }
+    },
+    "cleanWin11VmVerification": {
+      "os": "Windows 11 Pro Build 26300 (64-bit, 2 cores / 4 GB RAM)",
+      "preinstalledNodeOrVcredist": false,
+      "silentInstall": {
+        "exitCode": 0,
+        "payloadMatchedFiles": 151,
+        "uninstallKey": "935403b3-5b9e-5598-9b80-7266b3e79f5e",
+        "shortcutsVerified": 2
+      },
+      "firstLaunchZeroDeps1024x768": {
+        "windowRect": { "left": 41, "top": 29, "width": 942, "height": 662 },
+        "sqliteCreated": "paperflow.sqlite (4096 B)",
+        "clippingObserved": false,
+        "lingeringAfterClose": 0
+      },
+      "installedE2eAt1920x1080": {
+        "passed": 69,
+        "failed": 0,
+        "skipped": 0,
+        "lingeringProcesses": 0,
+        "displayRestoredTo": "1024x768"
+      },
+      "silentUninstall": {
+        "cleanWithin45s": true,
+        "userDataSqlitePreserved": true,
+        "lingeringProcesses": 0
+      },
+      "userHandsOnGuiInstallAndRun": true
+    },
+    "nsisRegressionHostPriorBaseline": {
+      "baseline": "a3a67ee (v0.1.0 prior build)",
       "installer": "release/PaperFlow-0.1.0-win-x64-setup.exe",
       "installExitCode": 0,
       "payloadMatchedFiles": 151,
@@ -103,19 +164,14 @@
       "shortcutsVerified": 2,
       "installedE2e": {
         "passed": 11,
-        "failed": 0,
-        "specs": [
-          "tests/e2e/bootstrap.spec.ts",
-          "tests/e2e/verification.spec.ts",
-          "tests/e2e/reader-ux.spec.ts",
-          "tests/e2e/selection-boundary.spec.ts"
-        ]
+        "failed": 0
       },
       "uninstallClean": true,
       "appDataPreservedFiles": 154,
       "lingeringProcesses": 0
     },
     "longDocumentMemoryCurve": {
+      "baseline": "a3a67ee (v0.1.0 prior build)",
       "fixture": "tests/fixtures/verification/reader/long-600.pdf",
       "synthetic": true,
       "stops": [1, 100, 200, 300, 400, 500, 600, 450, 150, 1],
@@ -129,6 +185,7 @@
       "finalPrivateMB": 403.37
     },
     "rotatedSelection180And270": {
+      "baseline": "a3a67ee (v0.1.0 prior build)",
       "fixture": "tests/fixtures/verification/reader/geometry.pdf",
       "synthetic": true,
       "singlePageNativeSelectionAndClipboardPassed": [3, 4, 15, 16],
@@ -143,30 +200,14 @@
         "clipboardVerified": true,
         "screenshotInspected": true
       }
-    },
-    "linuxPackageAudit": {
-      "artifact": "release/PaperFlow-0.1.0-linux-x64.tar.gz",
-      "topDir": "PaperFlow-0.1.0-linux-x64",
-      "entries": 172,
-      "fileEntries": 150,
-      "posixModesAndElfVerified": true,
-      "wrapperInjected": "scripts/linux-after-pack.mjs",
-      "noArgRelaunchVerifiedOnUbuntu2604": true,
-      "windowResizeAndMaximizeVerifiedOnUbuntu2604": true,
-      "fullE2eSuiteOnLinux": false
-    },
-    "realDesktopUserConfirmations": {
-      "windowsHighContrastSelection": "用户已于 Windows 真实高对比度桌面环境复验确认无交叉内框线",
-      "ubuntu2604NoArgLaunchAndResize": "已于 Ubuntu 26.04.1 LTS（GNOME Wayland + VMware vmwgfx，配置 chrome-sandbox root:root 4755）实测无参 ./paperflow 自动注入 --ozone-platform=x11、窗口 IsViewable、具备 _NET_WM_ACTION_RESIZE/_NET_WM_ACTION_MAXIMIZE_HORZ/_NET_WM_ACTION_MAXIMIZE_VERT 与程序化缩放，并由用户实机拖拽边框扩缩及最大化确认通过"
     }
   },
   "limitations": [
-    "本地 Windows 测试包未签名（Authenticode NotSigned）；代码已推送至 GitHub 私有仓库（main 与 v0.1.0），v0.1.0 Release 当前仍保持 Draft 草稿态（已附 Liberation Sans 1.07.4 源码包 fonts-liberation_1.07.4.orig.tar.gz），未公开发布。",
-    "Linux x64 便携包已在 Ubuntu 26.04.1 LTS 完成无参启动、窗口扩缩/最大化（含用户鼠标拖拽实机确认）与渲染运行验证；当前因 Ubuntu 虚拟机离线（SSH 超时），原生 Linux 单元测试与 69 项 Playwright 全套 E2E 仍未执行。",
-    "当前测试机仅连接单块物理显示器（2048x1152），无法实测多物理显示器硬件 DPI 拖动迁移；600 页内存曲线与 180°/270° 旋转页实测均基于项目原创合成 PDF，物理磁盘满/断电、真实外部长论文内存上限与本轮 pnpm dev / pnpm rebuild:electron 仍未重测。",
-    "跨页选区按用户确认的方案 A 保留标准 PDF/浏览器线性 DOM 选区行为，因此从上页尾拖至下页首时仍会按内容流顺序包含页面页眉/页尾。",
-    "五档 DPR 与 forced-colors E2E 为 Playwright/Chromium 进程模拟参数（其中高对比度选区无交叉内框线已另由用户在 Windows 真实桌面确认）。"
+    "本地与 Release 分发的 Windows 安装包未商业代码签名（Authenticode NotSigned）。",
+    "五档 DPR（含 forced-colors）及 E2E 所用 PDF 为合成素材与 Playwright/Chromium 进程模拟倍率；测试机仅单物理屏，未覆盖多物理显示器 DPI 硬件拖动迁移。",
+    "PaperFlow-0.1.0-linux-x64.deb 系基于 Windows 主机产出的同源 Linux 载荷（app.asar e84ea6e5...）在 Ubuntu 26.04.1 LTS 上用 dpkg-deb 封装，当前仓库构建脚本仅固化 dist:win 与 dist:linux（tar.gz）。",
+    "真实外部超大论文极限内存上限、物理磁盘满/断电，以及 run-7 最终两处微调后的 pnpm dev / pnpm rebuild:electron 仍未重测。"
   ],
   "draftReleaseCreated": true,
-  "remotePublish": false
+  "remotePublish": true
 }

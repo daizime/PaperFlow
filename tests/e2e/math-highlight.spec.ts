@@ -125,6 +125,7 @@ async function pixelEvidence(page: Page, before: Buffer, after: Buffer, referenc
     }
     const [a, b] = await Promise.all([decode(before), decode(after)])
     const white = (rgb: number[]) => Math.min(...rgb) >= criteria.whiteMinimumChannel && Math.max(...rgb) - Math.min(...rgb) <= criteria.whiteMaximumSpread
+    const luma = (rgb: number[]) => 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
     const whiteDistance = (rgb: number[]) => Math.hypot(255 - rgb[0], 255 - rgb[1], 255 - rgb[2])
     const median = (values: number[]) => values.length ? [...values].sort((x, y) => x - y)[Math.floor(values.length / 2)] : null
     const colorAt = (image: typeof a, x: number, y: number) => Array.from(image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 3))
@@ -138,7 +139,7 @@ async function pixelEvidence(page: Page, before: Buffer, after: Buffer, referenc
             if (x + 0.5 <= rect.x + criteria.interiorCss || y + 0.5 <= rect.y + criteria.interiorCss || x < 0 || y < 0 || x >= a.width || y >= a.height || x >= b.width || y >= b.height || seen.has(x + ',' + y)) continue
             seen.add(x + ',' + y)
             const original = colorAt(a, x, y), selected = colorAt(b, x, y)
-            if (mode === 'white' ? !white(original) : Math.max(...original) > criteria.inkMaximumBeforeChannel) continue
+            if (mode === 'white' ? !white(original) : luma(original) > criteria.inkMaximumBeforeChannel) continue
             result.push([x, y, original[0], original[1], original[2], selected[0], selected[1], selected[2], whiteDistance(original), whiteDistance(selected), null])
           }
         }

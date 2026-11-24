@@ -14,3 +14,4 @@
 .reader-placeholder__import { min-height: 38px; background: #3864b5; border-color: #3864b5; color: #fff; font-weight: 650; }
 .reader-placeholder__import:hover:enabled { background: #2c529a; border-color: #2c529a; }
 @media (max-width: 1120px) { .workspace { grid-template-columns: 212px minmax(0, 1fr) 212px; } }
+@media (max-width: 900px) { .workspace { grid-template-columns: 184px minmax(0, 1fr) 156px; } }

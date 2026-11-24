@@ -1,22 +1,23 @@
 # PaperFlow
-面向科研论文的 Windows 本地 PDF 阅读器。当前实现 T01–T03：安全桌面框架、本地文献库、真实 PDF.js Canvas + TextLayer、多页阅读和阅读进度。不接入翻译、LLM、OCR、网络文献服务或云存储。
+面向科研论文的本地离线桌面 PDF 阅读器（支持 Windows x64 与 Linux x64）。当前实现 T01–T03：安全桌面框架、本地文献库、真实 PDF.js Canvas + TextLayer、多页阅读与阅读进度。不接入翻译、LLM、OCR、网络文献服务或云存储。
 
 ## Windows 与 Linux 启动
 
-通过 `pnpm dist:win`、`pnpm pack:win` 或 `pnpm dist:linux` 会在被 Git 忽略的 `release/` 目录生成本地测试程序（`NotSigned`，未签名、未远程发布）：
+通过 `pnpm dist:win`、`pnpm pack:win` 或 `pnpm dist:linux` 会在被 Git 忽略的 `release/` 目录生成本地测试程序（`NotSigned`，构建脚本严格保留 `--publish never`）；`v0.1.0` Release 另附基于同源 Linux 载荷于 Ubuntu 26.04.1 LTS 封装的 `.deb` 原生安装包：
 
-| 用途 | 产物说明（本机构建后生成） |
+| 用途 | 产物说明 |
 | --- | --- |
 | Windows 解包版 | `release/win-unpacked/PaperFlow.exe`，双击运行，需保留同目录 DLL、语言资源与 `resources/` |
-| Windows 安装包 | `release/PaperFlow-0.1.0-win-x64-setup.exe`（NSIS 安装包，`--publish never`） |
-| Linux x64 便携包 | `release/PaperFlow-0.1.0-linux-x64.tar.gz`（Windows 跨平台构建；在 Linux 解压后运行 `PaperFlow-0.1.0-linux-x64/paperflow`） |
+| Windows 安装向导 | `release/PaperFlow-0.1.0-win-x64-setup.exe`（NSIS 图形/静默安装包，`--publish never`） |
+| Linux `.deb` 安装包 | `PaperFlow-0.1.0-linux-x64.deb`（Ubuntu/Debian `sudo apt install ./PaperFlow-0.1.0-linux-x64.deb`，自动设置 `chrome-sandbox` 权限与菜单） |
+| Linux x64 便携包 | `release/PaperFlow-0.1.0-linux-x64.tar.gz`（Windows 跨平台构建；解压后配置 `chrome-sandbox` `4755` 并运行 `PaperFlow-0.1.0-linux-x64/paperflow`） |
 
 当前版本已具备完整 T01–T03 基础及纯本地科研阅读器增强能力，包含：
 - **本地文献库管理**：按钮或拖拽 `.pdf` 导入（通过有界 `Uint8Array` 传输并共享主进程 SHA-256 去重与沙盒校验，不暴露本地路径）、文献搜索、内联重命名、确认删除（联动清理 `reader_state` 与副本）、逐文件详细错误列表与启动孤立副本自动清理。
 - **科研阅读体验**：PDF 内部目录书签抽屉、`Ctrl+F` 取消式惰性全文搜索与命中定位高亮、`Ctrl+滚轮`缩放与键盘翻页/缩放快捷键、本地白边裁剪阅读（`裁剪白边` 联动适合宽度，保留精准选字坐标系）。
-- **选区连续性与边界加固**：跨页连选 SVG 高亮、0°/90°/180°/270° 旋转页面数学公式与多行选区连续性、Windows `forced-colors: active` 高对比度无内描边平滑适配。
+- **选区与跨平台适配**：连续选区 SVG 高亮、0°/90°/180°/270° 旋转页面数学公式与多行选区连续性、Windows `forced-colors: active` 高对比度无内描边平滑适配，以及全平台基于工作区的窗口自适应缩放与窄屏响应布局。
 
-经 `typecheck`、`lint`、`89/89` 单元测试、`69/69` Windows 源码 E2E 与 `69/69` Windows 打包 `.exe` E2E 实测通过（并由用户于 Windows 真实高对比度桌面环境复验选区显示）；Linux x64 便携包已通过 TAR/ELF/`209/209` 构建与 `41/41` 许可证一致性校验，并在 Ubuntu 26.04.1 LTS 实机（Wayland + `vmwgfx`，需满足 `chrome-sandbox` `root:root 4755`）实测通过无参 `./paperflow`（自动走 X11 包装脚本）、窗口扩缩/最大化（含用户鼠标实机确认）、拖拽导入与 PDF.js 渲染（Linux 全套 E2E 未于 Linux 原生运行）。最新构建校验见 [产物清单](docs/artifacts.json)、[补充验收记录](docs/verification/summary.md) 与 [实施记录](docs/implementation-notes.md)。
+经 **Windows 宿主机（`89/89` 单测 + `69/69` 打包 `.exe` E2E）**、**Ubuntu 26.04.1 LTS 虚拟机（`88 passed | 1 skipped` 单测 + `69/69` 打包 `./paperflow` E2E + `.deb` 安装实测）**与 **纯净 Windows 11 Build 26300 虚拟机（零预装 VC++/Node，`1024×768` 无裁切首启 + `1920×1080` `69/69` E2E + NSIS 安装卸载与图形化安装实测）**全面验证通过；`out/` `209/209` 与 `41/41` 许可证校验一致。详情见 [产物清单](docs/artifacts.json)、[补充验收记录](docs/verification/summary.md) 与 [实施记录](docs/implementation-notes.md)。
 
 ## 从源码启动
 
@@ -86,4 +87,4 @@ pnpm dev
 ## 许可证
 自有代码采用 [AGPL-3.0-only](LICENSE)。上游版权及许可见 [第三方清单](docs/third-party-licenses.md)、resources/THIRD-PARTY-NOTICES.txt 和 resources/licenses/。PDF.js 附带字体、ICC、WASM 有独立条款，不能仅按 PDF.js 主许可证判断。后续引入 pdf2zh-next、BabelDOC、PyMuPDF 前须重新核查整个分发方案。当前不安装这些依赖。
 
-本地测试包不代表正式发布、签名或许可审查已全部完成。本轮不上传 GitHub Release、不远程部署。
+`v0.1.0` Release 已随 Liberation Sans 1.07.4 对应源码包发布于 GitHub Releases；本地构建命令保留 `--publish never` 不自动上传，且 Windows 产物保持 `NotSigned` 未商业代码签名。

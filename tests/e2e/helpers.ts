@@ -21,6 +21,13 @@ export async function launchApp(dataDir: string, options: { deviceScaleFactor?: 
     const page = await app.firstWindow()
     await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
     if (factor !== undefined) {
+      await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (!win) return
+        win.setMinimumSize(1080, 680)
+        win.setSize(1440, 900)
+      })
+      await expect.poll(() => page.evaluate(() => window.innerWidth >= 1040 && window.innerHeight >= 620)).toBe(true)
       await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBeCloseTo(factor, 2)
     }
     return { app, page }

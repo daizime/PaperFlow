@@ -168,4 +168,20 @@ computer-use 实测原生文件框成功打开，显示 PDF 扩展名过滤；�
      - **600 页长文档真实进程内存曲线（合成素材 `long-600.pdf`）**：启动打包版后在 `[1, 100, 200, 300, 400, 500, 600, 450, 150, 1]` 共 10 个跳转点稳定后通过 Electron `app.getAppMetrics()` 采样 4 个进程总占用：WorkingSet 起始 `284.18 MB`、峰值 `348.89 MB`（第 300 页）、末值 `321.14 MB`；PrivateBytes 起始 `362.06 MB`、峰值/末值 `403.37 MB`；全程在页 `canvas` 数始终控制在 **2–3 个**（`<= 8`），远页释放正常，无失控增长。
      - **180°/270° 旋转页实测与截图目视确认（合成素材 `geometry.pdf`）**：验证单页（第 3 页 `180°`、第 4 页 `270°`、第 15 页 `180°` `UserUnit=2.5`、第 16 页 `270°` `UserUnit=2.5`）拖选文本、`window.getSelection()`、前后区域像素蓝色高亮变化及 `Ctrl+C` 系统剪贴板写入全部通过（按 [selection-highlight.ts](../src/renderer/src/features/reader/selection-highlight.ts#L168) 设计，单页单行纯文本走原生 CSS `::selection`，不激活 `data-continuous-selection`）；进一步在 `50%` 缩放下执行第 3 页（`180°`）到第 4 页（`270°`）跨页鼠标拖拽，核实两页 `.textLayer` 均激活 `data-continuous-selection`、`.pdf-selection-shape > path` 非空（第 3 页路径长度 `154`、第 4 页 `63`）且包围盒与文本高度重叠、`Ctrl+C` 剪贴板包含跨页全文，并目视核对 3 张截图渲染正常。
    - **实机验证记录**：在 Ubuntu 26.04.1 LTS 实机配置 `chrome-sandbox` 权限后，验证无参 `./paperflow` 自动以 `--ozone-platform=x11` 拉起可见窗口（`Map State: IsViewable`、`1130×632` DIP / `1411×790` X11 px，具备 `_NET_WM_ACTION_RESIZE` / `MAXIMIZE_HORZ` / `MAXIMIZE_VERT` 属性并完成程序化宽高调节）、拖拽导入与 PDF.js 渲染，并由用户实机鼠标拖拽窗口边框扩缩与最大化确认通过；Windows 高对比度选区效果已由用户在真实高对比度桌面环境确认通过。
-   - **未验证边界（受硬件/环境条件限制）**：Ubuntu 26.04 虚拟机当前处于离线状态（SSH 连接超时），原生 Linux 单测与 69 项 Playwright 全套 E2E 仍待虚拟机开机后补测；本机当前仅连接单块物理显示器（`2048×1152`），无法实测多物理显示器 DPI 硬件拖动迁移；600 页与旋转页实测均基于项目原创合成 PDF；本轮 `pnpm dev` HMR 与 `pnpm rebuild:electron` 未重跑。
+   - **未验证边界（受硬件/环境条件限制）**：上述 2026-11-23 时点的未测项随后已于 2026-11-24 完成三端补测闭环（见下一节）。
+
+## 2026-11-24 跨平台全量 69/69 回归、窄屏自适应与 v0.1.0 正式收口
+
+在 Ubuntu 26.04.1 LTS 与纯净 Windows 11 Build 26300（2 核 / 4 GB、未预装 Node 或 VC++ 运行库）两台虚拟机实测中逐项定位并修复跨平台差异，形成最终 `v0.1.0` 收口版本：
+
+1. **跨平台与窄屏修复（共 7 个代码/测试文件，均保留 Electron 安全标志不变）**：
+   - [window.ts](../src/main/window.ts) 与 [main.css](../src/renderer/src/assets/main.css) / [toolbar.css](../src/renderer/src/features/reader/toolbar.css)：移除 `process.platform === 'linux'` 限制，全平台基于 `workAreaSize` 自适应计算初始与最小窗口尺寸，消除 Win11 `1024×768` 下标题栏徽标与关闭按钮右溢裁切；同时在窄视口增加单行横向滚动工具栏（`<=960px`）与紧凑三栏（`<=900px`），解决 DPR 2/3 下工具栏折行挤压阅读区高度问题。
+   - [helpers.ts](../tests/e2e/helpers.ts)：仅在传入 `deviceScaleFactor` 的模拟高分屏回归中全平台重置窗口至 `1440×900`（`setMinimumSize(1080, 680)`），不影响正常自适应启动验收。
+   - [math-highlight.spec.ts](../tests/e2e/math-highlight.spec.ts)：针对 Linux FreeType RGB LCD 次像素渲染蓝/红通道不均问题，将 `mode === 'ink'` 的原图墨迹像素判定由 `Math.max(R,G,B) <= 100` 改为保持同一阈值 `100` 的 Rec.709 相对亮度公式。
+   - [security.spec.ts](../tests/e2e/security.spec.ts) 与 [library-robustness.test.ts](../tests/unit/library-robustness.test.ts)：移除硬编码 Windows `win-unpacked` Preload 路径与 `\\` 分隔符，改用 `app.getAppPath()` 与 `node:path` `sep`（Windows 独占锁用例保留 `it.skipIf(process.platform !== 'win32')`）。
+2. **三端验证与原生安装包闭环**：
+   - **双端同源构建**：Windows 与 Linux（含 `.tar.gz` 内嵌抽取）`app.asar`（`33,413,413` B，SHA-256 `e84ea6e5f0cc6363c752a51f0390dd7a9fd199faca9b3518b6392b2409c494a6`）三方逐字节一致；`out/` `209/209` 与 `41/41` 许可证核对无误。
+   - **Windows 宿主机（`2048×1152`）**：`typecheck`/`lint` 通过，`89/89` 单测通过，打包版 `PaperFlow.exe` 全量 E2E **69/69 通过**（0 残留进程）。
+   - **Ubuntu 26.04.1 LTS 虚拟机（`1600×900`，Xwayland `:0`）**：`typecheck`/`lint` 通过，单测 `88 passed | 1 skipped`，打包版 `./paperflow` 全量 E2E **69/69 通过**（0 残留进程）；另基于同源 Linux 载荷用 `dpkg-deb --root-owner-group` 封装 `PaperFlow-0.1.0-linux-x64.deb`（`101,985,176` B），通过 `apt-get -s install` 与用户实机安装运行确认。
+   - **纯净 Windows 11 Build 26300 虚拟机（零预装 Node/VC++）**：静默 NSIS 安装 `151/151` 文件一致；`1024×768` 零依赖首启居中 `942×662`（徽标与 `×` 关闭键无裁切）并自动创建 `paperflow.sqlite`；临时切换 `1920×1080` 跑通安装版 **69/69 E2E** 后恢复 `1024×768`；静默卸载干净清除安装目录、注册表与快捷方式并默认保留 `paperflow.sqlite`；另经用户亲手执行图形化 `.exe` 安装实测确认通过。
+3. **保留未验证边界**：Windows 安装包 `NotSigned`；E2E 样本与模拟 DPR 均基于合成 PDF 与进程模拟参数；未测多物理显示器 DPI 硬件拖动迁移与外部超大论文极限内存；`PaperFlow-0.1.0-linux-x64.deb` 为 Ubuntu 现场封装产物（仓库构建脚本仍维持 `--publish never` 与 `.exe`/`.tar.gz` 目标）；最终两处微调后未重跑 `pnpm dev` 热更新与 `pnpm rebuild:electron`。

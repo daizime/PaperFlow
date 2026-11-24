@@ -22,17 +22,11 @@ export function installSessionSecurity(): void {
   })
 }
 export async function createWindow(onCreated?: (window: BrowserWindow) => void): Promise<BrowserWindow> {
-  let width = 1440
-  let height = 900
-  let minWidth = 1080
-  let minHeight = 680
-  if (process.platform === 'linux') {
-    const workArea = screen.getPrimaryDisplay().workAreaSize
-    minWidth = Math.min(1080, Math.max(640, Math.floor(workArea.width * 0.7)))
-    minHeight = Math.min(680, Math.max(440, Math.floor(workArea.height * 0.7)))
-    width = Math.min(1440, Math.max(minWidth, Math.floor(workArea.width * 0.92)))
-    height = Math.min(900, Math.max(minHeight, Math.floor(workArea.height * 0.92)))
-  }
+  const workArea = screen.getPrimaryDisplay().workAreaSize
+  const minWidth = Math.min(1080, Math.max(640, Math.floor(workArea.width * 0.7)))
+  const minHeight = Math.min(680, Math.max(440, Math.floor(workArea.height * 0.7)))
+  const width = Math.min(1440, Math.max(minWidth, Math.floor(workArea.width * 0.92)))
+  const height = Math.min(900, Math.max(minHeight, Math.floor(workArea.height * 0.92)))
   const window = new BrowserWindow({
     title: 'PaperFlow', width, height, minWidth, minHeight, resizable: true, maximizable: true,
     show: false, autoHideMenuBar: true, backgroundColor: '#f5f6f8',

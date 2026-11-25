@@ -4,8 +4,38 @@
 
 ## [Unreleased]
 
-- 新增 [dist-linux-deb.ts](scripts/dist-linux-deb.ts) 与 `pnpm dist:linux:deb`（继续保留 `--publish never`），用于在 Ubuntu / Debian 环境中稳定复现基于同源 Linux 载荷的 `.deb` 原生安装包，并附带 [dist-linux-deb.test.ts](tests/unit/dist-linux-deb.test.ts) 单元测试。
-- 刷新仓库主界面预览图 [paperflow-reader.png](docs/paperflow-reader.png) 并补充版本更新日志与桌面端安装说明。
+（暂无未发布条目）
+
+## [0.1.1] - 2026-11-25
+
+围绕「本地优先、版面保真、双语精读、主流阅读器兼容备份」的重要功能升级版本（SQLite `user_version = 4`，支持从 `v0.1.0` `v1` 数据库无损平滑迁移）。
+
+### 新增
+
+- **原页底图覆写双语翻译与逐句双向联动**：新增主进程受控 `TranslationService`，支持 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama 等）与 **本机 AI CLI**（Codex CLI / Claude CLI / Gemini CLI / 自定义 CLI），提供单页翻译、单段重译、后台逐页「连续译」及自定义专业术语表（Glossary）；译文持久化缓存于本地 SQLite，API Key 经 Electron `safeStorage` 加密存储；右侧原页 `ImageBitmap` 底图保留图表与公式，左右点击/拖选句段实时双向高亮。
+- **三视图与三套护眼阅读主题**：重构为固定顶栏 + 底部悬浮控制胶囊（拖拽分栏线零抖动），支持一键切换 **「原文 / 双栏 / 译文」** 三种阅读视图、收起/展开文献库及双向滚动同步锁定/解锁；新增 **明亮 / 护眼暖纸（`mix-blend-mode: multiply` 给 PDF 与译文真实着色）/ 深色** 三套全局主题与定制滚动条。
+- **文献库整理与跨库全文检索**：卡片升级为悬停图标栏（零高度抖动），新增星标收藏、自定义 `#标签` 筛选、实时阅读进度条，以及跨全库文献标题、标签、批注与已缓存译文的统一检索与点击跳转。
+- **深度精读工具链（纯本地、无大模型亦可复用）**：
+  - **划句批注与 AI 伴读**：黄/绿/蓝/粉四色 PDF 坐标高亮、随句笔记、右侧批注抽屉（筛选/编辑/跳转/导出 Markdown）及可选「AI 解释 / 解释公式」一键存为笔记；
+  - **画幅优先图表与文献速览 + 一键复制**：自动识别选中句中的 `Fig. N` / `Table N` / `[N]` / `(Author, YYYY)`；图表速览以 1.8× 离屏渲染并结合逐行像素墨迹扫描与同栏正文段落硬边界截断去除白边与邻近正文，画幅优先展示；支持经主进程受控剪贴板一键复制高清 PNG 图片、题注与引用，支持点击正文/滚动自动收起及「固定」常驻对照；
+  - **无书签 PDF 自动章节大纲**：对未内嵌书签的 PDF 自动扫描前 60 页并结合字号层级、重复页眉过滤与 `References` 后截断生成清晰章节树，点击目录项跳转并同步在原文/双栏/译文高亮定位对应标题；
+  - **多出版商一键复制引用**：结合 PDF 内嵌元数据、首页字号层级与出版商版面结构提取标题、作者、年份、期刊/会议与 DOI，支持手工微调与一键复制 **BibTeX / IEEE / GB/T 7714 / RIS**；
+  - **快捷键与 `?` 速查面板**：支持 `?`、`T`、`V`、`B`、`O`、`A`、`C`、`H`、`Ctrl+F`、`←/→`、`Esc` 等阅读快捷操作。
+- **适配主流阅读器的便携 `.zip` 一键备份与恢复**：内置零外部依赖 PKZIP 工具（UTF-8 文件名、CRC32、Zip-Slip 路径防护与大小上限），单文件导出 `pdfs/*.pdf`、`library.bib`（Zotero / JabRef / Mendeley）、`library.ris`（EndNote / Zotero / Mendeley）、`notes/*.md`（Obsidian / Notion）与 `paperflow-backup.json` 无损恢复清单（刻意排除加密 API Key，支持跨空库还原与幂等重导）。
+- **Linux `.deb` 打包脚本与测试清理加固**：新增 [dist-linux-deb.ts](scripts/dist-linux-deb.ts) 与 `pnpm dist:linux:deb`，精简 E2E 回归集并新增 `tests/e2e/global-teardown.ts` 自动清理 `%TEMP%\paperflow-*` 临时目录。
+
+### 修复
+
+- 修复深色模式下四色高亮圆点被全局按钮样式覆盖变灰以及深色/护眼模式滚动条颜色未适配的问题。
+- 修复速览题注、复制文本与目录标题匹配误用翻译阶段 `⟪M1⟫` 公式占位符的问题。
+- 修复点击目录跳转到页首标题时因居中滚动导致页码回退上一页的问题。
+- 修复 Springer 栏目标签/中圆点作者/卷期年份与 `The VLDB Journal` 误判为会议、ACM 双行含逗号标题截断与多栏作者漏提、IEEE 双逗号等引用提取与格式化缺陷。
+
+### 已知边界
+
+- Windows 安装包未进行商业代码签名（`NotSigned`），下载安装前请对照校验清单验证 SHA-256。
+- 本轮实测在 Windows x64 宿主机完成（`pnpm typecheck`、`pnpm lint --max-warnings=0`、16 文件 / 136 项 Vitest 单元测试、11 项开发态 Electron E2E、打包 `PaperFlow.exe` 3 项核心 E2E 及 Windows `Expand-Archive` 备份解压验证）；Linux `.tar.gz` 为 Windows 跨平台构建，Linux 实机与 `.deb` 原生安装回归留待 Ubuntu 环境补充。
+- E2E 中系统文件选择框由 `dialog.showOpenDialog` / `showSaveDialog` mock，双语翻译测试由本机 `127.0.0.1` 模拟服务端与本地 CLI 桩完成；便携备份刻意不包含加密 API 密钥。
 
 ## [0.1.0] - 2026-11-24
 

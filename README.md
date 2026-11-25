@@ -1,98 +1,132 @@
 # PaperFlow
 
-**`v0.1.0` + 双语翻译预览 · `AGPL-3.0-only` · `Windows x64 / Linux x64` · 安全隔离桌面端**
+**面向科研论文的本地安全隔离双语 PDF 阅读器 · `AGPL-3.0-only` · `Windows x64 / Linux x64`**
 
-面向科研论文的本地桌面双语 PDF 阅读器（Electron 44 + React 19 + PDF.js 6.4 + SQLite）。文献库、排版解析、白边裁剪与译文缓存均运行在本地；2026-11-24 已获授权接入主进程受控代理双语翻译，支持 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama）与 **本机 AI CLI**（Codex CLI / Claude CLI / Gemini CLI / 自定义 CLI），并采用 PDF 原页底图 + 原位译文覆写保持图表、公式与 1:1 双栏对齐；渲染层仍保持无外网直连权限，不引入 OCR 或 Python 翻译运行时依赖。
+PaperFlow 基于 **Electron 44 + React 19 + TypeScript + PDF.js 6.4 + SQLite（better-sqlite3）** 构建，聚焦「**本地优先、版面保真、安全隔离、兼容主流学术工作流**」的论文精读体验：
+
+- 文献库存储、PDF 版面解析、自动大纲、图表裁剪速览、引用提取与便携备份全部运行在**本地且不依赖大模型**；
+- 双语翻译与划句 AI 伴读通过 Electron 主进程受控代理接入 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama 等）或 **本机 AI CLI**（Codex CLI / Claude CLI / Gemini CLI / 自定义 CLI），译文持久化缓存于本地 SQLite，API Key 经系统安全模块 `safeStorage` 加密保存；
+- 渲染层始终保持零外网直连权限，严格启用 `sandbox` / `contextIsolation` / `webSecurity`，不引入 OCR 或 Python 翻译运行时依赖。
 
 ![PaperFlow 主界面预览（原创合成样本 PDF）](docs/paperflow-reader.png)
 
-## 下载与安装（v0.1.0）
+---
 
-可在仓库 GitHub Releases 获取 `v0.1.0` 正式附件与 `SHA256SUMS.txt` 校验清单，也可按下方源码命令在本机构建（所有构建脚本严格保留 `--publish never`）：
+## 核心特性
 
-| 平台与形态 | 发行文件 / 本地产物 | 安装与运行说明 |
-| --- | --- | --- |
-| **Windows x64 安装向导** | `PaperFlow-0.1.0-win-x64-setup.exe` | 图形化 NSIS 安装向导（支持自选目录、桌面与开始菜单快捷方式及控制面板卸载）；未商业签名（Authenticode `NotSigned`），SmartScreen 提示时请先对照 `SHA256SUMS.txt` 校验后再放行 |
-| **Windows x64 解包版** | `release/win-unpacked/PaperFlow.exe` | `pnpm pack:win` 本地生成，双击运行，需保留同目录 DLL、语言资源与 `resources/` |
-| **Ubuntu / Debian `.deb`（推荐）** | `PaperFlow-0.1.0-linux-x64.deb` | 终端执行 `sudo apt install ./PaperFlow-0.1.0-linux-x64.deb`（或用系统应用安装器打开）；安装脚本会自动将 `/opt/PaperFlow/chrome-sandbox` 设为 `root:root 4755` 并注册应用菜单与 PDF 关联；卸载：`sudo apt remove paperflow` |
-| **Linux x64 便携归档** | `PaperFlow-0.1.0-linux-x64.tar.gz` | 支持在 Windows 跨平台执行 `pnpm dist:linux` 生成；若系统限制非特权 user namespace（如 Ubuntu 24.04/26.04），解压后先对 `chrome-sandbox` 执行 `sudo chown root:root` 与 `sudo chmod 4755`，再运行 `./PaperFlow-0.1.0-linux-x64/paperflow` |
-| **对应上游字体源码包** | `fonts-liberation_1.07.4.orig.tar.gz` | 随包 PDF.js 标准字体 Liberation Sans `1.07.4`（GPL v2 + 字体例外）对应源码归档 |
+### 1. 文献库管理与跨库检索
+- **安全本地入库**：支持按钮选择或直接拖拽 `.pdf` 批量导入（单文件上限 100 MiB，主进程 SHA-256 去重与隐藏沙盒校验，渲染层不接触本机真实路径）。
+- **轻量整理与进度追踪**：卡片悬停浮现快捷操作栏（星标收藏、自定义 `#标签`、内联重命名、确认删除），实时展示已读页码与进度条，支持按「全部 / ★ 收藏 / `#标签`」即时筛选。
+- **跨库全局检索**：单个搜索框同时检索全库文献标题、标签、高亮批注/笔记及已缓存译文，命中结果点击直达对应文献与页码。
 
-## 核心特性与版本演进概览
+### 2. 三视图对照与护眼/深色阅读体验
+- **固定顶栏 + 底部悬浮控制胶囊**：顶部工具栏固定不随分栏线抖动，支持一键切换 **「原文 / 双栏 / 译文」** 三种视图模式、收起/展开文献库，以及双栏 `25%–75%` 自由拖拽比例（双击恢复 1:1）与同步滚动锁定/解锁。
+- **三套阅读主题（明亮 / 护眼 / 深色）**：
+  - **护眼暖纸**：通过 `mix-blend-mode: multiply` 为 PDF 原页与译文页真实着暖米色，降低长时间阅读刺眼感；
+  - **深色模式**：对 PDF 原页、译文底图与速览缩略图做柔和反色处理，同时保留高饱和四色高亮标注点与定制深色滚动条。
+- **科研排版细节**：支持 `裁剪白边` 联动适宽阅读、`Ctrl+F` 取消式全文搜索、`Ctrl+滚轮` 缩放、跨页/双栏/公式/旋转页连续高亮以及 `forced-colors` 高对比度适配。
 
-当前工作区已实现 T01–T03 基础、纯本地科研阅读器增强，以及 T04–T06 双栏对齐双语翻译能力：
-- **本地文献库管理与工作区交互**：按钮或拖拽 `.pdf` 批量导入（100 MiB 上限，有界 `Uint8Array` 传输并共享主进程 SHA-256 去重与隐藏沙盒校验，前端不接触真实本地路径）、标题/原文件名搜索、内联重命名、确认删除（联动清理 `reader_state`、`translation_cache` 与副本）；顶部支持一键「收起文献库 / 展开文献库」。
-- **1:1 对称双栏阅读与科研阅读体验**：打开文献后默认进入左原文 / 右译文 **1:1 等宽对半对照**视图（支持拖拽中线调整 `25%–75%` 比例、双击恢复 1:1，以及工具栏「双栏对照 / 单栏精读」一键切换）；保留目录书签抽屉（忽略纯外链）、`Ctrl+F` 取消式惰性全文搜索、`Ctrl+滚轮` 缩放与键盘快捷键、`裁剪白边` 联动适合宽度阅读、跨页与公式/旋转页 SVG 连选高亮、`forced-colors` 适配，以及基于 `scroll-sync.ts` / `useDualScrollSync.ts` 的默认锁定、可手动解锁双向同步滑动控制。
-- **原页底图覆写翻译与逐句双向联动（T04–T06）**：参考 `pdf2zh` 原位覆写与 `NeoRead` 双栏句级联动思路，右侧通过原页 `ImageBitmap` 底图完整保留原 PDF 矢量图表、表格与公式块（跳过 `formula` 块），在待译段落坐标框内按边缘采样的原块底色与安全列宽自适配渲染中文译文（防止溢出与跨栏尾片透出英文）；无论点击或拖选左侧原文句子还是右侧译文句段，对侧对应句子均实时同步高亮。翻译通过主进程 `TranslationService` 受控执行 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama）或 **本机 AI CLI**（Codex CLI / Claude CLI / Gemini CLI / 自定义 CLI），API Key 经 `safeStorage` 加密保存于本地 SQLite，译文按 `(document_id, page_number, block_id, target_language)` 持久化缓存，重复打开无需重复请求。
+### 3. 原页底图覆写双语翻译与逐句双向联动
+- **版面保真覆写**：右侧基于原页 `ImageBitmap` 底图完整保留矢量图表、表格与公式块（自动跳过 `formula` 块），按边缘采样的原块底色在安全列宽内原位覆写中文译文；点击或拖选左右任意一侧句子，对侧实时同步高亮。
+- **双引擎与缓存体系**：主进程 `TranslationService` 受控代理 OpenAI 兼容接口或本机 AI CLI，支持单页翻译、单段重译、后台逐页「连续译」及自定义**专业术语表（Glossary）**；译文按 `(document_id, page_number, block_id, target_language)` 持久化缓存于本地 SQLite，避免重复请求。
 
-说明：`v0.1.0` 发布包曾完成 **Windows 宿主机（`89/89` 单测 + `69/69` 打包 `.exe` E2E）**、**Ubuntu 26.04.1 LTS 虚拟机（`88 passed | 1 skipped` 单测 + `69/69` 打包 `./paperflow` E2E + `.deb` 安装实测）**与 **纯净 Windows 11 Build 26300 虚拟机（零预装 VC++/Node，`1024×768` 无裁切首启 + `1920×1080` `69/69` E2E + NSIS 安装实测）**全量验证；本次新增双语翻译与 1:1 双栏能力后的本地实测结论见本轮交付说明，跨平台安装包与云端真密钥联网回归将按需补充。历史发布详情见 [更新日志](CHANGELOG.md)、[产物清单](docs/artifacts.json)、[补充验收记录](docs/verification/summary.md) 与 [实施记录](docs/implementation-notes.md)。
+### 4. 高频科研精读工具链
+- **划句批注、笔记与 AI 伴读**：选中句子即可一键添加黄/绿/蓝/粉四色高亮或附带笔记，右侧悬浮批注抽屉支持按颜色筛选、点击回跳与一键导出 Markdown；配置引擎后可使用「AI 解释 / 解释公式」并将解析一键存为批注。
+- **图表与参考文献速览 + 一键复制**：点击含 `Fig. N` / `Table N` / `[N]` / `(Author, YYYY)` 的句子自动提供速览入口。图表速览以 1.8× 离屏渲染并结合**逐行像素墨迹扫描 + 同栏正文段落硬边界截断**去除白边与邻近正文干扰，画幅优先铺满浮窗；支持**一键复制高清 PNG 图片、复制题注/引用文本**、点击正文或继续滚动自动收起以及「固定」常驻对照。
+- **无书签 PDF 自动章节大纲**：对未内嵌书签的 PDF 自动扫描前 60 页文本与字号层级，自动剔除重复页眉、代码/表格噪点并在 `References` 后截断文献列表；点击任意目录标题即可跳转目标页并在原文/双栏/译文同步高亮定位该标题。
+- **一键复制引用（BibTeX / IEEE / GB/T 7714 / RIS）**：结合 PDF 内嵌元数据、首页字号层级与多出版商（ACM / Springer / IEEE / arXiv / 中文论文）版面结构自动提取标题、作者、年份、期刊/会议与 DOI，支持手工微调并持久化到本地。
+- **快捷键面板**：按 `?` 查看全部快捷键（`T` 切主题、`V` 切视图、`B` 收起文献库、`O` 目录、`A` 批注、`C` 引用、`H` 快速高亮、`Ctrl+F` 搜索、`←/→` 翻页、`Esc` 关闭浮窗）。
 
-## 从源码构建与启动
+### 5. 适配主流文献阅读器的一键备份与恢复（`.zip`）
+在文献库底部点击「一键备份 / 恢复备份」，内置零外部依赖的标准 PKZIP 引擎（UTF-8 文件名、CRC32 校验、Zip-Slip 路径防护与体积/条目上限），将整库打包为单个便携 `.zip` 文件：
 
-要求 Node.js 24+ 与 pnpm 11.25.0；版本由 `package.json` / `pnpm-lock.yaml` 固定。
+| 备份包内路径 | 用途与生态兼容 |
+| --- | --- |
+| `pdfs/*.pdf` | 完整原始 PDF 副本（按标题规范命名，恢复时走 SHA-256 去重与完整性校验） |
+| `library.bib` | 标准 BibTeX（含 `file` 附件路径与 `keywords` 标签），可直接导入 **Zotero / JabRef / Mendeley** |
+| `library.ris` | 标准 RIS 格式（含 `L1` 附件与 `KW` 标签），可直接导入 **EndNote / Zotero / Mendeley** |
+| `notes/*.md` | 各文献高亮与批注 Markdown 笔记，可直接拖入 **Obsidian / Notion / Logseq** |
+| `paperflow-backup.json` | PaperFlow 无损恢复清单（文献元数据、星标/标签、阅读进度、批注及定位框、SQLite 译文缓存与自定义术语表，支持幂等恢复） |
 
-```powershell
+> **安全说明**：便携 `.zip` 备份包刻意**不包含**已加密存储的翻译 API Key，防止分享或跨设备迁移备份时意外泄露个人凭据。
+
+---
+
+## 下载与本地构建
+
+可在 GitHub Releases 获取已发布版本的预构建产物，或按以下方式从源码直接构建最新主分支（所有构建脚本严格保留 `--publish never`，不自动远程发布）。
+
+### 环境要求
+- Node.js `>= 24.0.0`
+- pnpm `11.25.0`（版本由 `package.json` / `pnpm-lock.yaml` 固定）
+
+### 从源码运行
+```bash
 pnpm install --frozen-lockfile
 pnpm fixtures
 pnpm dev
 ```
 
-通过左侧「导入 PDF」或直接将 `.pdf` 文件拖入工作区导入本地文献（单文件上限 100 MiB；源文件保持原样）。图像扫描页会提示暂不支持 OCR。未选择文献时右侧显示「尚未翻译」占位；打开文献后点击右栏顶部的「设置」可配置 OpenAI 兼容 API（如 DeepSeek、本机 Ollama）或本机已安装的 AI CLI（如 `codex`），点击「翻译本页」即可在原位底图上对照阅读中文译文。
-
-## 命令
+### 常用命令
 
 | 命令 | 用途 |
-|---|---|
-| `pnpm dev` | Electron + Vite 开发窗口，React HMR |
-| `pnpm typecheck` | 主进程、Preload、Renderer、脚本与测试严格类型检查 |
-| `pnpm lint` | ESLint |
-| `pnpm test` | Vitest 业务与构建脚本单元测试 |
-| `pnpm test:e2e` | Playwright 实际 Electron 测试，需先 build |
-| `pnpm build` | 生产构建到 `out/`，不依赖开发服务器 |
-| `pnpm dist:win` | Windows x64 NSIS 本地安装包（`--publish never`） |
-| `pnpm pack:win` | Windows 解包程序到 `release/win-unpacked/`（`--publish never`） |
-| `pnpm dist:linux` | Linux x64 便携 `.tar.gz`（支持 Windows 跨平台构建并校验 Electron SHA-256 与 POSIX 权限） |
-| `pnpm dist:linux:deb` | 先构建 `.tar.gz`，再于 Ubuntu/Debian 上使用 `dpkg-deb` 封装 `release/PaperFlow-<version>-linux-x64.deb` |
-| `pnpm fixtures` | 重新生成可再分发的原创测试 PDF |
-| `pnpm rebuild:electron` | 在真实 Electron 中验证 SQLite Node-API 兼容性，需先 build |
+| --- | --- |
+| `pnpm dev` | 启动 Electron + Vite 开发窗口（React HMR） |
+| `pnpm typecheck` | 主进程、Preload、Renderer、脚本与测试严格 TypeScript 校验 |
+| `pnpm lint` | ESLint 静态检查 |
+| `pnpm test` | 运行 Vitest 单元测试 |
+| `pnpm test:e2e` | 运行 Playwright 真实 Electron 桌面端到端测试（需先执行 `pnpm build`） |
+| `pnpm build` | 生产构建到 `out/` |
+| `pnpm dist:win` | 构建 Windows x64 NSIS 安装包 `release/PaperFlow-<version>-win-x64-setup.exe`（`--publish never`） |
+| `pnpm pack:win` | 构建 Windows 解包版 `release/win-unpacked/PaperFlow.exe`（`--publish never`） |
+| `pnpm dist:linux` | 构建 Linux x64 便携 `.tar.gz`（支持跨平台构建并校验 Electron SHA-256 与 POSIX 权限） |
+| `pnpm dist:linux:deb` | 在 Ubuntu/Debian 上封装 `release/PaperFlow-<version>-linux-x64.deb` |
+| `pnpm fixtures` | 重新生成可再分发的原创合成测试 PDF |
+| `pnpm rebuild:electron` | 在真实 Electron 中验证 `better-sqlite3` Node-API 兼容性 |
 
-安装时会下载 Electron 二进制。若直连 GitHub 超时，可自行配置可信的 Electron 镜像，并与 `electron` npm 包中 `checksums.json` 的 SHA-256 校验一致，请勿禁用下载校验。`better-sqlite3` 13 附带 Node-API 10 预编译文件，本项目不调用传统 `electron-rebuild` 编译，避免额外 Python/C++ 工具链依赖；升级后须重新运行原生与打包测试。
+> 说明：`better-sqlite3` 13 附带 Node-API 10 预编译二进制，无需额外安装 Python / C++ 原生编译工具链。Windows 本地打包产物未进行商业代码签名（`NotSigned`），SmartScreen 提示时请核对 SHA-256 后运行；Linux 便携包在限制非特权 user namespace 的系统上需先对 `chrome-sandbox` 执行 `sudo chown root:root` 与 `sudo chmod 4755`。
 
-## 本地数据
+---
 
-默认位于 Electron `app.getPath('userData')`（Windows 通常为 `%APPDATA%/PaperFlow`，Linux 通常为 `~/.config/PaperFlow`）：
-- `paperflow.sqlite`：WAL 模式、外键开启、绑定参数、`user_version=2`（支持 `v1→v2` 非破坏平滑升级），包含 `documents`、`reader_state`、`translation_cache` 与 `app_settings` 四张业务表。
-- `library/<UUID>.pdf`：入库副本。前端不接触绝对路径。
-- `app_settings`：保存翻译引擎配置与经系统安全模块 `safeStorage` 加密后的 API 密钥；Chromium `localStorage` 保存最近选择的文献 ID。不向任何未配置的外部服务遥测或上传文献数据。
+## 本地数据与安全边界
 
-启动可使用 `--user-data-dir=<绝对目录>` 覆盖数据位置。自动化测试使用独立临时目录，不混入真实文献库。页码与缩放倍率防抖写入，并在窗口关闭时刷新；异常断电或强制终止进程不保证最后一次状态落盘。
+### 数据目录
+默认位于 Electron `app.getPath('userData')`（Windows 通常为 `%APPDATA%/PaperFlow`，Linux 通常为 `~/.config/PaperFlow`），亦可通过启动参数 `--user-data-dir=<绝对路径>` 指定独立便携目录：
+- `paperflow.sqlite`：WAL 模式、外键开启、`user_version = 4`（支持 `v1→v4` 非破坏平滑迁移），包含 `documents`、`reader_state`、`translation_cache`、`app_settings`、`annotations` 五张表。
+- `library/<UUID>.pdf`：本地文献副本，渲染层不接触绝对路径。
 
-## 安全与测试边界
+### 安全隔离约定
+- 强制启用 `sandbox: true`、`contextIsolation: true`、`webSecurity: true`，禁用 `nodeIntegration`、外部页面导航、弹窗与渲染层权限请求；
+- Preload 仅暴露 30 个冻结的 `window.paperflow` 业务方法；主进程 IPC 逐一校验窗口来源、主 frame、精确协议 URL（`app://bundle`）与 Zod 入参（含剪贴板、URL 协议与 CLI 参数元字符拦截）；
+- PDF 解析与渲染使用本地打包的 PDF.js Worker、CMaps 与 WASM，不加载任何外部 CDN，不执行 PDF 外部链接或表单脚本；外部翻译 API 与本机 CLI 仅在主进程 `TranslationService` 内受控执行。
 
-强制启用 `sandbox` / `contextIsolation` / `webSecurity`，禁用 Node integration、页面导航、弹窗和权限请求。Preload 仅暴露十六个 `window.paperflow` 业务方法；IPC 核验窗口、主 frame、精确 URL 与 Zod 参数（含 `http:`/`https:` 与 CLI 元字符拦截）。生产资源由白名单 `app://bundle` 协议提供服务。PDF 解析和阅读使用本地 Worker，不加载 CDN，渲染层保持零外网直连权限，不执行 PDF 链接、外部目录 URL、表单脚本或注释动作；OpenAI 兼容接口请求与本机 AI CLI 子进程调用均限定在主进程 `TranslationService` 内受控执行。
+---
 
-测试素材说明见 [tests/fixtures/README.md](tests/fixtures/README.md)。新增的加密、600 页、旋转与 DPI、阅读器 UX、选区边界以及含矢量柱状图/表格的学术双栏素材均为原创合成测试数据（生成器见 `scripts/verification/`）。Playwright 导入测试替换系统文件框返回值，拖拽导入测试在渲染层构造 `File`/`DataTransfer`，其后的字节校验、解析、文件复制、数据库与阅读渲染均真实运行；OpenAI 兼容 API 与 CLI 端到端测试在本机使用受控 `127.0.0.1` 模拟服务端与本地 Node CLI 桩验证完整 IPC、加密存密、原位覆写与 SQLite 缓存恢复路径。实际执行结果、失败修复与尚未验证边界见 [实施记录](docs/implementation-notes.md)、[补充验收记录](docs/verification/summary.md) 与 [交付报告](docs/delivery-report.md)。长期模块协作入口见 [项目管理](项目管理/README.md)。
+## 测试与验证边界
+
+- **测试素材**：仓库内所有测试 PDF（见 [tests/fixtures/README.md](tests/fixtures/README.md)）均为原创合成测试数据，不复制任何受版权保护的真实论文。
+- **当前主分支实测记录**：
+  - `pnpm typecheck`（0 错误）、`pnpm lint --max-warnings=0`（0 警告）；
+  - Vitest 单元测试：**16 个测试文件 / 136 项测试全部通过**（涵盖数据库迁移与健壮性、版面分析与双向对齐、翻译服务与密钥保护、紧致图表裁剪、无噪点自动大纲、多出版商引用提取与 ZIP 备份恢复）；
+  - Playwright 真实 Electron 端到端测试：开发态 **11 / 11 通过**，打包成品 `PaperFlow.exe` 核心回归（含系统剪贴板 PNG/文本写入、Windows `Expand-Archive` 备份解压互通与双实例跨空库还原）**3 / 3 通过**，E2E 全局清理后 `%TEMP%\paperflow-*` 残留为 0。
+- **模拟与未覆盖说明**：E2E 中系统原生打开/保存文件对话框通过 `dialog.showOpenDialog` / `showSaveDialog` 指定路径，双语翻译 E2E 通过本机 `127.0.0.1` 模拟 OpenAI 兼容服务端与本地 Node CLI 桩验证；真实公网第三方 API 稳定性、跨 Linux/macOS 新版打包验证视具体环境另行补充。
+
+---
 
 ## 目录导航
 
-| 文件或目录 | 内容 |
+| 路径 | 说明 |
 | --- | --- |
-| [src/](src/) | Electron 主进程 `main/`（含 `translation-service.ts`）、预加载 `preload/`、React 界面 `renderer/` 和跨进程类型 `shared/` |
-| [tests/](tests/) · [scripts/](scripts/) | 单元测试、桌面端到端测试、合成 PDF 素材、预览截取与多平台打包脚本 |
-| [build/](build/) · [resources/](resources/) | 打包图标、第三方许可原文和版权声明 |
-| [docs/](docs/) · [docs/verification/](docs/verification/) | 架构、实施记录、交付说明、产物清单、验证报告与界面预览截图 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志、发布产物与实测边界记录 |
-| `release/` | 本地打包与解包输出目录（被 Git 忽略） |
-| [项目管理/](项目管理/) · `项目管理/状态/` | 多会话分工约定（`状态/` 保存本机会话登记、冻结基线与交接，被 Git 忽略） |
-| `node_modules/` · `out/` | 依赖与本地构建输出 |
-| `.cache/` · `test-results/` | 本机验证日志与 Playwright 临时输出 |
+| [src/main/](src/main/) | Electron 主进程入口、协议与安全策略、IPC 注册、SQLite 数据库、文献管理、双引擎翻译与 ZIP 备份服务 |
+| [src/preload/](src/preload/) | 最小受控 `window.paperflow` 桥接层 |
+| [src/renderer/](src/renderer/) | React 阅读器界面（文献库、PDF 渲染与版面分析、双栏译文对照、批注/速览/引用/快捷键模块、三套主题） |
+| [src/shared/](src/shared/) | 跨进程契约、Zod 校验 Schema 与共享引用格式化模块 |
+| [tests/](tests/) · [scripts/](scripts/) | 单元测试、Electron E2E 测试、合成 PDF 生成器与多平台打包脚本 |
+| [docs/](docs/) | 架构设计、历史发布验证记录与预览截图 |
+| [CHANGELOG.md](CHANGELOG.md) | 历史版本更新日志 |
 
-## 开发结构与后续接口
-
-见 [架构说明](docs/architecture.md)。主流程已打通 `PdfPageData`（原始文字、TextLayer、Canvas、viewport）、`PdfViewerProps.onPageData` / `onPageBackdrop` / `onSourceSentenceInteract`、`layout-analysis.ts` 多栏阅读序重构与底色采样、`TranslationPanel`（PDF2ZH 原页底图覆写 + `sentence-alignment.ts` 句级双向联动 + `useDualScrollSync` 同步锁定）及主进程 `TranslationService`；`margin-crop.ts` 负责阅读白边裁剪联动，扫描页 OCR、Python 翻译运行时与自动远程发布仍保持禁用。
+---
 
 ## 许可证
 
-自有代码采用 [AGPL-3.0-only](LICENSE)。上游版权及许可见 [第三方清单](docs/third-party-licenses.md)、`resources/THIRD-PARTY-NOTICES.txt` 和 `resources/licenses/`。PDF.js 附带字体、ICC、WASM 遵循各自独立许可条款。
-
-`v0.1.0` Release 已随 Liberation Sans 1.07.4 对应源码包发布于 GitHub Releases；本地构建脚本始终保留 `--publish never` 不自动发布，且 Windows 产物保持 `NotSigned` 未商业代码签名。
+自有代码采用 [AGPL-3.0-only](LICENSE) 开源许可。第三方依赖与随包资源版权及许可见 [docs/third-party-licenses.md](docs/third-party-licenses.md)、`resources/THIRD-PARTY-NOTICES.txt` 与 `resources/licenses/`。

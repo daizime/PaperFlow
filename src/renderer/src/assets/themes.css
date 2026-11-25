@@ -1,0 +1,444 @@
+/* 护眼暖纸与深色阅读主题样式（通过 html[data-theme="sepia" | "dark"] 切换） */
+
+/* ========== 护眼暖纸 (sepia) ========== */
+html[data-theme="sepia"] body {
+  background: #f2ead8;
+  color: #3d3324;
+}
+
+html[data-theme="sepia"] .app-header,
+html[data-theme="sepia"] .workspace-topbar {
+  background: #f7f1e3;
+  border-color: #dfd3ba;
+  color: #5b4d38;
+}
+
+html[data-theme="sepia"] .local-badge {
+  background: #ebe2ce;
+  color: #6b5b44;
+}
+
+html[data-theme="sepia"] .library-panel {
+  background: #f4ecdb;
+  border-color: #dfd3ba;
+}
+
+html[data-theme="sepia"] .reader-panel,
+html[data-theme="sepia"] .reader-viewport,
+html[data-theme="sepia"] .pdf-scroll,
+html[data-theme="sepia"] .reader-pill-dock,
+html[data-theme="sepia"] .translation-scroll,
+html[data-theme="sepia"] .translation-bottom-dock {
+  background: #e6dcc6;
+}
+
+html[data-theme="sepia"] .translation-panel,
+html[data-theme="sepia"] .translation-header-spacer,
+html[data-theme="sepia"] .reader-floating-pill,
+html[data-theme="sepia"] .study-companion-bar,
+html[data-theme="sepia"] .study-explain-card,
+html[data-theme="sepia"] .study-peek-card,
+html[data-theme="sepia"] .study-drawer,
+html[data-theme="sepia"] .translation-modal,
+html[data-theme="sepia"] .document-hover-actions,
+html[data-theme="sepia"] .library-backup-bar {
+  background: #faf5e8;
+  border-color: #d8cba8;
+  color: #3d3324;
+}
+
+html[data-theme="sepia"] .study-peek-card__preview {
+  background: #f5ebd6;
+}
+
+html[data-theme="sepia"] .study-peek-card--visual .study-peek-card__header,
+html[data-theme="sepia"] .study-peek-card__caption-strip {
+  background: #f7f1e3;
+  border-color: #d8cba8;
+  color: #4a3f2d;
+}
+
+/* 护眼暖纸模式：用正片叠底（multiply）给白纸与译文页面真实着暖米色，同时保持文字与图表清晰锐利 */
+html[data-theme="sepia"] .pdf-page,
+html[data-theme="sepia"] .translation-page {
+  background: #f3e7ce;
+}
+
+html[data-theme="sepia"] .pdf-page::after,
+html[data-theme="sepia"] .translation-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #f3e7ce;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* ========== 深色主题 (dark) ========== */
+html[data-theme="dark"] body,
+html[data-theme="dark"] .app-shell {
+  background: #14171d;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .app-header,
+html[data-theme="dark"] .workspace-topbar,
+html[data-theme="dark"] .library-panel,
+html[data-theme="dark"] .reader-outline,
+html[data-theme="dark"] .reader-search-bar {
+  background: #1b2029;
+  border-color: #2c3442;
+  color: #cdd7e6;
+}
+
+html[data-theme="dark"] .app-header strong,
+html[data-theme="dark"] .workspace-topbar .reader-document-title,
+html[data-theme="dark"] .library-panel h2,
+html[data-theme="dark"] .study-drawer__header h3,
+html[data-theme="dark"] .study-explain-card__header strong,
+html[data-theme="dark"] .study-peek-card__header strong {
+  color: #edf2fb;
+}
+
+html[data-theme="dark"] .local-badge,
+html[data-theme="dark"] .library-panel .library-heading > span {
+  background: #252c38;
+  color: #9ba8be;
+}
+
+html[data-theme="dark"] .reader-panel,
+html[data-theme="dark"] .reader-viewport,
+html[data-theme="dark"] .pdf-scroll,
+html[data-theme="dark"] .reader-pill-dock,
+html[data-theme="dark"] .translation-scroll,
+html[data-theme="dark"] .translation-bottom-dock {
+  background: #111419;
+}
+
+html[data-theme="dark"] .translation-panel,
+html[data-theme="dark"] .translation-header-spacer,
+html[data-theme="dark"] .study-drawer,
+html[data-theme="dark"] .translation-modal,
+html[data-theme="dark"] .reader-placeholder {
+  background: #181d25;
+  border-color: #2c3442;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .reader-placeholder h1 {
+  color: #eef3fb;
+}
+
+html[data-theme="dark"] .reader-placeholder p,
+html[data-theme="dark"] .muted,
+html[data-theme="dark"] .translation-structure-meta,
+html[data-theme="dark"] .library-panel .document-description small,
+html[data-theme="dark"] .library-panel .document-description time {
+  color: #93a1b8;
+}
+
+html[data-theme="sepia"] {
+  color-scheme: light;
+}
+
+html[data-theme="sepia"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html[data-theme="sepia"] ::-webkit-scrollbar-track,
+html[data-theme="sepia"] ::-webkit-scrollbar-corner {
+  background: #e4d9c0;
+}
+
+html[data-theme="sepia"] ::-webkit-scrollbar-thumb {
+  background: #bfb08f;
+  border-radius: 999px;
+  border: 2px solid #e4d9c0;
+}
+
+html[data-theme="sepia"] ::-webkit-scrollbar-thumb:hover {
+  background: #a59472;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-track,
+html[data-theme="dark"] ::-webkit-scrollbar-corner {
+  background: #141820;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #354154;
+  border-radius: 999px;
+  border: 2px solid #141820;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #4e607c;
+}
+
+html[data-theme="dark"] button:not(.study-color-dot) {
+  background: #232a36;
+  border-color: #354052;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] button:not(.study-color-dot):hover:enabled {
+  background: #2d3748;
+  border-color: #536fa3;
+}
+
+html[data-theme="dark"] button.is-active,
+html[data-theme="dark"] .reader-toolbar button.is-active,
+html[data-theme="dark"] .translation-sync-toggle.is-locked,
+html[data-theme="dark"] .study-citation-tabs button.is-active {
+  background: #223456;
+  border-color: #4f77c4;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] .library-panel > .library-import-button,
+html[data-theme="dark"] .translation-header__btn--primary,
+html[data-theme="dark"] .study-companion-btn--primary,
+html[data-theme="dark"] .document-action-primary,
+html[data-theme="dark"] .translation-modal__primary {
+  background: #3864b5;
+  border-color: #4f7fd6;
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .library-panel > .library-import-button:hover:enabled,
+html[data-theme="dark"] .translation-header__btn--primary:hover:enabled,
+html[data-theme="dark"] .study-companion-btn--primary:hover:enabled,
+html[data-theme="dark"] .document-action-primary:hover:enabled,
+html[data-theme="dark"] .translation-modal__primary:hover:enabled {
+  background: #2f569e;
+  border-color: #6591e0;
+}
+
+html[data-theme="dark"] .study-companion-btn--peek {
+  background: #1e3828;
+  border-color: #3b7650;
+  color: #9be5b4;
+}
+
+html[data-theme="dark"] .study-companion-btn--peek:hover:enabled {
+  background: #264833;
+  border-color: #4b9464;
+}
+
+html[data-theme="dark"] .translation-header__btn--danger,
+html[data-theme="dark"] .document-action-danger,
+html[data-theme="dark"] .study-btn-danger {
+  background: #532622;
+  border-color: #93463e;
+  color: #f8b4ad;
+}
+
+html[data-theme="dark"] .study-color-dot {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
+html[data-theme="dark"] .study-color-dot--yellow {
+  background: #fde047;
+}
+
+html[data-theme="dark"] .study-color-dot--green {
+  background: #86efac;
+}
+
+html[data-theme="dark"] .study-color-dot--blue {
+  background: #93c5fd;
+}
+
+html[data-theme="dark"] .study-color-dot--pink {
+  background: #f9a8d4;
+}
+
+html[data-theme="dark"] .study-color-dot.is-selected {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.45);
+}
+
+html[data-theme="dark"] .pdf-annotation-highlight--yellow {
+  fill: rgba(250, 204, 21, 0.42);
+  stroke: rgba(250, 204, 21, 0.78);
+}
+
+html[data-theme="dark"] .pdf-annotation-highlight--green {
+  fill: rgba(74, 222, 128, 0.36);
+  stroke: rgba(74, 222, 128, 0.75);
+}
+
+html[data-theme="dark"] .pdf-annotation-highlight--blue {
+  fill: rgba(96, 165, 250, 0.38);
+  stroke: rgba(96, 165, 250, 0.78);
+}
+
+html[data-theme="dark"] .pdf-annotation-highlight--pink {
+  fill: rgba(244, 114, 182, 0.38);
+  stroke: rgba(244, 114, 182, 0.78);
+}
+
+html[data-theme="dark"] .workspace-topbar .reader-toolbar__import {
+  background: #20314f;
+  border-color: #4468aa;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .library-panel .library-search-field {
+  background: #141921;
+  border-color: #333e50;
+  color: #e4eaf5;
+}
+
+html[data-theme="dark"] .document-item {
+  background: transparent;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .document-item.selected {
+  background: #21304b;
+  border-color: #43649e;
+}
+
+html[data-theme="dark"] .pdf-badge {
+  background: #273754;
+  color: #9ec0ff;
+}
+
+html[data-theme="dark"] .reader-floating-pill,
+html[data-theme="dark"] .study-companion-bar,
+html[data-theme="dark"] .study-explain-card,
+html[data-theme="dark"] .study-peek-card,
+html[data-theme="dark"] .document-hover-actions {
+  background: rgba(27, 32, 42, 0.95);
+  border-color: #384457;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .study-annotation-card,
+html[data-theme="dark"] .study-explain-card__quote,
+html[data-theme="dark"] .study-peek-card__excerpt,
+html[data-theme="dark"] .study-peek-card__caption-strip,
+html[data-theme="dark"] .study-shortcuts-row,
+html[data-theme="dark"] .study-citation-preview,
+html[data-theme="dark"] .library-backup-bar {
+  background: #202733;
+  border-color: #323c4d;
+  color: #cfd8e8;
+}
+
+html[data-theme="dark"] .study-peek-card--visual .study-peek-card__header {
+  border-color: #2c3442;
+}
+
+html[data-theme="dark"] .translation-modal__header,
+html[data-theme="dark"] .translation-modal__footer {
+  border-color: #2c3442;
+  background: #1b2029;
+}
+
+html[data-theme="dark"] .translation-modal__header h3,
+html[data-theme="dark"] .translation-modal__label,
+html[data-theme="dark"] .study-shortcuts-group h4 {
+  color: #e4eaf5;
+}
+
+html[data-theme="dark"] .study-shortcuts-keys kbd {
+  background: #181d25;
+  border-color: #3a475c;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .study-peek-card__preview {
+  background: #14171d;
+  border-color: #323c4d;
+}
+
+html[data-theme="dark"] .study-peek-card__image {
+  filter: invert(0.88) hue-rotate(180deg) contrast(0.95);
+}
+
+html[data-theme="dark"] .reader-outline__badge {
+  background: #223456;
+  border-color: #4f77c4;
+  color: #b7d0ff;
+}
+
+/* PDF 原页与译文底图在深色模式下做柔和反转色，避免白纸刺眼同时保留图表色相 */
+html[data-theme="dark"] .pdf-page canvas,
+html[data-theme="dark"] .translation-page-bg {
+  filter: invert(0.88) hue-rotate(180deg) contrast(0.95);
+}
+
+html[data-theme="dark"] .translation-overlay-mask {
+  background-color: #1c212b !important;
+}
+
+html[data-theme="dark"] .translation-overlay-block.is-translated {
+  color: #e3e9f4;
+}
+
+/* 主题与视图分段切换胶囊 */
+.theme-switcher,
+.view-mode-switcher {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid #d7deea;
+  background: #f3f6fa;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+html[data-theme="sepia"] .theme-switcher,
+html[data-theme="sepia"] .view-mode-switcher {
+  background: #ece3cf;
+  border-color: #d6c8ab;
+}
+
+html[data-theme="dark"] .theme-switcher,
+html[data-theme="dark"] .view-mode-switcher {
+  background: #141921;
+  border-color: #313b4c;
+}
+
+.theme-switcher button,
+.view-mode-switcher button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+}
+
+.theme-switcher button.is-selected,
+.view-mode-switcher button.is-selected {
+  background: #ffffff;
+  border-color: #c8d4e8;
+  color: #2c529a;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .theme-switcher button.is-selected,
+html[data-theme="dark"] .view-mode-switcher button.is-selected {
+  background: #2a3548;
+  border-color: #4f77c4;
+  color: #c8dcff;
+}

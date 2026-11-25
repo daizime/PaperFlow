@@ -128,7 +128,7 @@ describe('文献库持久化与原子导入', () => {
 })
 
 describe('数据库、进度和参数边界', () => {
-  it('首次初始化与重复启动只创建两个业务表，版本为 1', async () => {
+  it('首次初始化与重复启动只创建核心业务表，版本为 4', async () => {
     database.close()
     database = new LibraryDatabase(filename)
     database.close()
@@ -137,9 +137,15 @@ describe('数据库、进度和参数边界', () => {
     const { default: Database } = await import('better-sqlite3')
     const inspection = new Database(filename, { readonly: true })
     try {
-      expect(inspection.pragma('user_version', { simple: true })).toBe(1)
+      expect(inspection.pragma('user_version', { simple: true })).toBe(4)
       expect(inspection.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all())
-        .toEqual([{ name: 'documents' }, { name: 'reader_state' }])
+        .toEqual([
+          { name: 'annotations' },
+          { name: 'app_settings' },
+          { name: 'documents' },
+          { name: 'reader_state' },
+          { name: 'translation_cache' }
+        ])
     } finally { inspection.close() }
   })
   it('阅读页码、倍率可存取并在数据库关闭后恢复', async () => {
@@ -170,7 +176,8 @@ describe('数据库、进度和参数边界', () => {
   it('所有值使用参数绑定，标题中的 SQL 字符串保持普通文本', () => {
     const record: StoredDocumentRecord = {
       id: randomUUID(), sha256: createHash('sha256').update('unique').digest('hex'), originalFilename: "a'; DROP TABLE documents;--.pdf",
-      displayTitle: "a'; DROP TABLE documents;--", storedFilename: '', byteSize: 8, pageCount: null, importedAt: new Date().toISOString()
+      displayTitle: "a'; DROP TABLE documents;--", storedFilename: '', byteSize: 8, pageCount: null, importedAt: new Date().toISOString(),
+      starred: false, tags: []
     }
     record.storedFilename = `${record.id}.pdf`
     database.insertDocument(record)

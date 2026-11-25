@@ -1,43 +1,46 @@
 # PaperFlow 架构说明
 
-本说明对应当前 PaperFlow 源码（T01–T03 基础及纯本地科研阅读器增强，更新日期 2026-11-22）；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
+本说明对应当前 PaperFlow 源码（T01–T03 基础、纯本地科研阅读器增强，以及 2026-11-24 授权放开的 T04–T06 受控双语翻译与 1:1 对称双栏阅读阶段，更新日期 2026-11-24）；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
 
 ## 进程与模块
 
-项目保持 electron-vite 的主进程、Preload、Renderer 三层入口。导入时另建一个隐藏、独立沙盒的校验窗口；PDF 解析不在拥有文件系统权限的主进程中执行。
+项目保持 electron-vite 的主进程、Preload、Renderer 三层入口。导入时另建一个隐藏、独立沙盒的校验窗口；PDF 解析不在拥有文件系统权限的主进程中执行；外部 AI 翻译（OpenAI 兼容 HTTP API 或本机 AI CLI）仅通过主进程 `TranslationService` 受控代理执行，渲染层保持零外网直连权限。
 
 ```mermaid
 flowchart LR
-  UI[React 文献库与阅读 UI] --> API[window.paperflow 九个业务 API]
+  UI[React 文献库 / 阅读 / 译文 UI] --> API[window.paperflow 十六个业务 API]
   API --> IPC[主进程：来源检查 + Zod]
   IPC --> DOC[DocumentService：有界快照/字节导入/哈希/复制/删除/清理]
-  IPC --> DB[LibraryDatabase：参数绑定 SQLite]
+  IPC --> TRN[TranslationService：safeStorage 密钥加密 + API/CLI 代理]
+  IPC --> DB[LibraryDatabase：参数绑定 SQLite v2]
   DOC --> VALID[隐藏沙盒校验窗口]
   VALID --> VW[本地 PDF.js Worker：逐页操作列表校验]
-  UI --> READER[PdfViewer：目录/检索/白边裁剪/导航/缩放/进度]
+  TRN --> EXT[OpenAI 兼容 API / 本机 AI CLI]
+  UI --> READER[PdfViewer：目录/检索/白边裁剪/导航/缩放/进度/原页快照]
   READER --> PAGE[PdfPage：Canvas + TextLayer + 选区与检索高亮]
   READER --> RW[本地 PDF.js Worker]
 ```
 
 | 目录/文件 | 责任 |
 | --- | --- |
-| `src/main/index.ts` | 应用启动、`userData` 路径、启动孤立副本回收（`cleanupOrphanFiles`）、服务装配与关闭 |
+| `src/main/index.ts` | 应用启动、`userData` 路径、启动孤立副本回收（`cleanupOrphanFiles`）、`TranslationService` 与 `LibraryDatabase` 装配、退出前任务取消与关闭 |
 | `src/main/window.ts` | 1440×900 主窗口、最小尺寸、安全策略、关闭前进度刷新 |
 | `src/main/services/app-protocol.ts` | 注册 `app://`、构建资源清单与 CSP |
-| `src/main/ipc/index.ts` | 九个业务 handler；校验受信窗口、`mainFrame`、精确 URL、参数 |
+| `src/main/ipc/index.ts` | 十六个业务 handler；校验受信窗口、`mainFrame`、精确 URL、参数与 `safeStorage` 装配 |
 | `src/main/services/document-service.ts` | 文件快照/字节导入、扩展名/头/大小检查、SHA-256、去重、临时文件、库副本、级联删除与孤立文件清理 |
-| `src/main/services/database.ts` | 业务表、迁移、重命名/删除持久化与参数绑定 SQL |
+| `src/main/services/translation-service.ts` | OpenAI 兼容 HTTP 翻译（`fetch`）与本机 AI CLI 解析执行（Codex / Claude / Gemini / 自定义 CLI），结合 Electron `safeStorage` 加密存密与 SQLite 块级缓存 |
+| `src/main/services/database.ts` | `user_version = 2` 四张业务表（含 v1→v2 非破坏升级）、设置与译文缓存持久化、级联删除与参数绑定 SQL |
 | `src/main/services/pdf-validation.ts` | 隐藏校验窗口、20 秒超时、专用返回信道与资源销毁 |
-| `src/preload/index.ts` | 仅暴露 `window.paperflow`，没有原始 IPC、路径或 Node API |
+| `src/preload/index.ts` | 仅暴露十六个 `window.paperflow` 业务方法，没有原始 IPC、路径、密钥读取或 Node API |
 | `src/preload/validation.ts` | 校验窗口专用一次性字节接收与结果报告，不暴露业务 API |
 | `src/renderer/validation.ts` | 调用 PDF.js，逐页获取操作列表，报告页数/友好错误 |
-| `src/renderer/src/App.tsx` | 三栏布局与 `.workspace` 文件拖拽拦截/释放导入覆盖层 |
+| `src/renderer/src/App.tsx` | 可折叠文献库侧边栏、打开文献默认 1:1 等宽双栏 / 单栏切换、双栏拖曳分屏、译文缓存预加载与多页状态协调、`.workspace` 文件拖拽导入 |
 | `src/renderer/src/features/library/` | 文献列表、导入/拖拽批量反馈、搜索过滤、内联重命名、确认删除与最近选择 |
-| `src/renderer/src/features/reader/` | PDF 生命周期、真实 Canvas/TextLayer、目录抽屉、惰性全文搜索、`Ctrl+滚轮`/快捷键、白边裁剪、跨页/旋转连选 SVG 与 `forced-colors` 适配 |
-| `src/renderer/src/features/translation/` | 独立滚动的“尚未翻译”容器 |
-| `src/shared/` | 业务契约（含共享字节格式化与控制字符检查）与 Zod 输入模型 |
+| `src/renderer/src/features/reader/` | PDF 生命周期、Canvas/TextLayer 与 `ImageBitmap` 底图快照回传、目录抽屉、惰性全文搜索、`Ctrl+滚轮`/快捷键、白边裁剪、多栏版面分析与底色采样、跨页/旋转连选 SVG 与 `forced-colors` 适配 |
+| `src/renderer/src/features/translation/` | 空态保留「尚未翻译」占位；打开文献后在右栏渲染原页底图 Canvas + 原位自适应覆写中文译文层（`OverlayPageContent`，保留矢量图表与公式）、未译/公式句级镜像热区、自然句双向对齐联动（`sentence-alignment.ts`）、翻译引擎设置弹窗（`TranslationSettingsModal`）与双向同步滑动控件（`scroll-sync.ts`、`useDualScrollSync.ts`） |
+| `src/shared/` | 业务契约（16 个 API、共享字节格式化与控制字符检查）与 Zod 输入模型（含 HTTP(S) URL 与安全 CLI token 校验） |
 
-不引入全局大型状态框架；React 状态按文献库、文档、单页分开。当前无翻译、OCR、账户、网络同步或外部论文服务。
+不引入全局大型状态框架；React 状态按文献库、文档、单页与翻译设置分开。仍不引入 OCR、Python 翻译运行时或自动远程发布。
 
 ## 安全边界
 
@@ -45,15 +48,15 @@ flowchart LR
 
 生产入口为 `app://bundle/index.html`，校验器为 `app://bundle/validation.html`。协议在 ready 前注册为 standard/secure，支持本地 fetch，不设置 `bypassCSP`。handler 只服务启动时枚举的构建资源，校验 host、方法、路径和查询串；文献库与任意磁盘文件不在资源清单中。开发入口只接受固定 `http://127.0.0.1:5173`，生产忽略开发服务器环境变量。
 
-网络请求按来源白名单拦截，生产仅允许应用资源与内部 data/blob/devtools 用途；开发另允许固定 Vite HTTP/WebSocket。CSP 默认拒绝，脚本与 Worker 限同源；PDF 字体需要本地 blob/data，PDF.js 的位置样式需要行内 style，WASM 解码使用 `wasm-unsafe-eval`。不启用普通 JavaScript `unsafe-eval`。页面导航、子 frame 导航、弹窗、webview 与系统权限请求均拒绝。PDF 只渲染页面与文字，不建立链接/脚本执行层，不调用 `shell.openExternal`。
+网络请求按来源白名单拦截：渲染层在生产环境仅允许应用资源与内部 data/blob/devtools 用途（开发另允许固定 Vite HTTP/WebSocket），**保持无外部翻译 API 直连权限**。CSP 默认拒绝，脚本与 Worker 限同源；PDF 字体需要本地 blob/data，PDF.js 的位置样式需要行内 style，WASM 解码使用 `wasm-unsafe-eval`。不启用普通 JavaScript `unsafe-eval`。页面导航、子 frame 导航、弹窗、webview 与系统权限请求均拒绝。PDF 只渲染页面与文字，不建立链接/脚本执行层，不调用 `shell.openExternal`。
 
-业务 handler 每次校验调用者 `webContents` 身份、`senderFrame === mainFrame` 和精确受信 URL，而非 URL 前缀。参数由 Zod 校验；renderer 无法指定本地路径、任意 IPC channel 或系统命令。专用校验结果 handler 只接受对应隐藏窗口与精确校验 URL，随后校验返回结构。
+业务 handler 每次校验调用者 `webContents` 身份、`senderFrame === mainFrame` 和精确受信 URL，而非 URL 前缀。参数由 Zod 校验；renderer 无法指定本地路径、任意 IPC channel 或任意系统 Shell 命令。**OpenAI 兼容 HTTP 翻译（限定 `http:`/`https:` URL）与本机 AI CLI 进程唤醒均由主进程 `TranslationService` 受控执行**：CLI 命令须通过纯文件系统 `PATH` 解析（`resolveCliExecutable`）并结合 Zod 严格拦截 Shell 注入元字符（`[&|<>^%!\r\n\`$;]`），提示词通过 `stdin` 管道传入空隔离临时目录并在超时/取消时终止进程树；OpenAI 密钥在主进程侧通过 Electron `safeStorage` 加密存于 SQLite `app_settings`，永不将明文密钥传回渲染层（仅返回脱敏摘要 `apiKeyPreview`）。专用校验结果 handler 只接受对应隐藏窗口与精确校验 URL，随后校验返回结构。
 
 这些措施缩小权限边界，不意味着对所有恶意 PDF、Chromium 漏洞或资源耗尽已作形式化安全证明。依赖升级仍需重新测试。
 
 ## IPC 业务契约
 
-`src/shared/contracts.ts` 的 `PaperFlowAPI` 通过 `contextBridge` 暴露。PDF 字节是 `Uint8Array`，界面不会获得文献绝对路径或内部文件名。
+`src/shared/contracts.ts` 的 `PaperFlowAPI` 通过 `contextBridge` 暴露十六个业务方法。PDF 字节是 `Uint8Array`，界面不会获得文献绝对路径、内部文件名或原始 API 密钥。
 
 | API | channel | 校验与行为 |
 | --- | --- | --- |
@@ -63,9 +66,16 @@ flowchart LR
 | `readPdfBytes(documentId)` | `document:read` | UUID；只读已入库文献，验证库副本和哈希 |
 | `updatePageCount(documentId, pageCount)` | `document:page-count` | UUID、1–1,000,000 的整数；更新页数并约束已有进度 |
 | `renameDocument(documentId, displayTitle)` | `document:rename` | UUID 与 1–200 字符去首尾空白且不含控制字符（`0x00–0x1F` / `0x7F`）的显示标题；返回更新后的公开记录 |
-| `deleteDocument(documentId)` | `document:delete` | UUID；删除 SQLite 记录（外键 `ON DELETE CASCADE` 联动清除 `reader_state`），并校验 `storedFilename === <id>.pdf`、非符号链接与 `realpath` 在 `library/` 内后移除副本 |
+| `deleteDocument(documentId)` | `document:delete` | UUID；删除 SQLite 记录（外键 `ON DELETE CASCADE` 联动清除 `reader_state` 与 `translation_cache` 并中止该文献在途翻译任务），并校验 `storedFilename === <id>.pdf`、非符号链接与 `realpath` 在 `library/` 内后移除副本 |
 | `getReaderState(documentId)` | `reader:get` | UUID 且文献存在；返回状态或 null |
 | `saveReaderState(state)` | `reader:save` | 严格对象；UUID、有效页码、0.5–3 的有限倍率、ISO 时间；数据库使用主进程时间 |
+| `getTranslationSettings()` | `translation:get-settings` | 无参数；返回当前供应商类型、目标语言、Base URL/模型、`hasApiKey`/`apiKeyPreview`（永不返回明文密钥）与 CLI 配置 |
+| `saveTranslationSettings(input)` | `translation:save-settings` | 严格 Zod 校验：`http:`/`https:` Base URL、禁止元字符的 CLI 命令与参数元组、`timeoutSec`（10–300）；新 API Key 经 `safeStorage` 加密落盘，传空字符串时清除密钥 |
+| `testTranslationConnection()` | `translation:test` | 无参数；按已保存配置向 OpenAI 兼容端点发送最小测试消息或探活本机 CLI 可执行路径，返回耗时、样本输出或错误与解析路径 |
+| `getPageTranslations(documentId, pageNumber)` | `translation:get-page` | UUID 与有效页码；按当前目标语言返回该页已缓存的 `TranslatedBlockRecord[]` |
+| `translatePage(input)` | `translation:translate-page` | UUID、页码、待译文本块列表（`blockId`/`kind`/`sourceText`/`sourceHash`）与可选 `force`；优先命中 `translation_cache`，按字符/块数分批调用翻译引擎、失败回退单块并持久化缓存 |
+| `cancelTranslation(documentId?)` | `translation:cancel` | 可选 UUID；中止全部或指定文献的在途 `AbortController` 请求与 CLI 子进程树 |
+| `clearDocumentTranslations(documentId)` | `translation:clear-document` | UUID；清空指定文献的全部本地 SQLite 译文缓存记录 |
 
 `DocumentRecord` 只含 ID、原文件名、显示标题、字节数、页数与导入时间。所有 SQL 值使用位置或命名参数绑定；建表迁移 SQL 是应用内固定文本。
 
@@ -83,12 +93,14 @@ userData/
 
 主进程支持绝对路径的 `--user-data-dir` 启动参数，供隔离测试或本机自选数据目录使用；renderer 不提供路径配置接口。数据库不写入安装目录。
 
-`PRAGMA user_version = 1` 管理首次建表事务；重复启动复用版本，拒绝未来未知版本。启用外键、WAL、5 秒 busy timeout。必须使用的业务表只有两张：
+`PRAGMA user_version = 2` 管理建表与非破坏升级事务（支持从 `v0` 全新初始化以及从 `v1` 平滑升级并保留已有文献与阅读进度；拒绝未来未知版本）。启用外键、WAL、5 秒 busy timeout。核心业务表共四张：
 
 | 表 | 字段与约束 |
 | --- | --- |
 | `documents` | UUID `id` 主键；唯一 `sha256`、唯一 `stored_filename`；`original_filename`、`display_title`、`byte_size`、可空 `page_count`、`imported_at` |
-| `reader_state` | `document_id` 主键并外键关联文献；从 1 开始的 `page_number`；0.5–3 的 `scale`；`updated_at` |
+| `reader_state` | `document_id` 主键并外键关联文献（`ON DELETE CASCADE`）；从 1 开始的 `page_number`；0.5–3 的 `scale`；`updated_at` |
+| `translation_cache` | `(document_id, page_number, block_id, target_language)` 复合主键并外键关联文献（`ON DELETE CASCADE`）；存储 `source_hash`、`provider_signature`、`translated_text`、`updated_at` 与lookup索引 |
+| `app_settings` | 键值对配置表（`key` 主键、`value`、`updated_at`），保存翻译配置 JSON 与经 `safeStorage` 加密后的 Base64 密钥 |
 
 导入串行排队。主进程以一个有界快照读取源文件，限制 **100 MiB（104,857,600 字节）**，检查普通文件、`.pdf` 扩展名与 `%PDF-1.x`/`%PDF-2.x` 文件头，并比较读取前后大小和修改时间。哈希与写入使用同一份字节，源文件不修改。
 
@@ -120,12 +132,12 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 
 ## T04–T08 可复用接口
 
-以下接口已保留，不预先实现句子切分、翻译或双向高亮。
+以下渲染层坐标与快照接口供版面分析、选区桥接及原页底图译文叠加复用。
 
 | 接口 | 数据与用途 |
 | --- | --- |
 | `PdfViewerProps.onPageData` / `PdfPageProps.onPageData` | 页面就绪时借用 `PdfPageData`；离屏、缩放或卸载时传 null 撤销，调用者不得长期保留过期资源 |
-| `PdfPageData` | `geometry`、原始 `textContent`、官方 `TextLayer`、页面 `element`；为文字项与选区命中保留入口 |
+| `PdfPageData` | `geometry`、原始 `textContent`、官方 `TextLayer`、页面 `canvas` 与 `element` |
 | `PageTextContent` | `PDFPageProxy.getTextContent` 返回类型，保留 items、文本样式和文字 transform；不能把每个 item 默认等同一句话 |
 | `PageGeometry` | 页码、完整 `PageViewport`、Canvas `outputScale`；统一旋转、CropBox、UserUnit 与缩放信息 |
 | `pdfPointToViewport` / `viewportPointToPdf` | PDF 坐标与页面局部 CSS 坐标双向转换 |
@@ -140,7 +152,7 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 针对公式、旋转页面与跨页连选场景，`selection-bridges.ts` 与 `selection-highlight.ts` 在同页统一 SVG 路径 `.pdf-selection-shape`（`fill-opacity: 0.36`）内合并原始字符框与补间矩形：
 - **视觉显示投影与旋转支持**：通过 `composeAffine(viewport.transform, item.transform)`、`displayScaleForViewport`（`viewport.scale * viewport.userUnit`）、`projectVisualRun`、`viewportToDisplayRect` 与 `displayToViewportRect` 将文字运行与选区矩形映射至未缩放的视觉显示空间，统一处理 0°/90°/180°/270° 页面旋转、`CropBox` 与 `UserUnit`，保持宽高下标与行内公式的连续桥接。
 - **跨页与端点守卫**：`selectedPart()` 增加 `comparePoint` 叶节点守卫；当选区跨越两页及以上（`activePages > 1 || startPage !== endPage`）时，即使某页仅选中单行文字、`bridges.length === 0`，也统一启用 `.pdf-selection-shape` 绘制。
-- **高对比度适配**：`forced-colors.css` 在 `@media (forced-colors: active)` 下为 `.pdf-selection-shape` 设置 `forced-color-adjust: none`、`fill: Highlight`、`fill-opacity: 0.36`、`stroke: Highlight`，并抑制冗余原生背景涂抹，在系统高对比度主题下保留下层 PDF Canvas 字符清晰度，同时增强选中列表项、聚焦环、搜索命中与工具栏按钮边界。
+- **高对比度适配**：`forced-colors.css` 在 `@media (forced-colors: active)` 下为 `.pdf-selection-shape` 设置 `forced-color-adjust: none`、`fill: Highlight`、`fill-opacity: 0.36`、`stroke: none`，并抑制冗余原生背景涂抹，在系统高对比度主题下保留下层 PDF Canvas 字符清晰度，同时增强选中列表项、聚焦环、搜索命中、句卡高亮及同步锁定按钮边界。
 
 已观察到 PointerEvent 保留小数坐标而兼容 MouseEvent 截为整数的情况。控制器仅给紧随其后、类型/目标/按钮/可信状态匹配的兼容事件消费一次准确指针坐标；不匹配则使用原鼠标坐标，失焦、取消和最终注销会清理缓存。这项处理不扩大字符框容差。
 
@@ -148,6 +160,28 @@ better-sqlite3 **13.0.3** 的本机 `binding.gyp` 使用 `NAPI_VERSION=10`，并
 
 页面离屏、缩放或卸载时幂等撤销注册，最后一页撤销时终止共享事件监听器；有效手势绑定实际起拖文字层，灰色页外空白绑定阅读根容器。具体行为是否通过以本轮 QA 的真实鼠标记录为准，静态架构说明不代替测试结果。
 
-实现位置为 `pdf-geometry.ts`、`selection-bridges.ts`、`selection-highlight.ts`、`forced-colors.css`、`PdfPage.tsx` 与 `PdfViewer.tsx`。未来高亮层仍以未缩放 PDF 坐标为准，显示时实时转换。句子 ID、阅读顺序、跨文字项聚合、多栏分段与译文对齐关系仍是后续独立设计项。
+实现位置为 `pdf-geometry.ts`、`selection-bridges.ts`、`selection-highlight.ts`、`forced-colors.css`、`PdfPage.tsx` 与 `PdfViewer.tsx`。未来高亮层仍以未缩放 PDF 坐标为准，显示时实时转换。
+
+### 多栏版面分析、原页底图译文覆写、引擎代理与双栏同步滑动
+
+根据 2026-11-24 授权放开的 T04–T06 阶段范围，`layout-analysis.ts` 通过 `PdfViewer` 的 `onPageData` 与 `onPageBackdrop` 借用入口同步提取纯坐标结果 `PageLayoutResult` 与页面 `ImageBitmap` 底图（不持有过期 `PDFPageProxy` 或 DOM 引用，缩放/离屏/切文档时显式 `.close()` 回收并清空状态），配合主进程 `TranslationService` 完成完整双语对照阅读：
+
+1. **多栏版面分析与底色采样（`layout-analysis.ts`）**：
+   - 将 PDF.js `textContent` 通过 `composeAffine(viewport.transform, item.transform)` 与 `viewportRectToPdf` 映射至未缩放视觉显示坐标与 PDF 用户坐标，支持 0°/90°/180°/270° 页面旋转、CropBox 与 UserUnit。
+   - 过滤空白项、边缘垂直印记（`margin-stamp`）、页眉、页脚与页码，并提供跨页重复边缘块精炼（`refineDocumentHeadersFooters`）。
+   - 采用基于跨幅宽行分带的 XY-Cut 重建多栏阅读序，识别 `heading`、`paragraph`、`caption`、`formula` 与 `list-item` 语义块；执行断词连字符拼接（保留 `self-`/`non-` 等复合前缀）、同 Band 跨栏未完句合并（`crossColumn: true`）、缩写/小数保护，计算基于坐标与文本的稳定块缓存键 `computeStableTranslationBlockKey` 与 64 位源签名 `hashTranslationBlockSource`。
+   - `sampleBlockBackgroundColors` 在页面 Canvas 就绪瞬时采样待译块边缘像素中位底色，用于无痕覆写彩底或白底块。
+2. **1:1 对称双栏、原页底图覆写与逐句双向联动（`App.tsx`、`TranslationPanel.tsx`、`sentence-alignment.ts`）**：
+   - 顶部支持一键「收起文献库 / 展开文献库」；打开文献默认进入 **1:1 等宽双栏对照**（拖曳分屏隔断条可在 `0.25–0.75` 间调整比例、双击恢复 1:1，工具栏支持切换「双栏对照 / 单栏精读」）。
+   - 未打开文献时保持 `.panel-heading` 与「尚未翻译」空态；打开文献后，`.translation-header` 通过 `ResizeObserver` 与左栏下沿像素对齐。
+   - `.translation-page` 同步左侧尺寸、缩放与 `裁剪白边` 偏移，底层由 `MirrorBackdropCanvas` 绘制原 PDF 页面 `ImageBitmap` 完整保留矢量图表、表格与公式（`formula` 块保留底图并叠加透明 `.translation-mirror-sentence` 热区）；`OverlayPageContent` 为跨栏空尾块提供精确非重叠背景遮罩（`.translation-overlay-mask`），对已译中文块先在不侵占邻列/Formula 的前提下尝试同栏右边界安全展宽，再渐进缩微字号（最低 `5.5px` / `line-height: 1.08`）以实现 **0px 纵向漂移**。
+   - **双向逐句对照高亮（`sentence-alignment.ts`、`PdfViewer.tsx`）**：已译块按中英文自然句切分并与原文句子 1:1 或区间比例双向对齐；未译块与公式块提供透明 `.translation-mirror-sentence` 热区。**左 → 右**：点击左侧原文句子在两侧同步高亮对应句；左侧拖选文字通过 `selectionchange` 与 `selectionToPdfRects` 反查覆盖句并仅在右侧同步高亮（不干扰左侧原生蓝底选区）。**右 → 左**：点击任意译文句段（`translation-overlay-sentence`）、未译热区或拖选译文文字，均在左侧 `.pdf-highlight-layer` 同步绘制精准 `.pdf-sentence-highlight` 并保持双栏句对交互对称（按 `Escape` 或点击空白清除）。
+3. **主进程双引擎翻译代理与安全存密（`TranslationService`、`TranslationSettingsModal.tsx`）**：
+   - 支持 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama 等，主进程原生 `fetch`）与 **本机 AI CLI**（Codex / Claude / Gemini / 自定义 CLI，`resolveCliExecutable` 纯文件系统检索 + `stdin` 传参 + 空临时工作目录 + 进程树取消清理），由 Zod 严检 URL 协议与 CLI 安全 token。
+   - OpenAI API Key 经 Electron `safeStorage` 加密存盘于 `app_settings`，仅向前端暴露 `hasApiKey` 与 `apiKeyPreview`；译文按 `SOURCE_HASH` 分批翻译与单块稳健回退后落盘 SQLite `translation_cache`，切页/重启优先读缓存。
+4. **双栏同步滑动锁定/解锁（`scroll-sync.ts`、`useDualScrollSync.ts`）**：
+   - 默认开启「同步锁定」，纵向 1:1 像素对齐、横向按双向溢出比例映射，以时效窗 `isEchoScroll` 消除来回回声；手动切为「自由滑动」后两侧独立滚动，重锁时自动从左侧同步校准右侧。
+
+扫描页 OCR、Python 翻译运行时依赖与自动远程发布仍严格不在实现范围内（`--publish never` 保持生效）。
 
 架构依据：[Electron 安全建议](https://www.electronjs.org/docs/latest/tutorial/security/)、[Electron 自定义协议](https://www.electronjs.org/docs/latest/api/protocol)、[electron-vite 依赖处理](https://electron-vite.org/guide/dependency-handling)、[PDF.js 官方示例](https://mozilla.github.io/pdf.js/examples/)。具体行为以本项目锁定版本源码和测试为准。

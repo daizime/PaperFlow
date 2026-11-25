@@ -1,0 +1,338 @@
+{
+  "schemaVersion": 1,
+  "source": "PaperFlow 原创合成双栏学术版面分析与双向对齐验证 PDF；不复制任何真实论文内容。",
+  "license": "AGPL-3.0-only",
+  "generator": "scripts/verification/generate-layout-analysis-fixture.ts",
+  "fixedMetadataDate": "2026-11-24T00:00:00.000Z",
+  "file": {
+    "name": "two-column-academic-fixture.pdf",
+    "bytes": 4678,
+    "sha256": "7fbf489896b18162fd26f35d8382447c1ceafc68ed707643250fa7e5a4d06512"
+  },
+  "pageSize": {
+    "width": 612,
+    "height": 792
+  },
+  "extractedPages": [
+    {
+      "pageNumber": 1,
+      "itemCount": 17
+    },
+    {
+      "pageNumber": 2,
+      "itemCount": 8
+    }
+  ],
+  "expectedOrder": {
+    "page1": [
+      "Deterministic Layout Pipeline for Local Academic Readers",
+      "1. Introduction",
+      "Modern readers require stable layout architecture (e.g., Smith et al., 2025).",
+      "As shown in Fig. 1, the scale factor is 3.14 with self-attention weights across two columns.",
+      "E = mc^2 + alpha (1)",
+      "The deterministic layout pipeline reconstructs column boundaries.",
+      "It preserves exact PDF coordinates.",
+      "Figure 1: Synthetic two-column alignment diagram.",
+      "2. Methods",
+      "Every sentence keeps unscaled boxes."
+    ],
+    "page2": [
+      "2.1 Band Segmentation",
+      "Left upper band stays above the table.",
+      "Right upper band follows left upper band.",
+      "Table 1: Cross-column reading order metrics verified across spanning blocks.",
+      "Left lower band resumes after spanning table.",
+      "Right lower band completes page reading order."
+    ]
+  },
+  "parts": [
+    {
+      "id": "p1-header",
+      "pageNumber": 1,
+      "column": "header",
+      "expectedKind": "header",
+      "text": "Synthetic Journal of Layout Audits",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 758,
+      "size": 9,
+      "width": 126.495
+    },
+    {
+      "id": "p1-title",
+      "pageNumber": 1,
+      "column": "spanning",
+      "expectedKind": "heading",
+      "text": "Deterministic Layout Pipeline for Local Academic Readers",
+      "font": "Helvetica-Bold",
+      "x": 54,
+      "y": 708,
+      "size": 15.5,
+      "width": 429.8305
+    },
+    {
+      "id": "p1-l-h1",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "heading",
+      "text": "1. Introduction",
+      "font": "Helvetica-Bold",
+      "x": 54,
+      "y": 668,
+      "size": 12,
+      "width": 83.34
+    },
+    {
+      "id": "p1-r-cont",
+      "pageNumber": 1,
+      "column": "right",
+      "expectedKind": "paragraph",
+      "text": "line reconstructs column boundaries.",
+      "font": "Times-Roman",
+      "x": 326,
+      "y": 668,
+      "size": 10.5,
+      "width": 154.56
+    },
+    {
+      "id": "p1-l-p1",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "Modern readers require stable layout archi-",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 646,
+      "size": 10.5,
+      "width": 181.65
+    },
+    {
+      "id": "p1-r-p1b",
+      "pageNumber": 1,
+      "column": "right",
+      "expectedKind": "paragraph",
+      "text": "It preserves exact PDF coordinates.",
+      "font": "Times-Roman",
+      "x": 326,
+      "y": 653,
+      "size": 10.5,
+      "width": 149.0055
+    },
+    {
+      "id": "p1-l-p2",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "tecture (e.g., Smith et al., 2025). As shown in",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 631,
+      "size": 10.5,
+      "width": 190.7325
+    },
+    {
+      "id": "p1-r-fig",
+      "pageNumber": 1,
+      "column": "right",
+      "expectedKind": "caption",
+      "text": "Figure 1: Synthetic two-column alignment diagram.",
+      "font": "Helvetica-Bold",
+      "x": 326,
+      "y": 622,
+      "size": 10,
+      "width": 243.38
+    },
+    {
+      "id": "p1-l-p3",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "Fig. 1, the scale factor is 3.14 with self-",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 616,
+      "size": 10.5,
+      "width": 166.5195
+    },
+    {
+      "id": "p1-r-h2",
+      "pageNumber": 1,
+      "column": "right",
+      "expectedKind": "heading",
+      "text": "2. Methods",
+      "font": "Helvetica-Bold",
+      "x": 326,
+      "y": 592,
+      "size": 12,
+      "width": 62.676
+    },
+    {
+      "id": "p1-l-p4",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "attention weights across two columns.",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 601,
+      "size": 10.5,
+      "width": 160.1145
+    },
+    {
+      "id": "p1-r-p2",
+      "pageNumber": 1,
+      "column": "right",
+      "expectedKind": "paragraph",
+      "text": "Every sentence keeps unscaled boxes.",
+      "font": "Times-Roman",
+      "x": 326,
+      "y": 570,
+      "size": 10.5,
+      "width": 159.495
+    },
+    {
+      "id": "p1-l-eq",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "formula",
+      "text": "E = mc^2 + alpha",
+      "font": "Courier",
+      "x": 54,
+      "y": 572,
+      "size": 11,
+      "width": 105.6
+    },
+    {
+      "id": "p1-l-eq-tag",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "formula",
+      "text": "(1)",
+      "font": "Times-Roman",
+      "x": 266,
+      "y": 572,
+      "size": 10.5,
+      "width": 12.243
+    },
+    {
+      "id": "p1-l-cross",
+      "pageNumber": 1,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "The deterministic layout pipe-",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 540,
+      "size": 10.5,
+      "width": 126.861
+    },
+    {
+      "id": "p1-page-num",
+      "pageNumber": 1,
+      "column": "footer",
+      "expectedKind": "page-number",
+      "text": "- 1 -",
+      "font": "Times-Roman",
+      "x": 294,
+      "y": 32,
+      "size": 9,
+      "width": 14.994
+    },
+    {
+      "id": "p2-header",
+      "pageNumber": 2,
+      "column": "header",
+      "expectedKind": "header",
+      "text": "Synthetic Journal of Layout Audits",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 758,
+      "size": 9,
+      "width": 126.495
+    },
+    {
+      "id": "p2-l-h21",
+      "pageNumber": 2,
+      "column": "left",
+      "expectedKind": "heading",
+      "text": "2.1 Band Segmentation",
+      "font": "Helvetica-Bold",
+      "x": 54,
+      "y": 700,
+      "size": 12,
+      "width": 132.696
+    },
+    {
+      "id": "p2-r-upper",
+      "pageNumber": 2,
+      "column": "right",
+      "expectedKind": "paragraph",
+      "text": "Right upper band follows left upper band.",
+      "font": "Times-Roman",
+      "x": 326,
+      "y": 682,
+      "size": 10.5,
+      "width": 175.854
+    },
+    {
+      "id": "p2-l-upper",
+      "pageNumber": 2,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "Left upper band stays above the table.",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 682,
+      "size": 10.5,
+      "width": 159.5055
+    },
+    {
+      "id": "p2-span-table",
+      "pageNumber": 2,
+      "column": "spanning",
+      "expectedKind": "caption",
+      "text": "Table 1: Cross-column reading order metrics verified across spanning blocks.",
+      "font": "Helvetica-Bold",
+      "x": 54,
+      "y": 640,
+      "size": 10.5,
+      "width": 389.7915
+    },
+    {
+      "id": "p2-r-lower",
+      "pageNumber": 2,
+      "column": "right",
+      "expectedKind": "paragraph",
+      "text": "Right lower band completes page reading order.",
+      "font": "Times-Roman",
+      "x": 326,
+      "y": 596,
+      "size": 10.5,
+      "width": 202.083
+    },
+    {
+      "id": "p2-l-lower",
+      "pageNumber": 2,
+      "column": "left",
+      "expectedKind": "paragraph",
+      "text": "Left lower band resumes after spanning table.",
+      "font": "Times-Roman",
+      "x": 54,
+      "y": 596,
+      "size": 10.5,
+      "width": 192.1605
+    },
+    {
+      "id": "p2-page-num",
+      "pageNumber": 2,
+      "column": "footer",
+      "expectedKind": "page-number",
+      "text": "- 2 -",
+      "font": "Times-Roman",
+      "x": 294,
+      "y": 32,
+      "size": 9,
+      "width": 14.994
+    }
+  ]
+}

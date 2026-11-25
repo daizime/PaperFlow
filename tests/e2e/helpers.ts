@@ -1,8 +1,17 @@
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-export async function createTestData(): Promise<string> { return mkdtemp(join(tmpdir(), 'paperflow-e2e-')) }
+
+export async function createTestData(): Promise<string> {
+  const runRoot = process.env.PAPERFLOW_E2E_RUN_ROOT
+  if (runRoot) {
+    await mkdir(runRoot, { recursive: true })
+    return mkdtemp(join(runRoot, 'case-'))
+  }
+  return mkdtemp(join(tmpdir(), 'paperflow-e2e-'))
+}
+
 export async function launchApp(dataDir: string, options: { deviceScaleFactor?: number } = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const factor = options.deviceScaleFactor
   if (factor !== undefined && (!Number.isFinite(factor) || factor <= 0)) {

@@ -12,10 +12,13 @@ test('T03 真实多页Canvas、Worker、文字选取复制、缩放与关闭恢�
   try {
     const { app, page } = running
     await importFixture(app, page, 'valid.pdf')
+    await page.getByRole('button', { name: '切换文献库侧边栏', exact: true }).click()
+    await waitForPage(page, 1)
+    await page.getByRole('button', { name: '适合宽度', exact: true }).click()
     await waitForPage(page, 1)
     await expect(page.locator('.pdf-page')).toHaveCount(3)
     expect(page.workers().some(worker => /pdf.worker.*\.mjs/.test(worker.url()) && worker.url().startsWith('app://bundle/'))).toBe(true)
-    expect(await page.locator('.pdf-page canvas').count()).toBeLessThan(3)
+    await expect.poll(() => page.locator('.pdf-page canvas').count()).toBeLessThan(3)
     const pixels = await page.locator('.pdf-page[data-page-number="1"] canvas').evaluate(canvas => {
       const element = canvas as HTMLCanvasElement
       const context = element.getContext('2d')!
@@ -54,7 +57,13 @@ test('T03 真实多页Canvas、Worker、文字选取复制、缩放与关闭恢�
     await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2)
     await page.mouse.wheel(0, scrollBox.height * 3)
     await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('3')
-    expect(await page.locator('.translation-scroll').evaluate(element => element.scrollTop)).toBe(0)
+    await expect.poll(async () => {
+      const positions = await page.evaluate(() => ({
+        left: document.querySelector('.pdf-scroll')?.scrollTop ?? -1,
+        right: document.querySelector('.translation-scroll')?.scrollTop ?? -1
+      }))
+      return positions.right > 100 ? Math.abs(positions.left - positions.right) : 999
+    }).toBeLessThanOrEqual(2)
     await page.getByRole('spinbutton', { name: '当前页码' }).fill('3')
     await page.getByRole('spinbutton', { name: '当前页码' }).press('Enter')
     await waitForPage(page, 3)

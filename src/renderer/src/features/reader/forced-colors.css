@@ -36,10 +36,35 @@
 
   .library-panel .document-item:focus-visible,
   .library-panel > .library-import-button:focus-visible,
-  .reader-panel .reader-toolbar button:focus-visible {
+  .reader-panel .reader-toolbar button:focus-visible,
+  .translation-sync-toggle:focus-visible,
+  .translation-overlay-block:focus-visible,
+  .translation-mirror-sentence:focus-visible {
     forced-color-adjust: auto;
     outline: 2px solid Highlight;
     outline-offset: 2px;
+  }
+
+  .translation-overlay-sentence.is-active,
+  .translation-mirror-sentence.is-active {
+    forced-color-adjust: auto;
+  }
+
+  .pdf-page .pdf-highlight-layer .pdf-sentence-highlight,
+  .translation-highlight-svg .translation-sentence-polygon {
+    forced-color-adjust: none;
+    fill: Highlight;
+    fill-opacity: 0.2;
+    stroke: Highlight;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+
+  .translation-overlay-block.is-translated {
+    forced-color-adjust: auto;
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid GrayText;
   }
 
   .pdf-page .pdf-highlight-layer .pdf-search-match {
@@ -56,9 +81,15 @@
   }
 
   .reader-panel .reader-toolbar button,
-  .library-panel > .library-import-button {
+  .library-panel > .library-import-button,
+  .translation-sync-toggle {
     forced-color-adjust: auto;
     border: 1px solid ButtonText;
+  }
+
+  .translation-sync-toggle[aria-pressed="true"] {
+    border: 2px solid Highlight;
+    outline: 1px solid Highlight;
   }
 
   .reader-panel .reader-toolbar button:disabled,

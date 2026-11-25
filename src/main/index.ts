@@ -1,12 +1,15 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage } from 'electron'
 import { registerAppScheme, installAppProtocol } from './services/app-protocol'
 import { createWindow, installSessionSecurity } from './window'
 import { mkdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import { BackupService } from './services/backup-service'
 import { LibraryDatabase } from './services/database'
 import { DocumentService } from './services/document-service'
 import { validatePdfInSandbox } from './services/pdf-validation'
+import { TranslationService } from './services/translation-service'
 import { registerIpc } from './ipc'
+
 registerAppScheme()
 app.setName('PaperFlow')
 app.setAppUserModelId('org.paperflow.desktop')
@@ -18,10 +21,17 @@ if (dataDirectory) {
   app.setPath('userData', dataDirectory)
 }
 let database: LibraryDatabase | undefined
+let translationService: TranslationService | undefined
 let mainWindow: BrowserWindow | null = null
 let quitting = false
-app.on('before-quit', () => { quitting = true })
-app.on('will-quit', () => { database?.close() })
+app.on('before-quit', () => {
+  quitting = true
+  translationService?.cancelAll()
+})
+app.on('will-quit', () => {
+  translationService?.cancelAll()
+  database?.close()
+})
 app.whenReady().then(async () => {
   installAppProtocol()
   installSessionSecurity()
@@ -29,8 +39,10 @@ app.whenReady().then(async () => {
   mkdirSync(userData, { recursive: true })
   database = new LibraryDatabase(join(userData, 'paperflow.sqlite'))
   const documents = new DocumentService(database, join(userData, 'library'), validatePdfInSandbox)
+  translationService = new TranslationService({ database, safeStorage })
+  const backupService = new BackupService(database, documents)
   await documents.cleanupOrphanFiles()
-  registerIpc(() => mainWindow, database, documents)
+  registerIpc(() => mainWindow, database, documents, translationService, backupService)
   const remember = (window: BrowserWindow): void => { mainWindow = window; window.on('closed', () => { mainWindow = null }) }
   await createWindow(remember)
   app.on('activate', () => {

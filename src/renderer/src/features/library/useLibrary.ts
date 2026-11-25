@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { formatPdfByteSize, hasControlCharacters, MAX_PDF_BYTES, type DocumentRecord, type ImportResult } from '../../../../shared/contracts'
+import { formatPdfByteSize, hasControlCharacters, MAX_PDF_BYTES, type DocumentRecord, type ImportResult, type UpdateDocumentMetaInput } from '../../../../shared/contracts'
 
 const LAST_DOCUMENT_KEY = 'paperflow:last-document'
 
@@ -67,6 +67,7 @@ async function importSingleDroppedFile(file: File): Promise<{ result?: ImportRes
 
 export function useLibrary(): {
   documents: DocumentRecord[]
+  readerProgress: Record<string, number>
   selected: DocumentRecord | null
   importing: boolean
   error: string | null
@@ -78,12 +79,16 @@ export function useLibrary(): {
   importPdf(): Promise<void>
   importDroppedFiles(files: FileList | File[]): Promise<void>
   renameDocument(documentId: string, displayTitle: string): Promise<boolean>
+  updateDocumentMeta(input: UpdateDocumentMetaInput): Promise<boolean>
+  updateLocalProgress(documentId: string, pageNumber: number): void
   deleteDocument(documentId: string): Promise<boolean>
   dismissErrors(): void
   reportError(message: string): void
+  reportNotice(message: string): void
   refresh(): Promise<void>
 } {
   const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  const [readerProgress, setReaderProgress] = useState<Record<string, number>>({})
   const [selectedId, setSelectedId] = useState<string | null>(() => localStorage.getItem(LAST_DOCUMENT_KEY))
   const [error, setError] = useState<string | null>(null)
   const [errorDetails, setErrorDetails] = useState<ImportFailureDetail[]>([])
@@ -115,7 +120,14 @@ export function useLibrary(): {
 
   const reportError = useCallback((message: string) => {
     setErrorDetails([])
+    setNotice(null)
     setError(message)
+  }, [])
+
+  const reportNotice = useCallback((message: string) => {
+    setError(null)
+    setErrorDetails([])
+    setNotice(message)
   }, [])
 
   const refresh = useCallback(async () => {
@@ -127,10 +139,24 @@ export function useLibrary(): {
       loadErrorRef.current = null
     }
     try {
-      const nextDocuments = await window.paperflow.listDocuments()
+      const [nextDocuments, nextProgress] = await Promise.all([
+        window.paperflow.listDocuments(),
+        window.paperflow.listReaderProgress().catch(() => ({} as Record<string, number>))
+      ])
       if (request !== refreshRequestRef.current) return
+      const validIds = new Set(nextDocuments.map(item => item.id))
       documentsRef.current = nextDocuments
       setDocuments(nextDocuments)
+      setReaderProgress(prev => {
+        const merged: Record<string, number> = {}
+        for (const [id, page] of Object.entries(nextProgress)) {
+          if (validIds.has(id)) merged[id] = page
+        }
+        for (const [id, page] of Object.entries(prev)) {
+          if (validIds.has(id)) merged[id] = page
+        }
+        return merged
+      })
       loadedRef.current = true
       loadErrorRef.current = null
       setLoadError(null)
@@ -257,6 +283,28 @@ export function useLibrary(): {
     }
   }, [refresh])
 
+  const updateDocumentMeta = useCallback(async (input: UpdateDocumentMetaInput): Promise<boolean> => {
+    setError(null)
+    setErrorDetails([])
+    try {
+      const updated = await window.paperflow.updateDocumentMeta(input)
+      setDocuments(current => {
+        const next = current.map(item => (item.id === input.documentId ? updated : item))
+        documentsRef.current = next
+        return next
+      })
+      return true
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '更新文献标签或收藏失败，请重试。'))
+      return false
+    }
+  }, [])
+
+  const updateLocalProgress = useCallback((documentId: string, pageNumber: number) => {
+    if (!documentId || pageNumber < 1) return
+    setReaderProgress(prev => (prev[documentId] === pageNumber ? prev : { ...prev, [documentId]: pageNumber }))
+  }, [])
+
   const deleteDocument = useCallback(async (documentId: string): Promise<boolean> => {
     setError(null)
     setErrorDetails([])
@@ -290,6 +338,7 @@ export function useLibrary(): {
 
   return {
     documents,
+    readerProgress,
     selected: documents.find(item => item.id === selectedId) ?? documents[0] ?? null,
     importing,
     error,
@@ -301,9 +350,12 @@ export function useLibrary(): {
     importPdf,
     importDroppedFiles,
     renameDocument,
+    updateDocumentMeta,
+    updateLocalProgress,
     deleteDocument,
     dismissErrors,
     reportError,
+    reportNotice,
     refresh
   }
 }

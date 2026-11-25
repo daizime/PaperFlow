@@ -4,6 +4,6 @@
 
 README及必要开发、验证文档使用中文；原创测试数据须标注为合成素材，真实执行、模拟与未验证项目分开记录。
 
-严格按 T01 → T02 → T03 实施，阶段测试通过后继续。不得关闭 Electron sandbox、contextIsolation、webSecurity。前端只使用 window.paperflow 业务 API。禁止接入 LLM、云服务、OCR、Python 翻译依赖或自动远程发布。
+严格按阶段推进，阶段测试通过后继续；2026-11-24 用户已授权放开双语翻译阶段（T04–T06），允许在 Electron 主进程受控代理下接入 OpenAI 兼容翻译 API 与本机 AI CLI（如 Codex CLI），并使用 SQLite 缓存与系统安全加密存储密钥。仍严格禁止关闭 Electron sandbox、contextIsolation、webSecurity；前端只使用 window.paperflow 业务 API，渲染层保持无外网直连权限；仍禁止 OCR、Python 翻译运行时依赖及自动远程发布。
 
 协作入口：项目管理/README.md。主控独占共享接口、构建配置和总体验收；模块仅写正式任务指定的路径。2026-10-27 用户已授权先建立长期多会话再补齐验证，真实模块身份与分工见项目管理/状态/registry.json。不得将临时代理登记为持久会话。全套构建、打包和桌面测试统一由 qa 执行；不重复争用公共产物。

@@ -39,6 +39,12 @@
 }
 /* 未来高亮层使用同一 CSS viewport；不拦截现有 TextLayer 的鼠标选区。 */
 .pdf-page-surface > .pdf-highlight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.pdf-annotation-highlight-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.pdf-annotation-highlight { stroke-width: 1; stroke-linejoin: round; }
+.pdf-annotation-highlight--yellow { fill: rgba(250, 204, 21, 0.34); stroke: rgba(202, 138, 4, 0.55); }
+.pdf-annotation-highlight--green { fill: rgba(74, 222, 128, 0.28); stroke: rgba(22, 163, 74, 0.5); }
+.pdf-annotation-highlight--blue { fill: rgba(96, 165, 250, 0.28); stroke: rgba(37, 99, 235, 0.5); }
+.pdf-annotation-highlight--pink { fill: rgba(244, 114, 182, 0.30); stroke: rgba(219, 39, 119, 0.5); }
 .pdf-page-status {
   position: absolute;
   inset: 0;

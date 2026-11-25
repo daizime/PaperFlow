@@ -1,0 +1,802 @@
+import {
+  computeStableTranslationBlockKey,
+  type AnalyzedBlock,
+  type AnalyzedSentence,
+  type InlineFormulaSpan,
+  type PageLayoutResult
+} from '../reader/layout-analysis'
+import type { PagePoint, PageRect, PdfSelectionRegion } from '../reader/pdf-geometry'
+
+export interface TranslatedSentenceSegment {
+  index: number
+  text: string
+  start: number
+  end: number
+}
+
+export interface BlockSentenceAlignment {
+  segments: TranslatedSentenceSegment[]
+  sourceToTarget: Map<string, number[]>
+  targetToSource: Map<number, string[]>
+}
+
+export interface SentenceHitResult {
+  sentence: AnalyzedSentence
+  block: AnalyzedBlock
+  blockKey: string
+}
+
+export interface SelectionSentenceMatch {
+  pageNumber: number
+  sentenceIds: string[]
+  blockKeys: string[]
+  sourceRects: PageRect[]
+}
+
+const PROTECTED_ABBR_RE =
+  /(?:e\.g|i\.e|et\s+al|al|fig|figs|eq|eqs|sect|sec|secs|tab|tabs|ref|refs|dr|prof|mr|mrs|ms|vs|etc|approx|no|nos|vol|vols|pp|inc|ltd|corp|st)$/i
+
+const CLOSING_PUNCT_RE = /[”’」』）】》"')\]\u201d\u2019]/
+
+function absorbTrailingClosersAndSpace(text: string, pos: number): number {
+  let cursor = pos
+  while (cursor < text.length && CLOSING_PUNCT_RE.test(text[cursor])) {
+    cursor += 1
+  }
+  while (cursor < text.length && (text[cursor] === ' ' || text[cursor] === '\t')) {
+    cursor += 1
+  }
+  return cursor
+}
+
+function isProtectedLatinPeriod(text: string, dotIndex: number): boolean {
+  const prev = dotIndex > 0 ? text[dotIndex - 1] : ''
+  const next = dotIndex + 1 < text.length ? text[dotIndex + 1] : ''
+
+  // 小数或版本号如 3.14 / v1.2
+  if (/[0-9]/.test(prev) && /[0-9]/.test(next)) return true
+
+  // "." 紧跟非空白且非右引号/括号字符（如 e.g. 内部第一点、网址）
+  if (next && !/\s/.test(next) && !CLOSING_PUNCT_RE.test(next) && next !== '.') return true
+
+  // 常见缩写或单字母首字母如 "J. Smith"
+  const prefix = text.slice(Math.max(0, dotIndex - 18), dotIndex)
+  if (PROTECTED_ABBR_RE.test(prefix)) return true
+  if (/(?:^|[\s(])([A-Z])$/.test(prefix)) return true
+
+  return false
+}
+
+/**
+ * 无损拆分译文为自然句数组（保留精确字符边界与拼接恒等：`segments.map(s => s.text).join('') === text`）。
+ * 支持中英文混排句末标点（`。！？.!?`）并保护常见科研缩写与小数点不被误拆。
+ */
+export function splitTranslatedSentences(text: string): TranslatedSentenceSegment[] {
+  if (!text) return []
+  const segments: TranslatedSentenceSegment[] = []
+  let start = 0
+  let i = 0
+
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === '。' || ch === '！' || ch === '？') {
+      let j = i + 1
+      while (j < text.length && (text[j] === '。' || text[j] === '！' || text[j] === '？')) {
+        j += 1
+      }
+      const end = absorbTrailingClosersAndSpace(text, j)
+      if (end < text.length) {
+        segments.push({ index: segments.length, text: text.slice(start, end), start, end })
+        start = end
+        i = end
+        continue
+      }
+      break
+    }
+
+    if (ch === '.' || ch === '!' || ch === '?') {
+      if (ch === '.' && isProtectedLatinPeriod(text, i)) {
+        i += 1
+        continue
+      }
+      let j = i + 1
+      while (j < text.length && (text[j] === '.' || text[j] === '!' || text[j] === '?')) {
+        j += 1
+      }
+      // 英文句末标点须到达结尾，或紧接右引号/空白后才断句
+      const nextAfterPunct = j < text.length ? text[j] : ''
+      if (j < text.length && !/\s/.test(nextAfterPunct) && !CLOSING_PUNCT_RE.test(nextAfterPunct)) {
+        i = j
+        continue
+      }
+      // 跳过仅引号内部紧随无空格字母的场景（如 `'e.g.'next`）
+      let k = j
+      while (k < text.length && CLOSING_PUNCT_RE.test(text[k])) k += 1
+      if (k < text.length && !/\s/.test(text[k])) {
+        i = k
+        continue
+      }
+      const end = absorbTrailingClosersAndSpace(text, j)
+      if (end < text.length) {
+        segments.push({ index: segments.length, text: text.slice(start, end), start, end })
+        start = end
+        i = end
+        continue
+      }
+      break
+    }
+
+    i += 1
+  }
+
+  if (start < text.length) {
+    segments.push({ index: segments.length, text: text.slice(start), start, end: text.length })
+  }
+
+  return segments
+}
+
+/**
+ * 构建块内「原文句子 <-> 译文句段」双向对齐映射。
+ * 句数相等时 1:1 对应；模型合并或拆分句时按字符占比区间投影保证双向完备覆盖。
+ */
+export function alignBlockSentences(
+  sourceSentences: readonly AnalyzedSentence[],
+  translatedText: string
+): BlockSentenceAlignment {
+  const segments = splitTranslatedSentences(translatedText)
+  const sourceToTarget = new Map<string, number[]>()
+  const targetToSource = new Map<number, string[]>()
+
+  if (sourceSentences.length === 0 || segments.length === 0) {
+    return { segments, sourceToTarget, targetToSource }
+  }
+
+  for (const s of sourceSentences) sourceToTarget.set(s.id, [])
+  for (const seg of segments) targetToSource.set(seg.index, [])
+
+  const link = (sourceId: string, segIndex: number): void => {
+    const tList = sourceToTarget.get(sourceId)
+    if (tList && !tList.includes(segIndex)) tList.push(segIndex)
+    const sList = targetToSource.get(segIndex)
+    if (sList && !sList.includes(sourceId)) sList.push(sourceId)
+  }
+
+  if (sourceSentences.length === 1) {
+    for (const seg of segments) link(sourceSentences[0].id, seg.index)
+    return { segments, sourceToTarget, targetToSource }
+  }
+
+  if (segments.length === 1) {
+    for (const s of sourceSentences) link(s.id, 0)
+    return { segments, sourceToTarget, targetToSource }
+  }
+
+  if (sourceSentences.length === segments.length) {
+    for (let i = 0; i < sourceSentences.length; i += 1) {
+      link(sourceSentences[i].id, segments[i].index)
+    }
+    return { segments, sourceToTarget, targetToSource }
+  }
+
+  const buildRanges = (lengths: readonly number[]): Array<{ start: number; end: number; mid: number }> => {
+    const total = Math.max(1, lengths.reduce((sum, v) => sum + v, 0))
+    let acc = 0
+    return lengths.map(len => {
+      const start = acc / total
+      acc += len
+      const end = acc / total
+      return { start, end, mid: (start + end) / 2 }
+    })
+  }
+
+  const sourceRanges = buildRanges(sourceSentences.map(s => Math.max(1, s.text.trim().length)))
+  const targetRanges = buildRanges(segments.map(seg => Math.max(1, seg.text.trim().length)))
+
+  for (let i = 0; i < sourceSentences.length; i += 1) {
+    const sr = sourceRanges[i]
+    for (let j = 0; j < segments.length; j += 1) {
+      const tr = targetRanges[j]
+      if (Math.min(sr.end, tr.end) > Math.max(sr.start, tr.start) + 1e-9) {
+        link(sourceSentences[i].id, segments[j].index)
+      }
+    }
+  }
+
+  // 兜底保证每句原文与每段译文均至少映射一个对端片段
+  for (let i = 0; i < sourceSentences.length; i += 1) {
+    if ((sourceToTarget.get(sourceSentences[i].id)?.length ?? 0) > 0) continue
+    let bestIdx = 0
+    let bestDist = Number.POSITIVE_INFINITY
+    for (let j = 0; j < targetRanges.length; j += 1) {
+      const dist = Math.abs(sourceRanges[i].mid - targetRanges[j].mid)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = j
+      }
+    }
+    link(sourceSentences[i].id, segments[bestIdx].index)
+  }
+
+  for (let j = 0; j < segments.length; j += 1) {
+    if ((targetToSource.get(segments[j].index)?.length ?? 0) > 0) continue
+    let bestIdx = 0
+    let bestDist = Number.POSITIVE_INFINITY
+    for (let i = 0; i < sourceRanges.length; i += 1) {
+      const dist = Math.abs(targetRanges[j].mid - sourceRanges[i].mid)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = i
+      }
+    }
+    link(sourceSentences[bestIdx].id, segments[j].index)
+  }
+
+  return { segments, sourceToTarget, targetToSource }
+}
+
+function pointToRectDistance(point: PagePoint, rect: PageRect): number {
+  const dx = point.x < rect.x ? rect.x - point.x : point.x > rect.x + rect.width ? point.x - (rect.x + rect.width) : 0
+  const dy = point.y < rect.y ? rect.y - point.y : point.y > rect.y + rect.height ? point.y - (rect.y + rect.height) : 0
+  return Math.hypot(dx, dy)
+}
+
+/**
+ * 按未缩放 PDF 坐标在页面版面中命中最贴近的原文句子（优先精确内部命中，再回退轻量边沿容差）。
+ */
+export function hitTestPageSentence(layout: PageLayoutResult | undefined, pdfPoint: PagePoint): SentenceHitResult | null {
+  if (!layout || !layout.hasText || layout.blocks.length === 0) return null
+
+  let best: SentenceHitResult | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  let bestArea = Number.POSITIVE_INFINITY
+
+  for (const block of layout.blocks) {
+    for (const sentence of block.sentences) {
+      for (const rect of sentence.rects) {
+        const dist = pointToRectDistance(pdfPoint, rect)
+        if (dist > 4) continue
+        const area = Math.max(1, rect.width * rect.height)
+        if (dist < bestDist - 1e-6 || (Math.abs(dist - bestDist) <= 1e-6 && area < bestArea)) {
+          bestDist = dist
+          bestArea = area
+          best = {
+            sentence,
+            block,
+            blockKey: computeStableTranslationBlockKey(block)
+          }
+        }
+      }
+    }
+  }
+
+  return best
+}
+
+const LIGATURE_RE = /[\uFB00-\uFB06]/g
+const LIGATURE_MAP: Record<string, string> = {
+  '\uFB00': 'ff',
+  '\uFB01': 'fi',
+  '\uFB02': 'fl',
+  '\uFB03': 'ffi',
+  '\uFB04': 'ffl',
+  '\uFB05': 'st',
+  '\uFB06': 'st'
+}
+
+interface RectOverlap {
+  ow: number
+  oh: number
+  area: number
+}
+
+interface ScoredSentenceCandidate {
+  sentence: AnalyzedSentence
+  blockKey: string
+  strictOverlapArea: number
+  looseOverlapArea: number
+  sentenceArea: number
+}
+
+function computeRectOverlap(a: PageRect, b: PageRect): RectOverlap | null {
+  const ow = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+  const oh = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+  if (ow <= 0 || oh <= 0) return null
+  return { ow, oh, area: ow * oh }
+}
+
+function normalizeSelectionText(raw: string): string {
+  return raw
+    .replace(LIGATURE_RE, ch => LIGATURE_MAP[ch] ?? ch)
+    .replace(/([A-Za-z])[-\u00AD\u2010]\s+([a-z])/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function toCompactAlphaCjk(normText: string): string {
+  return normText.replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
+}
+
+function extractBoundaryTokens(normText: string): string[] {
+  const tokens: string[] = []
+  const matches = normText.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g)
+  if (!matches) return tokens
+
+  for (const seg of matches) {
+    if (/^[\u4e00-\u9fff]+$/.test(seg)) {
+      if (seg.length === 1) {
+        tokens.push(seg)
+      } else {
+        for (let i = 0; i < seg.length - 1; i += 1) {
+          tokens.push(seg.slice(i, i + 2))
+        }
+      }
+      continue
+    }
+    if (seg.length >= 2) {
+      tokens.push(seg)
+    }
+  }
+  return tokens
+}
+
+function hasTokenOverlap(
+  tokens: readonly string[],
+  targetTokenSet: ReadonlySet<string>,
+  targetCompact: string
+): boolean {
+  for (const token of tokens) {
+    if (targetTokenSet.has(token)) return true
+    if (token.length >= 4 && targetCompact.includes(token)) return true
+  }
+  return false
+}
+
+function pruneBoundarySelectionCandidates(
+  candidates: ScoredSentenceCandidate[],
+  selectedText: string | undefined
+): ScoredSentenceCandidate[] {
+  if (!selectedText || candidates.length <= 1) return candidates
+  const normSel = normalizeSelectionText(selectedText)
+  if (normSel.length < 2) return candidates
+
+  const normSelCompact = toCompactAlphaCjk(normSel)
+  const normSelTokens = extractBoundaryTokens(normSel)
+  const normSelTokenSet = new Set(normSelTokens)
+  const normSelHead = normSel.slice(0, Math.min(normSel.length, 64))
+  const normSelHeadCompact = toCompactAlphaCjk(normSelHead)
+  const normSelHeadSet = new Set(extractBoundaryTokens(normSelHead))
+  const selLeadTokens = normSelTokens.slice(0, 2)
+
+  const normSelTail = normSel.slice(Math.max(0, normSel.length - 64))
+  const normSelTailCompact = toCompactAlphaCjk(normSelTail)
+  const normSelTailSet = new Set(extractBoundaryTokens(normSelTail))
+  const selTailTokens = normSelTokens.slice(-2)
+
+  const sentenceMatchesSelection = (candidate: ScoredSentenceCandidate): boolean => {
+    const normCand = normalizeSelectionText(candidate.sentence.text)
+    const tokens = extractBoundaryTokens(normCand)
+    if (tokens.length > 0 && hasTokenOverlap(tokens, normSelTokenSet, normSelCompact)) return true
+    return normSelCompact.length >= 2 && toCompactAlphaCjk(normCand).includes(normSelCompact)
+  }
+
+  const kept = [...candidates]
+
+  while (kept.length > 1) {
+    const first = kept[0]
+    if (first.strictOverlapArea / first.sentenceArea >= 0.35) break
+    const firstTokens = extractBoundaryTokens(normalizeSelectionText(first.sentence.text))
+    if (firstTokens.length === 0) break
+    const firstTailTokens = firstTokens.slice(-3)
+    const firstTokenSet = new Set(firstTokens)
+    const firstCompact = toCompactAlphaCjk(normalizeSelectionText(first.sentence.text))
+
+    const matchesHead =
+      hasTokenOverlap(firstTailTokens, normSelHeadSet, normSelHeadCompact) ||
+      hasTokenOverlap(selLeadTokens, firstTokenSet, firstCompact)
+    if (matchesHead) break
+
+    const rest = kept.slice(1)
+    if (!rest.some(sentenceMatchesSelection)) break
+    kept.shift()
+  }
+
+  while (kept.length > 1) {
+    const last = kept[kept.length - 1]
+    if (last.strictOverlapArea / last.sentenceArea >= 0.35) break
+    const lastTokens = extractBoundaryTokens(normalizeSelectionText(last.sentence.text))
+    if (lastTokens.length === 0) break
+    const lastHeadTokens = lastTokens.slice(0, 3)
+    const lastTokenSet = new Set(lastTokens)
+    const lastCompact = toCompactAlphaCjk(normalizeSelectionText(last.sentence.text))
+
+    const matchesTail =
+      hasTokenOverlap(lastHeadTokens, normSelTailSet, normSelTailCompact) ||
+      hasTokenOverlap(selTailTokens, lastTokenSet, lastCompact)
+    if (matchesTail) break
+
+    const rest = kept.slice(0, -1)
+    if (!rest.some(sentenceMatchesSelection)) break
+    kept.pop()
+  }
+
+  return kept
+}
+
+/**
+ * 将左栏真实文字选区返回的 PDF 坐标矩形列表反查为对应的原文句子与块键列表。
+ */
+export function matchSelectionRegionsToSentences(
+  layouts: ReadonlyMap<number, PageLayoutResult>,
+  regions: readonly PdfSelectionRegion[],
+  selectedText?: string
+): SelectionSentenceMatch | null {
+  if (regions.length === 0) return null
+
+  let targetPageNumber: number | null = null
+  let targetLayout: PageLayoutResult | undefined
+  for (const region of regions) {
+    const candidate = layouts.get(region.pageNumber)
+    if (candidate && candidate.hasText && candidate.blocks.length > 0) {
+      targetPageNumber = region.pageNumber
+      targetLayout = candidate
+      break
+    }
+  }
+
+  if (targetPageNumber === null || !targetLayout) return null
+
+  const pageRegions = regions.filter(r => r.pageNumber === targetPageNumber)
+  const scored = scoreLayoutSentencesAgainstRects(
+    targetLayout,
+    pageRegions.map(r => r.rect),
+    sentence => sentence.rects
+  )
+  if (scored.length === 0) return null
+
+  const strictCandidates = scored.filter(candidate => candidate.strictOverlapArea > 0)
+  const chosen =
+    strictCandidates.length > 0
+      ? pruneBoundarySelectionCandidates(strictCandidates, selectedText)
+      : [pickMaxLooseCandidate(scored)]
+
+  return buildSelectionMatchFromChosen(targetPageNumber, chosen)
+}
+
+function scoreLayoutSentencesAgainstRects(
+  layout: PageLayoutResult,
+  targetRects: readonly PageRect[],
+  getCandidateRects: (sentence: AnalyzedSentence, block: AnalyzedBlock) => readonly PageRect[]
+): ScoredSentenceCandidate[] {
+  const scored: ScoredSentenceCandidate[] = []
+
+  for (const block of layout.blocks) {
+    const blockKey = computeStableTranslationBlockKey(block)
+    for (const sentence of block.sentences) {
+      const candidateRects = getCandidateRects(sentence, block)
+      let strictOverlapArea = 0
+      let looseOverlapArea = 0
+      let sentenceArea = 0
+
+      for (const sr of candidateRects) {
+        sentenceArea += Math.max(1, sr.width * sr.height)
+        for (const pr of targetRects) {
+          const overlap = computeRectOverlap(sr, pr)
+          if (!overlap) continue
+          const minH = Math.max(0.5, Math.min(sr.height, pr.height))
+          const minW = Math.max(0.5, Math.min(sr.width, pr.width))
+          if (overlap.oh >= minH * 0.35 && overlap.ow >= 1.5) {
+            looseOverlapArea += overlap.area
+          }
+          if (overlap.oh >= minH * 0.45 && overlap.ow >= 1.5 && overlap.ow >= Math.min(minW * 0.5, 14)) {
+            strictOverlapArea += overlap.area
+          }
+        }
+      }
+
+      if (strictOverlapArea > 0 || looseOverlapArea > 0) {
+        scored.push({
+          sentence,
+          blockKey,
+          strictOverlapArea,
+          looseOverlapArea,
+          sentenceArea: Math.max(1, sentenceArea)
+        })
+      }
+    }
+  }
+
+  return scored
+}
+
+function pickMaxLooseCandidate(scored: readonly ScoredSentenceCandidate[]): ScoredSentenceCandidate {
+  let best = scored[0]
+  for (let i = 1; i < scored.length; i += 1) {
+    if (scored[i].looseOverlapArea > best.looseOverlapArea) {
+      best = scored[i]
+    }
+  }
+  return best
+}
+
+function buildSelectionMatchFromChosen(
+  pageNumber: number,
+  chosen: readonly { sentence: AnalyzedSentence; blockKey: string; blockBounds?: PageRect }[]
+): SelectionSentenceMatch | null {
+  const sentenceIds: string[] = []
+  const blockKeys: string[] = []
+  const sourceRects: PageRect[] = []
+  const seenSentences = new Set<string>()
+  const seenBlocks = new Set<string>()
+
+  for (const candidate of chosen) {
+    if (!seenSentences.has(candidate.sentence.id)) {
+      seenSentences.add(candidate.sentence.id)
+      sentenceIds.push(candidate.sentence.id)
+      if (candidate.sentence.rects.length > 0) {
+        sourceRects.push(...candidate.sentence.rects)
+      } else if (candidate.blockBounds) {
+        sourceRects.push(candidate.blockBounds)
+      }
+    }
+    if (!seenBlocks.has(candidate.blockKey)) {
+      seenBlocks.add(candidate.blockKey)
+      blockKeys.push(candidate.blockKey)
+    }
+  }
+
+  if (sentenceIds.length === 0) return null
+  return {
+    pageNumber,
+    sentenceIds,
+    blockKeys,
+    sourceRects
+  }
+}
+
+export interface MirrorDragSelectionResult extends SelectionSentenceMatch {
+  usedMarquee: boolean
+}
+
+interface DisplaySentenceHit {
+  sentence: AnalyzedSentence
+  block: AnalyzedBlock
+  blockKey: string
+  dist: number
+}
+
+function hitTestDisplaySentence(
+  layout: PageLayoutResult,
+  displayPoint: PagePoint,
+  maxDist: number,
+  columnFilter?: number
+): DisplaySentenceHit | null {
+  let best: DisplaySentenceHit | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  let bestArea = Number.POSITIVE_INFINITY
+
+  for (const block of layout.blocks) {
+    for (const sentence of block.sentences) {
+      if (columnFilter !== undefined && sentence.columnIndex !== columnFilter) continue
+      const rects = sentence.displayRects.length > 0 ? sentence.displayRects : [block.displayBounds]
+      for (const rect of rects) {
+        const dist = pointToRectDistance(displayPoint, rect)
+        if (dist > maxDist) continue
+        const area = Math.max(1, rect.width * rect.height)
+        if (dist < bestDist - 1e-6 || (Math.abs(dist - bestDist) <= 1e-6 && area < bestArea)) {
+          bestDist = dist
+          bestArea = area
+          best = {
+            sentence,
+            block,
+            blockKey: computeStableTranslationBlockKey(block),
+            dist
+          }
+        }
+      }
+    }
+  }
+
+  return best
+}
+
+/**
+ * 解析右栏未译镜像底图或公式区域上的拖拽选择（支持从句内扫选连续阅读序与空白区起拖框选）。
+ */
+export function resolveMirrorDragSelection(
+  layout: PageLayoutResult | undefined,
+  startDisplayPoint: PagePoint,
+  currentDisplayPoint: PagePoint
+): MirrorDragSelectionResult | null {
+  if (!layout || !layout.hasText || layout.blocks.length === 0) return null
+
+  const startHit = hitTestDisplaySentence(layout, startDisplayPoint, 4)
+  if (startHit) {
+    let endHit = hitTestDisplaySentence(layout, currentDisplayPoint, 10)
+    if (!endHit && startHit.sentence.columnIndex > 0) {
+      endHit = hitTestDisplaySentence(layout, currentDisplayPoint, 36, startHit.sentence.columnIndex)
+    }
+    if (!endHit) {
+      endHit = hitTestDisplaySentence(layout, currentDisplayPoint, 36) ?? startHit
+    }
+
+    const minOrder = Math.min(startHit.sentence.order, endHit.sentence.order)
+    const maxOrder = Math.max(startHit.sentence.order, endHit.sentence.order)
+    const sweepChosen: Array<{ sentence: AnalyzedSentence; blockKey: string; blockBounds: PageRect }> = []
+    for (const block of layout.blocks) {
+      const blockKey = computeStableTranslationBlockKey(block)
+      for (const sentence of block.sentences) {
+        if (sentence.order >= minOrder && sentence.order <= maxOrder) {
+          sweepChosen.push({ sentence, blockKey, blockBounds: block.bounds })
+        }
+      }
+    }
+
+    const match = buildSelectionMatchFromChosen(layout.pageNumber, sweepChosen)
+    return match ? { ...match, usedMarquee: false } : null
+  }
+
+  const dragRect: PageRect = {
+    x: Math.min(startDisplayPoint.x, currentDisplayPoint.x),
+    y: Math.min(startDisplayPoint.y, currentDisplayPoint.y),
+    width: Math.abs(currentDisplayPoint.x - startDisplayPoint.x),
+    height: Math.abs(currentDisplayPoint.y - startDisplayPoint.y)
+  }
+  if (dragRect.width < 2 && dragRect.height < 2) return null
+
+  const scored = scoreLayoutSentencesAgainstRects(layout, [dragRect], (sentence, block) =>
+    sentence.displayRects.length > 0 ? sentence.displayRects : [block.displayBounds]
+  )
+  if (scored.length === 0) return null
+
+  const strictCandidates = scored.filter(candidate => candidate.strictOverlapArea > 0)
+  const chosen = strictCandidates.length > 0 ? strictCandidates : [pickMaxLooseCandidate(scored)]
+  const match = buildSelectionMatchFromChosen(layout.pageNumber, chosen)
+  return match ? { ...match, usedMarquee: true } : null
+}
+
+export interface OverlayBlockIndentGeometry {
+  anchorX: number
+  anchorWidth: number
+  firstLineIndent: number
+}
+
+/**
+ * 判定一个版面块是否属于需要送译并覆写译文的文本块（公式块、纯数字或无字母符号碎片保留原底图）。
+ */
+export function isTranslatableBlock(
+  block: AnalyzedBlock
+): block is AnalyzedBlock & { kind: Exclude<AnalyzedBlock['kind'], 'formula'> } {
+  if (block.kind === 'formula' || block.sentences.length === 0) return false
+  const raw = block.sentences.map(s => s.text).join(' ')
+  let cleaned = ''
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i)
+    if (code < 32 || code === 127) continue
+    cleaned += raw[i]
+  }
+  const trimmed = cleaned.trim()
+  if (!trimmed) return false
+  return /[A-Za-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(trimmed)
+}
+
+/**
+ * 获取送译与哈希校验用的原文文本（存在行内公式占位符时优先使用占位符版本，以在译文中原样嵌回公式切片）。
+ */
+export function getBlockTranslationSourceText(block: AnalyzedBlock): string {
+  if (block.translationSourceText && block.translationSourceText.trim()) {
+    return block.translationSourceText.trim()
+  }
+  return block.sentences.map(s => s.text).join(' ').trim()
+}
+
+export const INLINE_FORMULA_TOKEN_RE = /⟪M(\d+)⟫/g
+
+export type InlineFormulaSegmentPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'formula'; formula: InlineFormulaSpan }
+
+/**
+ * 将含 ⟪M#⟫ 占位符的译文句切分为纯文本片段与行内公式切片引用；未识别占位符会被安全剔除。
+ */
+export function splitTextWithInlineFormulas(
+  text: string,
+  formulas: readonly InlineFormulaSpan[] | undefined
+): InlineFormulaSegmentPart[] {
+  if (!text) return []
+  if (!formulas || formulas.length === 0 || !text.includes('⟪M')) {
+    const cleaned = text.replace(/⟪M\d+⟫/g, '')
+    return cleaned ? [{ kind: 'text', text: cleaned }] : []
+  }
+
+  const byToken = new Map(formulas.map(f => [f.token, f]))
+  const parts: InlineFormulaSegmentPart[] = []
+  let lastIdx = 0
+
+  for (const match of text.matchAll(INLINE_FORMULA_TOKEN_RE)) {
+    const start = match.index ?? 0
+    if (start > lastIdx) {
+      parts.push({ kind: 'text', text: text.slice(lastIdx, start) })
+    }
+    const formula = byToken.get(match[0])
+    if (formula) {
+      parts.push({ kind: 'formula', formula })
+    }
+    lastIdx = start + match[0].length
+  }
+
+  if (lastIdx < text.length) {
+    parts.push({ kind: 'text', text: text.slice(lastIdx) })
+  }
+
+  return parts.length > 0 ? parts : [{ kind: 'text', text: '' }]
+}
+
+/**
+ * 统计各正文栏的基准左边缘坐标（排除极窄片段与公式块，避免公式缩进拉偏整栏基准）。
+ */
+export function computeColumnLeftEdges(blocks: readonly AnalyzedBlock[]): Map<number, number> {
+  const columnLeftByIndex = new Map<number, number>()
+  for (const block of blocks) {
+    if (block.columnIndex <= 0 || !isTranslatableBlock(block)) continue
+    if (block.displayBounds.width < 60) continue
+    const leftEdge = block.displayBounds.x
+    const prev = columnLeftByIndex.get(block.columnIndex)
+    if (prev === undefined || leftEdge < prev) {
+      columnLeftByIndex.set(block.columnIndex, leftEdge)
+    }
+  }
+  return columnLeftByIndex
+}
+
+/**
+ * 根据原版面多行首行偏移与单行段相对栏左边缘偏移，计算译文叠加块的安全锚点与首行缩进（未缩放 pt）。
+ */
+export function computeOverlayBlockIndent(
+  block: AnalyzedBlock,
+  columnLeftByIndex: ReadonlyMap<number, number>
+): OverlayBlockIndentGeometry {
+  const fallback: OverlayBlockIndentGeometry = {
+    anchorX: block.displayBounds.x,
+    anchorWidth: block.displayBounds.width,
+    firstLineIndent: 0
+  }
+  if ((block.kind !== 'paragraph' && block.kind !== 'list-item') || block.sentences.length === 0) {
+    return fallback
+  }
+
+  const minIndent = Math.max(4, block.fontSize * 0.45)
+  const maxIndent = Math.min(36, block.fontSize * 3.2)
+
+  const firstRect = block.sentences[0].displayRects[0]
+  const indentInBlock = firstRect ? firstRect.x - block.displayBounds.x : 0
+  if (indentInBlock >= minIndent && indentInBlock <= maxIndent) {
+    return {
+      anchorX: block.displayBounds.x,
+      anchorWidth: block.displayBounds.width,
+      firstLineIndent: Math.round(indentInBlock * 10) / 10
+    }
+  }
+
+  if (block.kind === 'paragraph' && block.columnIndex > 0) {
+    const colLeft = columnLeftByIndex.get(block.columnIndex)
+    if (colLeft !== undefined) {
+      const offsetFromCol = block.displayBounds.x - colLeft
+      if (
+        offsetFromCol >= minIndent &&
+        offsetFromCol <= maxIndent &&
+        block.displayBounds.height <= block.fontSize * 1.85 &&
+        block.displayBounds.width >= 60
+      ) {
+        return {
+          anchorX: colLeft,
+          anchorWidth: Math.round((block.displayBounds.width + offsetFromCol) * 10) / 10,
+          firstLineIndent: Math.round(offsetFromCol * 10) / 10
+        }
+      }
+    }
+  }
+
+  return fallback
+}

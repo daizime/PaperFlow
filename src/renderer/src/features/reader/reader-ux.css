@@ -34,6 +34,22 @@
   color: #354258;
 }
 
+.reader-outline__heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reader-outline__badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #eaf0fc;
+  border: 1px solid #c5d4ee;
+  color: #2c529a;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .reader-outline__close {
   min-width: 24px;
   height: 24px;
@@ -181,6 +197,15 @@
   pointer-events: none;
 }
 
+.pdf-sentence-highlight-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
 @media (forced-colors: none) {
   .pdf-search-match {
     background: rgba(255, 212, 59, 0.42);
@@ -190,5 +215,12 @@
   .pdf-search-match--active {
     background: rgba(255, 146, 43, 0.52);
     box-shadow: 0 0 0 1.5px rgba(217, 72, 15, 0.85);
+  }
+
+  .pdf-sentence-highlight {
+    fill: rgba(56, 100, 181, 0.14);
+    stroke: rgba(56, 100, 181, 0.72);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
   }
 }

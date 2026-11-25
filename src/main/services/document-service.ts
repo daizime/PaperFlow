@@ -192,7 +192,9 @@ export class DocumentService {
             displayTitle: existing.displayTitle,
             byteSize: existing.byteSize,
             pageCount: existing.pageCount,
-            importedAt: existing.importedAt
+            importedAt: existing.importedAt,
+            starred: existing.starred,
+            tags: existing.tags
           }
         }
       }

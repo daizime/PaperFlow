@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import type { AnnotationRecord } from '../../../../shared/contracts'
 import { ZERO_CROP_INSETS, measureCanvasCropInsets, type CropInsets } from './margin-crop'
+import { buildHighlightPolygons } from './highlight-polygon'
 import { TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from './pdf-engine'
-import type { PageGeometry, PageTextContent } from './pdf-geometry'
+import { pdfRectToViewport, type PageGeometry, type PageRect, type PageTextContent } from './pdf-geometry'
 import { buildPageTextIndex, findTextRangesForMatch, type SearchMatch, type TextSpan } from './pdf-search'
 import { attachSelectionHighlight } from './selection-highlight'
 import { alignSingleCharacterAdvances } from './text-layer-layout'
@@ -14,6 +16,7 @@ export interface PdfPageData {
   textContent: PageTextContent
   textLayer: TextLayer
   element: HTMLDivElement
+  canvas: HTMLCanvasElement
 }
 
 export interface PdfPageProps {
@@ -25,9 +28,12 @@ export interface PdfPageProps {
   cropMargins?: boolean
   searchMatches?: readonly SearchMatch[]
   activeMatchId?: string | null
+  activeSentenceRects?: readonly PageRect[]
+  annotations?: readonly AnnotationRecord[]
   onTextStatus(pageNumber: number, hasText: boolean): void
   /** 临时页面资源的借用接口；离开渲染范围/缩放/卸载时以 null 撤销。 */
   onPageData?(pageNumber: number, data: PdfPageData | null): void
+  onPageSize?(pageNumber: number, size: { width: number; height: number }): void
   onPageInsets?(pageNumber: number, insets: CropInsets): void
   onActiveMatchRendered?(matchId: string, element: HTMLElement): void
 }
@@ -39,6 +45,7 @@ const MAX_CANVAS_DIMENSION = 8192
 interface RenderedHighlightContext {
   surface: HTMLDivElement
   highlightLayer: HTMLDivElement
+  geometry: PageGeometry
   spans: TextSpan[]
   textDivs: readonly HTMLElement[]
 }
@@ -84,15 +91,18 @@ export function PdfPage({
   cropMargins = false,
   searchMatches,
   activeMatchId = null,
+  activeSentenceRects,
+  annotations,
   onTextStatus,
   onPageData,
+  onPageSize,
   onPageInsets,
   onActiveMatchRendered
 }: PdfPageProps): React.JSX.Element {
   const elementRef = useRef<HTMLDivElement>(null)
   const mountRef = useRef<HTMLDivElement>(null)
   const renderQueue = useRef<Promise<void>>(Promise.resolve())
-  const callbacks = useRef({ onTextStatus, onPageData, onPageInsets, onActiveMatchRendered })
+  const callbacks = useRef({ onTextStatus, onPageData, onPageSize, onPageInsets, onActiveMatchRendered })
   const measuredRef = useRef<{ pdf: PDFDocumentProxy; pageNumber: number } | null>(null)
   const renderedRef = useRef<RenderedHighlightContext | null>(null)
   const [nearViewport, setNearViewport] = useState(false)
@@ -102,8 +112,8 @@ export function PdfPage({
   const [renderVersion, setRenderVersion] = useState(0)
 
   useLayoutEffect(() => {
-    callbacks.current = { onTextStatus, onPageData, onPageInsets, onActiveMatchRendered }
-  }, [onTextStatus, onPageData, onPageInsets, onActiveMatchRendered])
+    callbacks.current = { onTextStatus, onPageData, onPageSize, onPageInsets, onActiveMatchRendered }
+  }, [onTextStatus, onPageData, onPageSize, onPageInsets, onActiveMatchRendered])
 
   useEffect(() => {
     measuredRef.current = null
@@ -151,6 +161,7 @@ export function PdfPage({
         if (viewport.width <= 0 || viewport.height <= 0 || !Number.isFinite(viewport.width * viewport.height)) throw new Error('无效页面尺寸')
         const natural = page.getViewport({ scale: 1 })
         setSize(previous => previous.width === natural.width && previous.height === natural.height ? previous : { width: natural.width, height: natural.height })
+        callbacks.current.onPageSize?.(pageNumber, { width: natural.width, height: natural.height })
         surface = document.createElement('div')
         surface.className = 'pdf-page-surface'
         surface.style.width = viewport.width + 'px'
@@ -212,11 +223,12 @@ export function PdfPage({
         renderedRef.current = {
           surface,
           highlightLayer,
+          geometry,
           spans: buildPageTextIndex(textContent).spans,
           textDivs: textLayer.textDivs
         }
         callbacks.current.onTextStatus(pageNumber, textContent.items.some(item => 'str' in item && item.str.trim().length > 0))
-        callbacks.current.onPageData?.(pageNumber, { geometry, textContent, textLayer, element })
+        callbacks.current.onPageData?.(pageNumber, { geometry, textContent, textLayer, element, canvas })
         completed = true
         setRenderVersion(version => version + 1)
         setStatus('ready')
@@ -260,51 +272,100 @@ export function PdfPage({
   useLayoutEffect(() => {
     const rendered = renderedRef.current
     if (status !== 'ready' || !rendered) return
-    const { surface, highlightLayer, spans, textDivs } = rendered
-    if (!searchMatches || searchMatches.length === 0) {
+    const { surface, highlightLayer, geometry, spans, textDivs } = rendered
+    const hasSearch = Boolean(searchMatches && searchMatches.length > 0)
+    const hasSentence = Boolean(activeSentenceRects && activeSentenceRects.length > 0)
+    const hasAnnotations = Boolean(annotations && annotations.length > 0)
+    if (!hasSearch && !hasSentence && !hasAnnotations) {
       highlightLayer.replaceChildren()
       return
     }
-    const bounds = surface.getBoundingClientRect()
-    if (bounds.width <= 0 || bounds.height <= 0) return
 
-    const range = document.createRange()
-    const nodes: HTMLDivElement[] = []
-    let activeElement: HTMLElement | null = null
-
-    for (const match of searchMatches) {
-      const segments = findTextRangesForMatch(spans, match.startOffset, match.endOffset)
-      const boxes: HighlightBox[] = []
-      for (const segment of segments) {
-        const div = textDivs[segment.divIndex]
-        const textNode = div?.firstChild
-        if (!(textNode instanceof Text) || !div.isConnected) continue
-        const start = Math.max(0, Math.min(textNode.length, segment.localStart))
-        const end = Math.max(start, Math.min(textNode.length, segment.localEnd))
-        if (end <= start) continue
-        range.setStart(textNode, start)
-        range.setEnd(textNode, end)
-        for (const rect of range.getClientRects()) {
-          if (rect.width <= 0 || rect.height <= 0) continue
-          boxes.push({
-            left: rect.left - bounds.left,
-            top: rect.top - bounds.top,
-            width: rect.width,
-            height: rect.height
-          })
+    const svgNs = 'http://www.w3.org/2000/svg'
+    const nodes: Element[] = []
+    if (annotations && annotations.length > 0) {
+      const annSvg = document.createElementNS(svgNs, 'svg')
+      annSvg.setAttribute('class', 'pdf-annotation-highlight-svg')
+      annSvg.setAttribute('width', String(geometry.viewport.width))
+      annSvg.setAttribute('height', String(geometry.viewport.height))
+      annSvg.setAttribute('viewBox', `0 0 ${geometry.viewport.width} ${geometry.viewport.height}`)
+      annSvg.setAttribute('aria-hidden', 'true')
+      for (const ann of annotations) {
+        const viewRects = ann.rects
+          .map(pdfRect => pdfRectToViewport(geometry, pdfRect))
+          .filter(rect => rect.width > 0 && rect.height > 0)
+        const polygons = buildHighlightPolygons(viewRects, { padX: 1.5, padY: 0.8, radius: 3 })
+        for (const poly of polygons) {
+          const path = document.createElementNS(svgNs, 'path')
+          path.setAttribute('class', `pdf-annotation-highlight pdf-annotation-highlight--${ann.color}`)
+          path.setAttribute('data-annotation-id', ann.id)
+          path.setAttribute('d', poly.path)
+          annSvg.appendChild(path)
         }
       }
-      const isActive = activeMatchId !== null && match.id === activeMatchId
-      for (const box of mergeLineBoxes(boxes)) {
-        const marker = document.createElement('div')
-        marker.className = isActive ? 'pdf-search-match pdf-search-match--active' : 'pdf-search-match'
-        marker.dataset.matchId = match.id
-        marker.style.left = `${box.left}px`
-        marker.style.top = `${box.top}px`
-        marker.style.width = `${box.width}px`
-        marker.style.height = `${box.height}px`
-        nodes.push(marker)
-        if (isActive && !activeElement) activeElement = marker
+      if (annSvg.childNodes.length > 0) nodes.push(annSvg)
+    }
+    if (activeSentenceRects && activeSentenceRects.length > 0) {
+      const viewRects = activeSentenceRects
+        .map(pdfRect => pdfRectToViewport(geometry, pdfRect))
+        .filter(rect => rect.width > 0 && rect.height > 0)
+      const polygons = buildHighlightPolygons(viewRects, { padX: 2, padY: 1, radius: 3.5 })
+      if (polygons.length > 0) {
+        const svg = document.createElementNS(svgNs, 'svg')
+        svg.setAttribute('class', 'pdf-sentence-highlight-svg')
+        svg.setAttribute('width', String(geometry.viewport.width))
+        svg.setAttribute('height', String(geometry.viewport.height))
+        svg.setAttribute('viewBox', `0 0 ${geometry.viewport.width} ${geometry.viewport.height}`)
+        svg.setAttribute('aria-hidden', 'true')
+        for (const poly of polygons) {
+          const path = document.createElementNS(svgNs, 'path')
+          path.setAttribute('class', 'pdf-sentence-highlight')
+          path.setAttribute('d', poly.path)
+          svg.appendChild(path)
+        }
+        nodes.push(svg)
+      }
+    }
+
+    const bounds = surface.getBoundingClientRect()
+    let activeElement: HTMLElement | null = null
+    if (searchMatches && searchMatches.length > 0 && bounds.width > 0 && bounds.height > 0) {
+      const range = document.createRange()
+
+      for (const match of searchMatches) {
+        const segments = findTextRangesForMatch(spans, match.startOffset, match.endOffset)
+        const boxes: HighlightBox[] = []
+        for (const segment of segments) {
+          const div = textDivs[segment.divIndex]
+          const textNode = div?.firstChild
+          if (!(textNode instanceof Text) || !div.isConnected) continue
+          const start = Math.max(0, Math.min(textNode.length, segment.localStart))
+          const end = Math.max(start, Math.min(textNode.length, segment.localEnd))
+          if (end <= start) continue
+          range.setStart(textNode, start)
+          range.setEnd(textNode, end)
+          for (const rect of range.getClientRects()) {
+            if (rect.width <= 0 || rect.height <= 0) continue
+            boxes.push({
+              left: rect.left - bounds.left,
+              top: rect.top - bounds.top,
+              width: rect.width,
+              height: rect.height
+            })
+          }
+        }
+        const isActive = activeMatchId !== null && match.id === activeMatchId
+        for (const box of mergeLineBoxes(boxes)) {
+          const marker = document.createElement('div')
+          marker.className = isActive ? 'pdf-search-match pdf-search-match--active' : 'pdf-search-match'
+          marker.dataset.matchId = match.id
+          marker.style.left = `${box.left}px`
+          marker.style.top = `${box.top}px`
+          marker.style.width = `${box.width}px`
+          marker.style.height = `${box.height}px`
+          nodes.push(marker)
+          if (isActive && !activeElement) activeElement = marker
+        }
       }
     }
 
@@ -312,7 +373,7 @@ export function PdfPage({
     if (activeElement && activeMatchId) {
       callbacks.current.onActiveMatchRendered?.(activeMatchId, activeElement)
     }
-  }, [status, renderVersion, searchMatches, activeMatchId])
+  }, [status, renderVersion, searchMatches, activeMatchId, activeSentenceRects, annotations])
 
   const activeInsets = cropMargins ? insets : ZERO_CROP_INSETS
   const fullWidth = size.width * scale

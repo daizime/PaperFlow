@@ -228,7 +228,75 @@
 }
 
 .library-panel .document-entry {
+  position: relative;
   border-radius: 8px;
+}
+
+.library-panel .document-item {
+  gap: 9px;
+  padding-right: 26px;
+}
+
+.library-panel .document-star-badge {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  font-size: 12px;
+  line-height: 1;
+  color: #c77c14;
+  pointer-events: none;
+}
+
+.library-panel .document-hover-actions {
+  position: absolute;
+  bottom: 6px;
+  right: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid #ced8e8;
+  background: #ffffff;
+  box-shadow: 0 3px 10px rgba(24, 34, 51, 0.14);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.library-panel .document-entry:hover .document-hover-actions,
+.library-panel .document-entry:focus-within .document-hover-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.library-panel .document-hover-icon-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #4f5f77;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.library-panel .document-hover-icon-btn:hover:enabled {
+  background: #edf2ff;
+  border-color: #c5d4ee;
+  color: #2c529a;
+}
+
+.library-panel .document-hover-icon-btn--star.is-starred {
+  color: #c77c14;
+}
+
+.library-panel .document-hover-icon-btn--danger:hover:enabled {
+  background: #fff0ee;
+  border-color: #ebc9c4;
+  color: #943d31;
 }
 
 .library-panel .document-actions {
@@ -351,4 +419,177 @@
 .library-panel .library-no-results button {
   margin-top: 14px;
   font-size: 11px;
+}
+
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.library-filters button {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  border-radius: 999px;
+  border: 1px solid #d7deea;
+  background: #fff;
+  color: #55657d;
+}
+
+.library-filters button.is-active {
+  background: #eaf0fc;
+  border-color: #a9bee9;
+  color: #2c529a;
+  font-weight: 600;
+}
+
+.document-progress-track {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: #e4eaf3;
+  overflow: hidden;
+}
+
+.document-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #4e78c8;
+}
+
+.document-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 9px 0;
+}
+
+.document-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #3864b5;
+  font-size: 10px;
+}
+
+.document-tag-pill button {
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: #64738b;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.library-panel .document-action-star.is-starred {
+  color: #b4690e;
+  font-weight: 600;
+}
+
+.library-cross-hits {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed #dce3ee;
+}
+
+.library-cross-hit-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-cross-hit-btn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid #dde4ef;
+  border-radius: 7px;
+  background: #f8fafd;
+  text-align: left;
+}
+
+.library-cross-hit-btn:hover:enabled {
+  background: #eef3fc;
+  border-color: #a9bee9;
+}
+
+.library-cross-hit-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.library-hit-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.library-hit-badge--annotation {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.library-hit-badge--translation {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.library-cross-hit-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #354258;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-cross-hit-page {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #64738b;
+}
+
+.library-cross-hit-snippet {
+  font-size: 11px;
+  color: #55657d;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.library-backup-bar {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e4eaf3;
+}
+
+.library-backup-bar button {
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 550;
 }

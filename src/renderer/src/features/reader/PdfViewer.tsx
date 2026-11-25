@@ -1,21 +1,89 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { DocumentRecord } from '../../../../shared/contracts'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import type { FirstPageCitationSource, FirstPageTextItem } from '../../../../shared/citation'
+import type { AnnotationRecord, DocumentRecord } from '../../../../shared/contracts'
+import { computeTightFigureCropBox } from '../study/figure-crop'
+import { analyzePageLayout, sampleBlockBackgroundColors, type PageLayoutResult } from './layout-analysis'
 import { type CropInsets } from './margin-crop'
 import { PdfOutline } from './PdfOutline'
 import { PdfPage, type PdfPageData } from './PdfPage'
 import { PdfSearchBar } from './PdfSearchBar'
 import { ReaderToolbar } from './ReaderToolbar'
 import { loadPdf, pdfErrorMessage, type PDFDocumentProxy } from './pdf-engine'
-import { extractPdfOutline, type PdfOutlineItem } from './pdf-outline'
+import {
+  clientPointToPdf,
+  pdfRectToViewport,
+  selectionToPdfRects,
+  type PageGeometry,
+  type PagePoint,
+  type PageRect,
+  type PdfSelectionRegion
+} from './pdf-geometry'
+import { extractAutoOutlineFromPdf, extractPdfOutline, type PdfOutlineItem } from './pdf-outline'
 import { PdfSearchService, type SearchMatch } from './pdf-search'
 import { useReaderPersistence } from './useReaderPersistence'
 import './reader.css'
 import './reader-ux.css'
 
+export interface PageBackdropSnapshot {
+  bitmap: ImageBitmap
+  blockColors: Record<string, string>
+}
+
+export interface ReaderMirrorState {
+  pageCount: number
+  currentPage: number
+  scale: number
+  cropMargins: boolean
+  estimatedSize: { width: number; height: number }
+  pageSizes: Record<number, { width: number; height: number }>
+  pageInsets: Record<number, CropInsets>
+  pageTextStatus: Record<number, boolean>
+  headerOffsetPx: number
+  outlineOpen: boolean
+  searchOpen: boolean
+  toolbarDisabled: boolean
+}
+
+export interface ReaderToolbarActions {
+  toggleOutline(): void
+  toggleSearch(): void
+  setScale(scale: number): void
+  fitWidth(): void
+  toggleCropMargins(): void
+}
+
+export type LeftSourceInteractEvent =
+  | { type: 'point'; pageNumber: number; pdfPoint: PagePoint }
+  | { type: 'selection'; regions: PdfSelectionRegion[]; selectedText?: string }
+  | { type: 'clear' }
+
 export interface PdfViewerProps {
-  document: DocumentRecord; onImport(): void; onPageCount(): Promise<void>
-  importing: boolean
+  document: DocumentRecord; onPageCount(): Promise<void>
   onPageData?(pageNumber: number, data: PdfPageData | null): void
+  onPageLayout?(pageNumber: number, result: PageLayoutResult | null): void
+  onPageBackdrop?(pageNumber: number, backdrop: PageBackdropSnapshot | null): void
+  onScrollRootChange?(element: HTMLDivElement | null): void
+  onMirrorStateChange?(state: ReaderMirrorState): void
+  cancelNavigationRef?: MutableRefObject<(() => void) | null>
+  navigateToPageRef?: MutableRefObject<((pageNumber: number) => void) | null>
+  analyzePageRef?: MutableRefObject<((pageNumber: number) => Promise<PageLayoutResult | null>) | null>
+  extractPageTextRef?: MutableRefObject<((pageNumber: number) => Promise<string | null>) | null>
+  extractCitationSourceRef?: MutableRefObject<(() => Promise<FirstPageCitationSource | null>) | null>
+  renderRegionPreviewRef?: MutableRefObject<
+    | ((
+        pageNumber: number,
+        kind: 'figure' | 'table',
+        captionBounds?: PageRect,
+        obstacleBounds?: readonly PageRect[]
+      ) => Promise<string | null>)
+    | null
+  >
+  toolbarActionsRef?: MutableRefObject<ReaderToolbarActions | null>
+  hideFloatingPill?: boolean
+  annotationsByPage?: ReadonlyMap<number, readonly AnnotationRecord[]>
+  activeSentence?: { pageNumber: number; rects: readonly PageRect[] } | null
+  onSourceSentenceInteract?(event: LeftSourceInteractEvent): void
+  onOutlineNavigate?(item: PdfOutlineItem): void
 }
 
 interface NavigationAnchor {
@@ -31,10 +99,33 @@ function isEditableElement(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && target.isContentEditable
 }
 
-export function PdfViewer({ document: record, importing, onImport, onPageCount, onPageData }: PdfViewerProps): React.JSX.Element {
+export function PdfViewer({
+  document: record,
+  onPageCount,
+  onPageData,
+  onPageLayout,
+  onPageBackdrop,
+  onScrollRootChange,
+  onMirrorStateChange,
+  cancelNavigationRef,
+  navigateToPageRef,
+  analyzePageRef,
+  extractPageTextRef,
+  extractCitationSourceRef,
+  renderRegionPreviewRef,
+  toolbarActionsRef,
+  hideFloatingPill = false,
+  annotationsByPage,
+  activeSentence,
+  onSourceSentenceInteract,
+  onOutlineNavigate
+}: PdfViewerProps): React.JSX.Element {
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [size, setSize] = useState({ width: 612, height: 792 })
+  const [pageSizes, setPageSizes] = useState<Record<number, { width: number; height: number }>>({})
+  const [pageInsets, setPageInsets] = useState<Record<number, CropInsets>>({})
+  const [headerOffsetPx, setHeaderOffsetPx] = useState(0)
   const [pageNumber, setPageNumber] = useState(1)
   const [scale, setScale] = useState(1)
   const [fitCommit, setFitCommit] = useState(0)
@@ -45,6 +136,8 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [outlineItems, setOutlineItems] = useState<PdfOutlineItem[]>([])
   const [outlineLoading, setOutlineLoading] = useState(false)
+  const [outlineAutoGenerated, setOutlineAutoGenerated] = useState(false)
+  const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null)
 
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -63,7 +156,7 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
   const navigationAnchor = useRef<NavigationAnchor | null>(null)
   const anchorIntent = useRef<{ request: number; pageNumber: number; resetHorizontal: boolean } | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const titleRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const activePdf = useRef<PDFDocumentProxy | null>(null)
   const activeDocument = useRef<string | null>(null)
@@ -85,26 +178,99 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
   }, [cancelAnchor, invalidateFit])
 
   const onPageCountRef = useRef(onPageCount)
+  const onPageDataRef = useRef(onPageData)
+  const onPageLayoutRef = useRef(onPageLayout)
+  const onPageBackdropRef = useRef(onPageBackdrop)
+  const onScrollRootChangeRef = useRef(onScrollRootChange)
+  const onMirrorStateChangeRef = useRef(onMirrorStateChange)
+  const onSourceSentenceInteractRef = useRef(onSourceSentenceInteract)
+  const onOutlineNavigateRef = useRef(onOutlineNavigate)
+  const backdropTokensRef = useRef<Map<number, number>>(new Map())
+  const renderedPagesRef = useRef<Map<number, { geometry: PageGeometry; surface: HTMLElement }>>(new Map())
+
   useLayoutEffect(() => {
     rootRef.current = scrollRoot
     onPageCountRef.current = onPageCount
+    onPageDataRef.current = onPageData
+    onPageLayoutRef.current = onPageLayout
+    onPageBackdropRef.current = onPageBackdrop
+    onScrollRootChangeRef.current = onScrollRootChange
+    onMirrorStateChangeRef.current = onMirrorStateChange
+    onSourceSentenceInteractRef.current = onSourceSentenceInteract
+    onOutlineNavigateRef.current = onOutlineNavigate
     scaleRef.current = scale
     loadingRef.current = loading
     cropMarginsRef.current = cropMargins
-  }, [scrollRoot, onPageCount, scale, loading, cropMargins])
+  }, [scrollRoot, onPageCount, onPageData, onPageLayout, onPageBackdrop, onScrollRootChange, onMirrorStateChange, onSourceSentenceInteract, onOutlineNavigate, scale, loading, cropMargins])
 
   useLayoutEffect(() => {
+    if (!cancelNavigationRef) return
+    cancelNavigationRef.current = cancelNavigation
+    return () => {
+      cancelNavigationRef.current = null
+    }
+  }, [cancelNavigationRef, cancelNavigation])
+
+  const handleScrollRootRef = useCallback((element: HTMLDivElement | null): void => {
+    setScrollRoot(element)
+    onScrollRootChangeRef.current?.(element)
+  }, [])
+
+  useLayoutEffect(() => {
+    const tokens = backdropTokensRef.current
+    const pagesMap = renderedPagesRef.current
     activeDocument.current = record.id
     activePdf.current = null
     pageInsetsRef.current = {}
+    tokens.clear()
+    pagesMap.clear()
     pendingScrollMatchIdRef.current = null
     cancelNavigation()
     return () => {
       activeDocument.current = null
       activePdf.current = null
+      tokens.clear()
+      pagesMap.clear()
       cancelNavigation()
     }
   }, [record.id, cancelNavigation])
+
+  useEffect(() => {
+    if (!scrollRoot) return
+    let rafId: number | null = null
+    const emitSelection = (): void => {
+      const interact = onSourceSentenceInteractRef.current
+      if (!interact) return
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) return
+      const anchorInRoot = sel.anchorNode ? scrollRoot.contains(sel.anchorNode) : false
+      const focusInRoot = sel.focusNode ? scrollRoot.contains(sel.focusNode) : false
+      if (!anchorInRoot && !focusInRoot) return
+
+      const regions: PdfSelectionRegion[] = []
+      for (const entry of renderedPagesRef.current.values()) {
+        if (!entry.surface.isConnected) continue
+        regions.push(...selectionToPdfRects(sel, entry.surface, entry.geometry))
+      }
+      if (regions.length > 0) {
+        interact({ type: 'selection', regions, selectedText: sel.toString() })
+      }
+    }
+
+    const onSelectionChange = (): void => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId)
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null
+        emitSelection()
+      })
+    }
+
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId)
+      document.removeEventListener('selectionchange', onSelectionChange)
+    }
+  }, [scrollRoot])
 
   useEffect(() => {
     let cancelled = false
@@ -112,7 +278,8 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
     searchServiceRef.current?.dispose()
     searchServiceRef.current = null
     setLoading(true); setError(null); setTextStatus({})
-    setOutlineOpen(false); setOutlineItems([]); setOutlineLoading(false)
+    setPageSizes({}); setPageInsets({})
+    setOutlineOpen(false); setOutlineItems([]); setOutlineLoading(false); setOutlineAutoGenerated(false); setActiveOutlineId(null)
     setSearchOpen(false); setSearchQuery(''); setCaseSensitive(false)
     setSearchMatches([]); setActiveMatchIndex(0); setSearching(false)
     setCropMargins(false)
@@ -157,19 +324,31 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
     if (!pdf || loading || error) return
     const controller = new AbortController()
     setOutlineLoading(true)
-    void extractPdfOutline(pdf, controller.signal)
-      .then(items => {
-        if (!controller.signal.aborted && activePdf.current === pdf) {
+    setOutlineAutoGenerated(false)
+    void (async () => {
+      try {
+        const items = await extractPdfOutline(pdf, controller.signal)
+        if (controller.signal.aborted || activePdf.current !== pdf) return
+        if (items.length > 0) {
           setOutlineItems(items)
+          setOutlineAutoGenerated(false)
+          setOutlineLoading(false)
+          return
+        }
+        const autoItems = await extractAutoOutlineFromPdf(pdf, controller.signal)
+        if (!controller.signal.aborted && activePdf.current === pdf) {
+          setOutlineItems(autoItems)
+          setOutlineAutoGenerated(autoItems.length > 0)
           setOutlineLoading(false)
         }
-      })
-      .catch(() => {
+      } catch {
         if (!controller.signal.aborted && activePdf.current === pdf) {
           setOutlineItems([])
+          setOutlineAutoGenerated(false)
           setOutlineLoading(false)
         }
-      })
+      }
+    })()
     return () => controller.abort()
   }, [pdf, loading, error])
 
@@ -273,6 +452,194 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
     setPageNumber(target)
     beginAnchor(target)
   }, [pdf, beginAnchor, cancelNavigation])
+
+  useEffect(() => {
+    if (!navigateToPageRef) return
+    navigateToPageRef.current = navigate
+    return () => {
+      navigateToPageRef.current = null
+    }
+  }, [navigateToPageRef, navigate])
+
+  useEffect(() => {
+    if (!analyzePageRef) return
+    analyzePageRef.current = async (targetPage: number): Promise<PageLayoutResult | null> => {
+      const active = activePdf.current
+      if (!active || loadingRef.current || targetPage < 1 || targetPage > active.numPages) return null
+      try {
+        const pageObj = await active.getPage(targetPage)
+        try {
+          const viewport = pageObj.getViewport({ scale: 1 })
+          const textContent = (await pageObj.getTextContent({ includeMarkedContent: true })) as Parameters<
+            typeof analyzePageLayout
+          >[0]
+          return analyzePageLayout(textContent, {
+            pageNumber: targetPage,
+            viewport,
+            outputScale: { x: 1, y: 1 }
+          })
+        } finally {
+          if (!pageObj.destroyed) pageObj.cleanup()
+        }
+      } catch {
+        return null
+      }
+    }
+    return () => {
+      analyzePageRef.current = null
+    }
+  }, [analyzePageRef, pdf, loading])
+
+  useEffect(() => {
+    if (!extractPageTextRef) return
+    const cache = new Map<number, string>()
+    extractPageTextRef.current = async (targetPage: number): Promise<string | null> => {
+      const cached = cache.get(targetPage)
+      if (cached !== undefined) return cached
+      const active = activePdf.current
+      if (!active || loadingRef.current || targetPage < 1 || targetPage > active.numPages) return null
+      try {
+        const pageObj = await active.getPage(targetPage)
+        try {
+          const textContent = (await pageObj.getTextContent()) as { items?: Array<{ str?: string; hasEOL?: boolean }> }
+          let out = ''
+          for (const item of textContent.items ?? []) {
+            if (!item || typeof item.str !== 'string') continue
+            out += item.str
+            out += item.hasEOL ? '\n' : ' '
+          }
+          const normalized = out.replace(/[ \t]+\n/g, '\n').trim()
+          cache.set(targetPage, normalized)
+          return normalized
+        } finally {
+          if (!pageObj.destroyed) pageObj.cleanup()
+        }
+      } catch {
+        return null
+      }
+    }
+    return () => {
+      extractPageTextRef.current = null
+    }
+  }, [extractPageTextRef, pdf, loading, record.id])
+
+  useEffect(() => {
+    if (!extractCitationSourceRef) return
+    extractCitationSourceRef.current = async (): Promise<FirstPageCitationSource | null> => {
+      const active = activePdf.current
+      if (!active || loadingRef.current || active.numPages < 1) return null
+      try {
+        const metaRaw = await active.getMetadata().catch(() => null)
+        const infoObj = (metaRaw?.info ?? {}) as Record<string, unknown>
+        const pdfInfo = {
+          title: typeof infoObj.Title === 'string' ? infoObj.Title : undefined,
+          author: typeof infoObj.Author === 'string' ? infoObj.Author : undefined,
+          subject: typeof infoObj.Subject === 'string' ? infoObj.Subject : undefined,
+          creationDate: typeof infoObj.CreationDate === 'string' ? infoObj.CreationDate : undefined
+        }
+
+        const pageObj = await active.getPage(1)
+        try {
+          const textContent = (await pageObj.getTextContent()) as { items?: readonly unknown[] }
+          const items: FirstPageTextItem[] = []
+          let page1Text = ''
+          for (const raw of textContent.items ?? []) {
+            if (!raw || typeof raw !== 'object' || !('str' in raw)) continue
+            const it = raw as { str?: unknown; width?: unknown; hasEOL?: unknown; transform?: unknown }
+            if (typeof it.str !== 'string') continue
+            page1Text += it.str + (it.hasEOL ? '\n' : ' ')
+            const t = Array.isArray(it.transform) ? it.transform : null
+            const fontSize =
+              t && typeof t[0] === 'number' && typeof t[1] === 'number' ? Math.hypot(t[0], t[1]) : 10
+            const x = t && typeof t[4] === 'number' ? t[4] : 0
+            const y = t && typeof t[5] === 'number' ? t[5] : 0
+            items.push({
+              str: it.str,
+              fontSize,
+              x,
+              y,
+              width: typeof it.width === 'number' ? it.width : undefined,
+              hasEOL: Boolean(it.hasEOL)
+            })
+          }
+          return {
+            page1Text: page1Text.replace(/[ \t]+\n/g, '\n').trim(),
+            items,
+            pdfInfo
+          }
+        } finally {
+          if (!pageObj.destroyed) pageObj.cleanup()
+        }
+      } catch {
+        return null
+      }
+    }
+    return () => {
+      extractCitationSourceRef.current = null
+    }
+  }, [extractCitationSourceRef, pdf, loading, record.id])
+
+  useEffect(() => {
+    if (!renderRegionPreviewRef) return
+    renderRegionPreviewRef.current = async (
+      targetPage: number,
+      kind: 'figure' | 'table',
+      captionBounds?: PageRect,
+      obstacleBounds?: readonly PageRect[]
+    ): Promise<string | null> => {
+      const active = activePdf.current
+      if (!active || loadingRef.current || targetPage < 1 || targetPage > active.numPages) return null
+      try {
+        const pageObj = await active.getPage(targetPage)
+        try {
+          const renderScale = 1.8
+          const viewport = pageObj.getViewport({ scale: renderScale })
+          const widthPx = Math.max(1, Math.floor(viewport.width))
+          const heightPx = Math.max(1, Math.floor(viewport.height))
+          const fullCanvas = document.createElement('canvas')
+          fullCanvas.width = widthPx
+          fullCanvas.height = heightPx
+          const ctx = fullCanvas.getContext('2d', { willReadFrequently: true })
+          if (!ctx) return null
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, widthPx, heightPx)
+          await pageObj.render({ canvas: fullCanvas, canvasContext: ctx, viewport }).promise
+
+          const geom = { pageNumber: targetPage, viewport, outputScale: { x: 1, y: 1 } }
+          const capVp =
+            captionBounds && captionBounds.width > 0 && captionBounds.height > 0
+              ? pdfRectToViewport(geom, captionBounds)
+              : undefined
+          const obsVp = obstacleBounds?.map(rect => pdfRectToViewport(geom, rect))
+
+          const imageData = ctx.getImageData(0, 0, widthPx, heightPx)
+          const box = computeTightFigureCropBox(imageData.data, widthPx, heightPx, kind, capVp, obsVp)
+          if (!box) return null
+
+          const maxOutW = 960
+          const ratio = box.sw > maxOutW ? maxOutW / box.sw : 1
+          const outW = Math.max(1, Math.round(box.sw * ratio))
+          const outH = Math.max(1, Math.round(box.sh * ratio))
+          const cropCanvas = document.createElement('canvas')
+          cropCanvas.width = outW
+          cropCanvas.height = outH
+          const outCtx = cropCanvas.getContext('2d')
+          if (!outCtx) return null
+          outCtx.fillStyle = '#ffffff'
+          outCtx.fillRect(0, 0, outW, outH)
+          outCtx.drawImage(fullCanvas, box.sx, box.sy, box.sw, box.sh, 0, 0, outW, outH)
+          return cropCanvas.toDataURL('image/png')
+        } finally {
+          if (!pageObj.destroyed) pageObj.cleanup()
+        }
+      } catch {
+        return null
+      }
+    }
+    return () => {
+      renderRegionPreviewRef.current = null
+    }
+  }, [renderRegionPreviewRef, pdf, loading, record.id])
 
   const scrollElementIntoReader = useCallback((element: HTMLElement): void => {
     const root = rootRef.current
@@ -400,7 +767,7 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
   }, [scrollRoot, applyScale])
 
   useEffect(() => {
-    const panel = titleRef.current?.closest<HTMLElement>('.reader-panel') ?? null
+    const panel = bodyRef.current?.closest<HTMLElement>('.reader-panel') ?? null
     const handlePanelKeyDown = (event: KeyboardEvent): void => {
       if (!activePdf.current || loadingRef.current) return
       const mod = event.ctrlKey || event.metaKey
@@ -486,9 +853,126 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
     setTextStatus(old => old[number] === hasText ? old : { ...old, [number]: hasText })
   }, [])
 
+  const sizeCallback = useCallback((number: number, pageSize: { width: number; height: number }): void => {
+    setPageSizes(old => {
+      const existing = old[number]
+      if (existing && existing.width === pageSize.width && existing.height === pageSize.height) return old
+      return { ...old, [number]: pageSize }
+    })
+  }, [])
+
   const insetsCallback = useCallback((number: number, insets: CropInsets): void => {
     pageInsetsRef.current[number] = insets
+    setPageInsets(old => {
+      const existing = old[number]
+      if (
+        existing &&
+        existing.left === insets.left &&
+        existing.top === insets.top &&
+        existing.right === insets.right &&
+        existing.bottom === insets.bottom
+      ) {
+        return old
+      }
+      return { ...old, [number]: insets }
+    })
   }, [])
+
+  const handlePageData = useCallback((number: number, data: PdfPageData | null): void => {
+    const nextToken = (backdropTokensRef.current.get(number) ?? 0) + 1
+    backdropTokensRef.current.set(number, nextToken)
+    if (data) {
+      const surface = data.element.querySelector<HTMLElement>('.pdf-page-surface')
+      if (surface) {
+        renderedPagesRef.current.set(number, { geometry: data.geometry, surface })
+      } else {
+        renderedPagesRef.current.delete(number)
+      }
+      const layoutResult = analyzePageLayout(data.textContent, data.geometry)
+      onPageLayoutRef.current?.(number, layoutResult)
+      if (onPageBackdropRef.current && data.canvas.width > 0 && data.canvas.height > 0 && typeof createImageBitmap === 'function') {
+        const docId = record.id
+        const blockColors = sampleBlockBackgroundColors(data.canvas, layoutResult, data.geometry)
+        void createImageBitmap(data.canvas)
+          .then(bitmap => {
+            if (backdropTokensRef.current.get(number) !== nextToken || activeDocument.current !== docId) {
+              bitmap.close()
+              return
+            }
+            onPageBackdropRef.current?.(number, { bitmap, blockColors })
+          })
+          .catch(() => {})
+      }
+    } else {
+      renderedPagesRef.current.delete(number)
+      onPageBackdropRef.current?.(number, null)
+    }
+    onPageDataRef.current?.(number, data)
+  }, [record.id])
+
+  const measureHeaderOffset = useCallback((): void => {
+    const body = bodyRef.current
+    const panel = body?.closest<HTMLElement>('.reader-panel') ?? null
+    if (!body || !panel) return
+    const offset = Math.max(0, Math.round(body.getBoundingClientRect().top - panel.getBoundingClientRect().top))
+    setHeaderOffsetPx(prev => (prev === offset ? prev : offset))
+  }, [])
+
+  useEffect(() => {
+    const body = bodyRef.current
+    const panel = body?.closest<HTMLElement>('.reader-panel') ?? null
+    if (!body || !panel) return
+    const observer = new ResizeObserver(() => measureHeaderOffset())
+    observer.observe(panel)
+    observer.observe(body)
+    return () => observer.disconnect()
+  }, [measureHeaderOffset])
+
+  const mirrorState = useMemo<ReaderMirrorState>(
+    () => ({
+      pageCount: pdf && !loading && !error ? pdf.numPages : 0,
+      currentPage: pageNumber,
+      scale,
+      cropMargins,
+      estimatedSize: size,
+      pageSizes,
+      pageInsets,
+      pageTextStatus: textStatus,
+      headerOffsetPx,
+      outlineOpen,
+      searchOpen,
+      toolbarDisabled: !pdf || loading
+    }),
+    [pdf, loading, error, pageNumber, scale, cropMargins, size, pageSizes, pageInsets, textStatus, headerOffsetPx, outlineOpen, searchOpen]
+  )
+
+  if (toolbarActionsRef) {
+    toolbarActionsRef.current = {
+      toggleOutline: () => setOutlineOpen(open => !open),
+      toggleSearch: () => {
+        if (searchOpen) closeSearch()
+        else openAndFocusSearch()
+      },
+      setScale: applyScale,
+      fitWidth: () => { void fitWidth() },
+      toggleCropMargins: () => {
+        cancelNavigation()
+        setCropMargins(crop => !crop)
+        setCropCommit(value => value + 1)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!toolbarActionsRef) return
+    return () => {
+      toolbarActionsRef.current = null
+    }
+  }, [toolbarActionsRef])
+
+  useEffect(() => {
+    onMirrorStateChangeRef.current?.(mirrorState)
+  }, [mirrorState])
 
   const matchesByPage = useMemo(() => {
     const grouped = new Map<number, SearchMatch[]>()
@@ -512,35 +996,11 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
   )
   const saveError = useReaderPersistence(persistenceState)
 
-  const defaultTitle = record.originalFilename.replace(/\.pdf$/i, '') || record.originalFilename
-  const shownTitle = record.displayTitle !== defaultTitle ? record.displayTitle : record.originalFilename
+  useLayoutEffect(() => {
+    measureHeaderOffset()
+  }, [measureHeaderOffset, searchOpen, saveError, textStatus, pageNumber, loading, error, cropMargins, scale])
 
   return <>
-    <div ref={titleRef} className="reader-document-title" title={record.originalFilename}>{shownTitle}</div>
-    <ReaderToolbar
-      pageNumber={pageNumber}
-      pageCount={pdf?.numPages ?? 0}
-      scale={scale}
-      disabled={!pdf || loading}
-      importing={importing}
-      outlineOpen={outlineOpen}
-      searchOpen={searchOpen}
-      cropMargins={cropMargins}
-      onNavigate={navigate}
-      onScale={applyScale}
-      onFitWidth={() => { void fitWidth() }}
-      onToggleOutline={() => setOutlineOpen(open => !open)}
-      onToggleSearch={() => {
-        if (searchOpen) closeSearch()
-        else openAndFocusSearch()
-      }}
-      onToggleCropMargins={() => {
-        cancelNavigation()
-        setCropMargins(crop => !crop)
-        setCropCommit(value => value + 1)
-      }}
-      onImport={onImport}
-    />
     {searchOpen && (
       <PdfSearchBar
         query={searchQuery}
@@ -560,17 +1020,49 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
     {textStatus[pageNumber] === false && <div role="status" className="reader-notice">本页没有可提取文字，可能是扫描页面；当前暂不支持 OCR。</div>}
     {loading && <div className="reader-loading" role="status">正在加载 PDF…</div>}
     {error && <div className="reader-error error-banner" role="alert">{error}</div>}
-    <div className="reader-body">
+    <div className="reader-body" ref={bodyRef}>
       {outlineOpen && (
         <PdfOutline
           items={outlineItems}
           loading={outlineLoading}
+          autoGenerated={outlineAutoGenerated}
           currentPage={pageNumber}
-          onNavigate={navigate}
+          activeItemId={activeOutlineId}
+          onNavigate={item => {
+            if (item.pageNumber !== null) {
+              setActiveOutlineId(item.id)
+              navigate(item.pageNumber)
+              onOutlineNavigateRef.current?.(item)
+            }
+          }}
           onClose={() => setOutlineOpen(false)}
         />
       )}
-      <div className="pdf-scroll" ref={setScrollRoot} onScroll={onScroll}
+      <div className="reader-viewport">
+        <div className="pdf-scroll" ref={handleScrollRootRef} onScroll={onScroll}
+        onClick={event => {
+          const interact = onSourceSentenceInteractRef.current
+          if (!interact || event.button !== 0) return
+          const sel = window.getSelection()
+          if (sel && !sel.isCollapsed) return
+          const pageEl =
+            event.target instanceof Element ? event.target.closest<HTMLElement>('.pdf-page[data-page-number]') : null
+          const targetPage = pageEl ? Number.parseInt(pageEl.dataset.pageNumber ?? '', 10) : Number.NaN
+          const entry = Number.isInteger(targetPage) ? renderedPagesRef.current.get(targetPage) : undefined
+          if (!entry || !entry.surface.isConnected) {
+            interact({ type: 'clear' })
+            return
+          }
+          try {
+            const pdfPoint = clientPointToPdf(entry.geometry, entry.surface.getBoundingClientRect(), {
+              x: event.clientX,
+              y: event.clientY
+            })
+            interact({ type: 'point', pageNumber: targetPage, pdfPoint })
+          } catch {
+            interact({ type: 'clear' })
+          }
+        }}
         onWheelCapture={event => { if (!event.ctrlKey && !event.metaKey) cancelNavigation() }}
         onTouchStartCapture={cancelNavigation} onPointerDownCapture={cancelNavigation}
         onKeyDownCapture={event => { if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancelNavigation() }}
@@ -587,12 +1079,35 @@ export function PdfViewer({ document: record, importing, onImport, onPageCount, 
             cropMargins={cropMargins}
             searchMatches={matchesByPage.get(number)}
             activeMatchId={activeMatch?.pageNumber === number ? activeMatch.id : null}
+            activeSentenceRects={activeSentence?.pageNumber === number ? activeSentence.rects : undefined}
+            annotations={annotationsByPage?.get(number)}
             onTextStatus={textCallback}
-            onPageData={onPageData}
+            onPageData={handlePageData}
+            onPageSize={sizeCallback}
             onPageInsets={insetsCallback}
             onActiveMatchRendered={handleActiveMatchRendered}
           />
         })}</div>}
+        </div>
+        {!hideFloatingPill ? (
+          <div className="reader-pill-dock">
+            <ReaderToolbar
+              pageNumber={pageNumber}
+              pageCount={pdf?.numPages ?? 0}
+              scale={scale}
+              disabled={!pdf || loading}
+              cropMargins={cropMargins}
+              onNavigate={navigate}
+              onScale={applyScale}
+              onFitWidth={() => { void fitWidth() }}
+              onToggleCropMargins={() => {
+                cancelNavigation()
+                setCropMargins(crop => !crop)
+                setCropCommit(value => value + 1)
+              }}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   </>

@@ -1,0 +1,520 @@
+import { describe, expect, test } from 'vitest'
+import {
+  alignBlockSentences,
+  computeColumnLeftEdges,
+  computeOverlayBlockIndent,
+  getBlockTranslationSourceText,
+  hitTestPageSentence,
+  isTranslatableBlock,
+  matchSelectionRegionsToSentences,
+  resolveMirrorDragSelection,
+  splitTextWithInlineFormulas,
+  splitTranslatedSentences
+} from '../../src/renderer/src/features/translation/sentence-alignment'
+import { computeStableTranslationBlockKey, type AnalyzedBlock, type AnalyzedSentence, type PageLayoutResult } from '../../src/renderer/src/features/reader/layout-analysis'
+import type { PageRect } from '../../src/renderer/src/features/reader/pdf-geometry'
+
+function makeSentence(
+  id: string,
+  text: string,
+  rects: PageRect[],
+  order = 1
+): AnalyzedSentence {
+  return {
+    id,
+    pageNumber: 1,
+    order,
+    blockId: 'p1-b001',
+    blockKind: 'paragraph',
+    columnIndex: 1,
+    text,
+    rects,
+    displayRects: rects,
+    bounds: rects[0],
+    displayBounds: rects[0],
+    fragments: [],
+    crossColumn: false
+  }
+}
+
+describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testing & selection lookup', () => {
+  test('splits Chinese and mixed Latin/abbreviation sentences losslessly without breaking Fig. 1 or 3.14', () => {
+    const cjk = '现代阅读器需要稳定的架构（如 Smith 等，2025）。如图 1 所示，比例因子为 3.14！这是第三句？是的。'
+    const cjkSegs = splitTranslatedSentences(cjk)
+    expect(cjkSegs.map(s => s.text)).toEqual([
+      '现代阅读器需要稳定的架构（如 Smith 等，2025）。',
+      '如图 1 所示，比例因子为 3.14！',
+      '这是第三句？',
+      '是的。'
+    ])
+    expect(cjkSegs.map(s => s.text).join('')).toBe(cjk)
+
+    const en = 'As shown in Fig. 1 (e.g., Smith et al., 2025), alpha is 3.14. Second sentence follows cleanly!'
+    const enSegs = splitTranslatedSentences(en)
+    expect(enSegs.map(s => s.text)).toEqual([
+      'As shown in Fig. 1 (e.g., Smith et al., 2025), alpha is 3.14. ',
+      'Second sentence follows cleanly!'
+    ])
+    expect(enSegs.map(s => s.text).join('')).toBe(en)
+
+    const single = '没有内部句号的标题文本'
+    expect(splitTranslatedSentences(single)).toEqual([{ index: 0, text: single, start: 0, end: single.length }])
+  })
+
+  test('aligns 1:1 equal sentence counts as well as N->M merged/split translations bidirectionally', () => {
+    const s1 = makeSentence('s1', 'First sentence is relatively brief.', [{ x: 50, y: 650, width: 180, height: 10 }], 1)
+    const s2 = makeSentence('s2', 'Second sentence explains experimental methodology.', [{ x: 50, y: 635, width: 200, height: 10 }], 2)
+    const s3 = makeSentence('s3', 'Third sentence concludes cleanly.', [{ x: 50, y: 620, width: 150, height: 10 }], 3)
+
+    // 2 -> 2 exact correspondence
+    const exact = alignBlockSentences([s1, s2], '第一句简明扼要。第二句说明实验方法。')
+    expect(exact.sourceToTarget.get('s1')).toEqual([0])
+    expect(exact.sourceToTarget.get('s2')).toEqual([1])
+    expect(exact.targetToSource.get(0)).toEqual(['s1'])
+    expect(exact.targetToSource.get(1)).toEqual(['s2'])
+
+    // 3 -> 2 merged correspondence: every source and every target must remain mapped
+    const merged = alignBlockSentences([s1, s2, s3], '第一句简述并在前半部分衔接核心实验方法。随后第二部分完整给出实验方法并简明收尾结论。')
+    expect(merged.sourceToTarget.get('s1')!.length).toBeGreaterThanOrEqual(1)
+    expect(merged.sourceToTarget.get('s2')!.length).toBeGreaterThanOrEqual(1)
+    expect(merged.sourceToTarget.get('s3')!.length).toBeGreaterThanOrEqual(1)
+    expect(merged.targetToSource.get(0)!.length).toBeGreaterThanOrEqual(1)
+    expect(merged.targetToSource.get(1)!.length).toBeGreaterThanOrEqual(1)
+
+    // 2 -> 3 split correspondence
+    const split = alignBlockSentences([s1, s2], '第一句较短。第二句被译文拆分。补充细节结尾。')
+    expect(split.targetToSource.get(0)).toEqual(['s1'])
+    expect(split.targetToSource.get(1)!.length).toBeGreaterThanOrEqual(1)
+    expect(split.targetToSource.get(2)!.length).toBeGreaterThanOrEqual(1)
+  })
+
+  test('hitTestPageSentence & matchSelectionRegionsToSentences accurately match coordinates while rejecting whitespace/tiny touches', () => {
+    const s1 = makeSentence('s1', 'Alpha sentence.', [{ x: 54, y: 650, width: 160, height: 10 }], 1)
+    const s2 = makeSentence('s2', 'Beta sentence.', [{ x: 54, y: 634, width: 160, height: 10 }], 2)
+    const block: AnalyzedBlock = {
+      id: 'p1-b001',
+      pageNumber: 1,
+      order: 1,
+      kind: 'paragraph',
+      columnIndex: 1,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 54, y: 634, width: 160, height: 26 },
+      displayBounds: { x: 54, y: 132, width: 160, height: 26 },
+      sentences: [s1, s2]
+    }
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [block],
+      sentences: [s1, s2],
+      filteredItems: []
+    }
+    const expectedKey = computeStableTranslationBlockKey(block)
+
+    expect(hitTestPageSentence(layout, { x: 90, y: 655 })?.sentence.id).toBe('s1')
+    expect(hitTestPageSentence(layout, { x: 90, y: 633 })?.sentence.id).toBe('s2') // within 1.5pt edge tolerance
+    expect(hitTestPageSentence(layout, { x: 400, y: 300 })).toBeNull()
+
+    const layoutsMap = new Map([[1, layout]])
+    // 真实覆盖 s1 并且仅擦边接触 s2 不足 0.5pt（不应误命中 s2）
+    const singleMatch = matchSelectionRegionsToSentences(layoutsMap, [
+      { pageNumber: 1, rect: { x: 60, y: 649.6, width: 80, height: 9 } }
+    ])
+    expect(singleMatch?.sentenceIds).toEqual(['s1'])
+    expect(singleMatch?.blockKeys).toEqual([expectedKey])
+
+    // 跨两句选区同时命中 s1 和 s2
+    const multiMatch = matchSelectionRegionsToSentences(layoutsMap, [
+      { pageNumber: 1, rect: { x: 60, y: 651, width: 80, height: 8 } },
+      { pageNumber: 1, rect: { x: 60, y: 636, width: 80, height: 8 } }
+    ])
+    expect(multiMatch?.sentenceIds).toEqual(['s1', 's2'])
+  })
+
+  test('does not leak into preceding same-line sentence on proportional overshoot, vertical bleed, or tight seam clicks', () => {
+    const s1 = makeSentence(
+      's1',
+      'Factorizable updates arise in many domains such as linear algebra and machine learning.',
+      [
+        { x: 54, y: 650, width: 220, height: 10 },
+        { x: 54, y: 638, width: 120, height: 10 }
+      ],
+      1
+    )
+    const s2 = makeSentence(
+      's2',
+      'Section 8 demonstrates how our framework can be used for the incremental evaluation of matrix chain multiplication, recovering prior work on this [44].',
+      [
+        { x: 166, y: 638, width: 108, height: 10 },
+        { x: 54, y: 626, width: 220, height: 10 },
+        { x: 54, y: 614, width: 220, height: 10 },
+        { x: 54, y: 602, width: 22, height: 10 }
+      ],
+      2
+    )
+    const s3 = makeSentence(
+      's3',
+      'Matrix chain computation can be phrased in our language.',
+      [{ x: 80, y: 602, width: 194, height: 10 }],
+      3
+    )
+
+    const block: AnalyzedBlock = {
+      id: 'p1-b001',
+      pageNumber: 1,
+      order: 1,
+      kind: 'paragraph',
+      columnIndex: 1,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 54, y: 602, width: 220, height: 58 },
+      displayBounds: { x: 54, y: 132, width: 220, height: 58 },
+      sentences: [s1, s2, s3]
+    }
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [block],
+      sentences: [s1, s2, s3],
+      filteredItems: []
+    }
+    const layoutsMap = new Map([[1, layout]])
+
+    const s2FullText =
+      'Section 8 demonstrates how our framework can be used for the incremental evaluation of matrix chain multiplication, recovering prior work on this [44].'
+
+    // A. DOM selection rect on line 2 (y=637..651) bleeds 1pt vertically into s1 line 1 and overlaps s1 line 2 by 8pt
+    const lineRegions = [
+      { pageNumber: 1, rect: { x: 166, y: 637, width: 108, height: 14 } },
+      { pageNumber: 1, rect: { x: 54, y: 625, width: 220, height: 13 } },
+      { pageNumber: 1, rect: { x: 54, y: 613, width: 220, height: 13 } },
+      { pageNumber: 1, rect: { x: 54, y: 601, width: 22, height: 13 } }
+    ]
+    expect(matchSelectionRegionsToSentences(layoutsMap, lineRegions)?.sentenceIds).toEqual(['s2'])
+    expect(matchSelectionRegionsToSentences(layoutsMap, lineRegions, s2FullText)?.sentenceIds).toEqual(['s2'])
+
+    // B. Extreme 18pt horizontal overshoot into s1 on line 2 is still pruned via selectedText boundary matching
+    const overshootRegions = [
+      { pageNumber: 1, rect: { x: 156, y: 638, width: 118, height: 10 } },
+      { pageNumber: 1, rect: { x: 54, y: 626, width: 220, height: 10 } },
+      { pageNumber: 1, rect: { x: 54, y: 614, width: 220, height: 10 } },
+      { pageNumber: 1, rect: { x: 54, y: 602, width: 22, height: 10 } }
+    ]
+    expect(matchSelectionRegionsToSentences(layoutsMap, overshootRegions, s2FullText)?.sentenceIds).toEqual(['s2'])
+
+    // C. Genuine cross-sentence drag starting inside s1 tail keeps both s1 and s2
+    const crossRegions = [
+      { pageNumber: 1, rect: { x: 135, y: 638, width: 139, height: 10 } },
+      { pageNumber: 1, rect: { x: 54, y: 626, width: 220, height: 10 } }
+    ]
+    expect(
+      matchSelectionRegionsToSentences(layoutsMap, crossRegions, 'machine learning. Section 8 demonstrates how')
+        ?.sentenceIds
+    ).toEqual(['s1', 's2'])
+
+    // D. Short single-word drag ("Section" / "Se") inside s2 matches only s2
+    expect(
+      matchSelectionRegionsToSentences(
+        layoutsMap,
+        [{ pageNumber: 1, rect: { x: 167, y: 638, width: 28, height: 10 } }],
+        'Section'
+      )?.sentenceIds
+    ).toEqual(['s2'])
+    expect(
+      matchSelectionRegionsToSentences(
+        layoutsMap,
+        [{ pageNumber: 1, rect: { x: 167, y: 638, width: 7, height: 10 } }],
+        'Se'
+      )?.sentenceIds
+    ).toEqual(['s2'])
+
+    // E. Interior point hit strictly inside s2 beats nearby s1 edge tolerance even if s1 has smaller area
+    const smallS1 = makeSentence('s1-small', 'Short end.', [{ x: 100, y: 638, width: 65.5, height: 10 }], 1)
+    const bigS2 = makeSentence('s2-big', 'Section 8 long sentence.', [{ x: 166, y: 638, width: 140, height: 10 }], 2)
+    const tightLayout: PageLayoutResult = {
+      ...layout,
+      blocks: [{ ...block, sentences: [smallS1, bigS2] }],
+      sentences: [smallS1, bigS2]
+    }
+    expect(hitTestPageSentence(tightLayout, { x: 166.5, y: 643 })?.sentence.id).toBe('s2-big')
+  })
+
+  test('resolveMirrorDragSelection supports mid-line reading sweeps, reverse drags, and whitespace marquee selection', () => {
+    const makeDualSentence = (
+      id: string,
+      text: string,
+      displayRects: PageRect[],
+      rects: PageRect[],
+      order: number
+    ): AnalyzedSentence => ({
+      id,
+      pageNumber: 1,
+      order,
+      blockId: 'p1-b001',
+      blockKind: 'paragraph',
+      columnIndex: 1,
+      text,
+      rects,
+      displayRects,
+      bounds: rects[0],
+      displayBounds: displayRects[0],
+      fragments: [],
+      crossColumn: false
+    })
+
+    // Top-down display Y: Line 1 y=140, Line 2 y=152, Line 3 y=164, Line 4 y=176
+    const s1 = makeDualSentence(
+      's1',
+      'First sentence ending.',
+      [
+        { x: 54, y: 140, width: 220, height: 10 },
+        { x: 54, y: 152, width: 112, height: 10 }
+      ],
+      [
+        { x: 54, y: 642, width: 220, height: 10 },
+        { x: 54, y: 630, width: 112, height: 10 }
+      ],
+      1
+    )
+    const s2 = makeDualSentence(
+      's2',
+      'Section 8 mid-line sentence.',
+      [
+        { x: 168, y: 152, width: 106, height: 10 },
+        { x: 54, y: 164, width: 220, height: 10 },
+        { x: 54, y: 176, width: 32, height: 10 }
+      ],
+      [
+        { x: 168, y: 630, width: 106, height: 10 },
+        { x: 54, y: 618, width: 220, height: 10 },
+        { x: 54, y: 606, width: 32, height: 10 }
+      ],
+      2
+    )
+    const s3 = makeDualSentence(
+      's3',
+      'Third following sentence.',
+      [{ x: 90, y: 176, width: 184, height: 10 }],
+      [{ x: 90, y: 606, width: 184, height: 10 }],
+      3
+    )
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [
+        {
+          id: 'p1-b001',
+          pageNumber: 1,
+          order: 1,
+          kind: 'paragraph',
+          columnIndex: 1,
+          fontSize: 10,
+          isBold: false,
+          bounds: { x: 54, y: 606, width: 220, height: 46 },
+          displayBounds: { x: 54, y: 140, width: 220, height: 46 },
+          sentences: [s1, s2, s3]
+        }
+      ],
+      sentences: [s1, s2, s3],
+      filteredItems: []
+    }
+
+    // 1. Mid-line sweep inside s2 only (Line 2 right -> Line 4 left): selects ONLY s2
+    const onlyS2 = resolveMirrorDragSelection(layout, { x: 170, y: 157 }, { x: 75, y: 181 })
+    expect(onlyS2?.sentenceIds).toEqual(['s2'])
+    expect(onlyS2?.usedMarquee).toBe(false)
+
+    // 2. Cross-sentence forward and reverse sweep (s1 <-> s2)
+    expect(resolveMirrorDragSelection(layout, { x: 80, y: 145 }, { x: 120, y: 169 })?.sentenceIds).toEqual(['s1', 's2'])
+    expect(resolveMirrorDragSelection(layout, { x: 120, y: 169 }, { x: 80, y: 145 })?.sentenceIds).toEqual(['s1', 's2'])
+
+    // 3. Marquee starting in blank left margin covering s2's Line 3 while barely grazing s1 Line 2 vertically by 1pt
+    const marqueeS2 = resolveMirrorDragSelection(layout, { x: 10, y: 161 }, { x: 260, y: 173 })
+    expect(marqueeS2?.sentenceIds).toEqual(['s2'])
+    expect(marqueeS2?.usedMarquee).toBe(true)
+  })
+
+  test('computeOverlayBlockIndent restores multi-line and single-line paragraph indentation while ignoring bearings/headings', () => {
+    const makeBlock = (
+      id: string,
+      kind: AnalyzedBlock['kind'],
+      columnIndex: number,
+      displayBounds: PageRect,
+      firstRect: PageRect
+    ): AnalyzedBlock => ({
+      id,
+      pageNumber: 9,
+      order: 1,
+      kind,
+      columnIndex,
+      fontSize: 10,
+      isBold: kind === 'heading',
+      bounds: displayBounds,
+      displayBounds,
+      sentences: [
+        makeSentence(`${id}-s1`, 'Sample text.', [firstRect], 1).bounds
+          ? {
+              ...makeSentence(`${id}-s1`, 'Sample text.', [firstRect], 1),
+              displayRects: [firstRect]
+            }
+          : makeSentence(`${id}-s1`, 'Sample text.', [firstRect], 1)
+      ]
+    })
+
+    const multiLineIndented = makeBlock(
+      'b-multi',
+      'paragraph',
+      1,
+      { x: 51, y: 370.8, width: 238.1, height: 47.8 },
+      { x: 62.4, y: 370.8, width: 226.7, height: 10.5 }
+    )
+    const flushLeft = makeBlock(
+      'b-flush',
+      'paragraph',
+      2,
+      { x: 306.2, y: 212.5, width: 238.1, height: 35.4 },
+      { x: 306.2, y: 212.5, width: 238.1, height: 10.5 }
+    )
+    const singleLineIndented = makeBlock(
+      'b-single',
+      'paragraph',
+      2,
+      { x: 317.5, y: 388.8, width: 226.8, height: 10.5 },
+      { x: 317.5, y: 388.8, width: 226.8, height: 10.5 }
+    )
+    const tinyItalicBearing = makeBlock(
+      'b-italic',
+      'paragraph',
+      1,
+      { x: 51, y: 668, width: 238.1, height: 47.8 },
+      { x: 52.6, y: 668, width: 236.5, height: 10.5 }
+    )
+    const centeredFormulaText = makeBlock(
+      'b-centered',
+      'paragraph',
+      2,
+      { x: 363.1, y: 261.8, width: 47.3, height: 13.4 },
+      { x: 363.1, y: 261.8, width: 47.3, height: 13.4 }
+    )
+    const headingBlock = makeBlock(
+      'b-heading',
+      'heading',
+      1,
+      { x: 62.4, y: 194.7, width: 121.6, height: 12.6 },
+      { x: 62.4, y: 194.7, width: 121.6, height: 12.6 }
+    )
+
+    const colLefts = computeColumnLeftEdges([
+      multiLineIndented,
+      flushLeft,
+      singleLineIndented,
+      tinyItalicBearing,
+      centeredFormulaText,
+      headingBlock
+    ])
+    expect(colLefts.get(1)).toBe(51)
+    expect(colLefts.get(2)).toBe(306.2)
+
+    expect(computeOverlayBlockIndent(multiLineIndented, colLefts)).toEqual({
+      anchorX: 51,
+      anchorWidth: 238.1,
+      firstLineIndent: 11.4
+    })
+    expect(computeOverlayBlockIndent(singleLineIndented, colLefts)).toEqual({
+      anchorX: 306.2,
+      anchorWidth: 238.1,
+      firstLineIndent: 11.3
+    })
+    expect(computeOverlayBlockIndent(flushLeft, colLefts)).toEqual({
+      anchorX: 306.2,
+      anchorWidth: 238.1,
+      firstLineIndent: 0
+    })
+    expect(computeOverlayBlockIndent(tinyItalicBearing, colLefts)).toEqual({
+      anchorX: 51,
+      anchorWidth: 238.1,
+      firstLineIndent: 0
+    })
+    expect(computeOverlayBlockIndent(centeredFormulaText, colLefts)).toEqual({
+      anchorX: 363.1,
+      anchorWidth: 47.3,
+      firstLineIndent: 0
+    })
+    expect(computeOverlayBlockIndent(headingBlock, colLefts)).toEqual({
+      anchorX: 62.4,
+      anchorWidth: 121.6,
+      firstLineIndent: 0
+    })
+  })
+
+  test('isTranslatableBlock keeps all prose/heading/caption blocks translatable while skipping formulas, pure digits, and symbol/control fragments', () => {
+    const buildBlock = (kind: AnalyzedBlock['kind'], text: string): AnalyzedBlock => ({
+      id: `blk-${kind}`,
+      pageNumber: 1,
+      order: 1,
+      kind,
+      columnIndex: 1,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 50, y: 500, width: 120, height: 12 },
+      displayBounds: { x: 50, y: 150, width: 120, height: 12 },
+      sentences: text ? [makeSentence('s-test', text, [{ x: 50, y: 500, width: 120, height: 10 }])] : []
+    })
+
+    expect(isTranslatableBlock(buildBlock('heading', 'Abstract'))).toBe(true)
+    expect(isTranslatableBlock(buildBlock('heading', '6 Factorizable updates'))).toBe(true)
+    expect(isTranslatableBlock(buildBlock('paragraph', 'The delta view computes δS[A, C] in O(1) time.'))).toBe(true)
+    expect(isTranslatableBlock(buildBlock('caption', 'Fig. 7 Creating a delta view tree.'))).toBe(true)
+    expect(isTranslatableBlock(buildBlock('list-item', '[1] First item in list.'))).toBe(true)
+
+    expect(isTranslatableBlock(buildBlock('formula', 'E = mc^2 (1)'))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('paragraph', ''))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('paragraph', '123'))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('paragraph', '\u0005\u0006'))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('paragraph', '︸ ︸'))).toBe(false)
+  })
+
+  test('getBlockTranslationSourceText & splitTextWithInlineFormulas map placeholders and omit stray tokens cleanly', () => {
+    const formula = {
+      token: '⟪M1⟫',
+      fallbackText: 'δVRST@A',
+      displayRect: { x: 100, y: 200, width: 24, height: 14 },
+      baselineY: 210,
+      lineFontSize: 10
+    }
+    const blockWithInline: AnalyzedBlock = {
+      id: 'b-inline',
+      pageNumber: 9,
+      order: 1,
+      kind: 'paragraph',
+      columnIndex: 2,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 50, y: 500, width: 180, height: 14 },
+      displayBounds: { x: 50, y: 200, width: 180, height: 14 },
+      sentences: [makeSentence('s-in', 'Compute δVRST@A efficiently.', [{ x: 50, y: 500, width: 180, height: 10 }])],
+      inlineFormulas: [formula],
+      translationSourceText: 'Compute ⟪M1⟫ efficiently.'
+    }
+    expect(getBlockTranslationSourceText(blockWithInline)).toBe('Compute ⟪M1⟫ efficiently.')
+    expect(splitTextWithInlineFormulas('高效计算 ⟪M1⟫ 以及 ⟪M99⟫ 结束。', blockWithInline.inlineFormulas)).toEqual([
+      { kind: 'text', text: '高效计算 ' },
+      { kind: 'formula', formula },
+      { kind: 'text', text: ' 以及 ' },
+      { kind: 'text', text: ' 结束。' }
+    ])
+  })
+})

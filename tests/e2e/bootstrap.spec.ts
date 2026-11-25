@@ -6,7 +6,38 @@ test('T01 真实桌面启动、安全隔离与导航阻止', async () => {
     await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
     await expect(page.getByText('尚未翻译', { exact: true })).toBeVisible()
     expect(await page.evaluate(() => typeof (globalThis as Record<string, unknown>).require)).toBe('undefined')
-    expect(await page.evaluate(() => Object.keys(window.paperflow).sort())).toEqual(['deleteDocument', 'getReaderState', 'importPdf', 'importPdfBytes', 'listDocuments', 'readPdfBytes', 'renameDocument', 'saveReaderState', 'updatePageCount'])
+    expect(await page.evaluate(() => Object.keys(window.paperflow).sort())).toEqual([
+      'cancelTranslation',
+      'clearDocumentTranslations',
+      'copyImageDataUrl',
+      'copyText',
+      'createAnnotation',
+      'deleteAnnotation',
+      'deleteDocument',
+      'explainSelection',
+      'exportAnnotationsMarkdown',
+      'exportBackup',
+      'getPageTranslations',
+      'getReaderState',
+      'getTranslationSettings',
+      'importBackup',
+      'importPdf',
+      'importPdfBytes',
+      'listAnnotations',
+      'listDocuments',
+      'listReaderProgress',
+      'onTranslationProgress',
+      'readPdfBytes',
+      'renameDocument',
+      'saveReaderState',
+      'saveTranslationSettings',
+      'searchLibrary',
+      'testTranslationConnection',
+      'translatePage',
+      'updateAnnotation',
+      'updateDocumentMeta',
+      'updatePageCount'
+    ])
     const preferences = await app.evaluate(({ BrowserWindow }) => (BrowserWindow.getAllWindows()[0].webContents as unknown as { getLastWebPreferences(): Record<string, unknown> }).getLastWebPreferences())
     expect(preferences).toMatchObject({ sandbox: true, nodeIntegration: false, contextIsolation: true, webSecurity: true })
     await page.evaluate(() => { window.open('https://example.com'); window.location.href = 'https://example.com' })

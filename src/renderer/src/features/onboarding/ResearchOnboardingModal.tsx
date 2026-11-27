@@ -229,7 +229,7 @@ export function ResearchOnboardingModal({
       >
         <div className="onboarding-modal__header">
           <div>
-            <div className="onboarding-modal__eyebrow">PaperFlow · 研究生科研向导</div>
+            <div className="onboarding-modal__eyebrow">Foliopair · 研究生科研向导</div>
             <h3 id="onboarding-modal-title">开启你的科研文献工作区</h3>
           </div>
           <button
@@ -603,7 +603,7 @@ export function ResearchOnboardingModal({
                   </label>
                   <div className="onboarding-modal__glossary-sample" data-testid="onboarding-glossary-preview">
                     示例：{previewGlossary.slice(0, 3).map(item => `${item.source} → ${item.target}`).join('、')}
-                    {previewGlossary.length > 3 ? ' 等' : ''}。仅对该文件夹内论文生效，可在左侧分类树「⚙」随时增删。
+                    {previewGlossary.length > 3 ? ' 等' : ''}。仅对该文件夹内论文生效，可在左侧分类树「分类设置」随时增删。
                   </div>
                 </div>
               ) : null}
@@ -647,7 +647,7 @@ export function ResearchOnboardingModal({
                 disabled={saving}
                 onClick={() => void handleSubmit()}
               >
-                {saving ? '正在保存…' : '完成并进入 PaperFlow'}
+                {saving ? '正在保存…' : '完成并进入 Foliopair'}
               </button>
             )}
           </div>

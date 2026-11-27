@@ -164,7 +164,7 @@ export function PptPreviewModal({
           <div className="ppt-preview-main">
             <div className={`ppt-preview-canvas${isDarkSlide ? ' is-dark-slide' : ' is-light-slide'}`}>
               <div className="ppt-preview-canvas__top-bar">
-                <span>PaperFlow Academic Deck</span>
+                <span>Foliopair Academic Deck</span>
                 <span>
                   {safeIndex + 1} / {deck.slides.length} · {LAYOUT_LABELS[activeSlide.layout]}
                 </span>

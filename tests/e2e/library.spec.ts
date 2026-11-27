@@ -34,7 +34,7 @@ test('T02 导入、去重、同名共存、IPC、损坏拒绝、数据库重启'
     await importFixture(app, page, 'corrupt.pdf')
     await expect(page.getByRole('alert')).toContainText('损坏')
     await expect(page.locator('.library-tree-doc')).toHaveCount(2)
-    await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
+    await expect(page.getByText('Foliopair', { exact: true })).toBeVisible()
     await app.close()
     running = await launchApp(data)
     await expect(running.page.locator('.library-tree-doc')).toHaveCount(2)

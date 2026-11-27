@@ -1,0 +1,152 @@
+/* PaperFlow 语义化设计令牌（Light 纸墨档案 / Sepia 暖棉纸 / Dark 石墨暗桌）
+ * Unslop 方法论署名（CC BY 4.0）: Damir Sokolovsky (@heydamir, https://github.com/heydamir/unslop)
+ */
+
+:root {
+  --pf-font-sans: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --pf-font-mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* 空间与圆角标尺（4px 基准 + 嵌套圆角） */
+  --pf-radius-xs: 4px;
+  --pf-radius-sm: 6px;
+  --pf-radius-md: 8px;
+  --pf-radius-lg: 12px;
+  --pf-radius-xl: 14px;
+
+  /* 动效曲线与节奏 */
+  --pf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --pf-dur-fast: 140ms;
+  --pf-dur-mid: 200ms;
+
+  /* Light 主题：档案纸墨中性斜坡 */
+  --pf-bg-canvas: #eceef2;
+  --pf-bg-sidebar: #f8f9fa;
+  --pf-bg-chrome: #fdfdfd;
+  --pf-bg-surface: #ffffff;
+  --pf-bg-raised: #f1f3f6;
+  --pf-bg-hover: rgba(23, 30, 44, 0.055);
+  --pf-bg-active: #e9effa;
+  --pf-bg-overlay: rgba(255, 255, 255, 0.96);
+  --pf-bg-backdrop: rgba(17, 23, 34, 0.36);
+
+  --pf-text: #1c222e;
+  --pf-text-secondary: #4a5468;
+  --pf-text-muted: #6c7689;
+
+  --pf-border: rgba(28, 34, 46, 0.09);
+  --pf-border-strong: rgba(28, 34, 46, 0.16);
+  --pf-border-active: rgba(47, 90, 168, 0.34);
+
+  /* 单一克制主强调色（档案钴墨蓝，>= 4.5:1 对比度） */
+  --pf-accent: #2f5aa8;
+  --pf-accent-hover: #254888;
+  --pf-accent-soft: #eaf0fb;
+  --pf-accent-text: #224482;
+
+  --pf-ok: #1a7a47;
+  --pf-ok-dot: #1f9d5a;
+  --pf-ok-soft: #ecf7f0;
+  --pf-ok-border: rgba(26, 122, 71, 0.24);
+
+  --pf-warn: #8c5209;
+  --pf-warn-dot: #c9770e;
+  --pf-warn-soft: #fbf4e4;
+  --pf-warn-border: rgba(166, 102, 16, 0.28);
+
+  --pf-danger: #9c382c;
+  --pf-danger-soft: #fdf0ee;
+  --pf-danger-border: rgba(156, 56, 44, 0.25);
+
+  /* 中性轻阴影（绝不使用高饱和蓝调或霓虹发光） */
+  --pf-shadow-sm: 0 1px 2px rgba(17, 23, 34, 0.06);
+  --pf-shadow-md: 0 4px 14px rgba(17, 23, 34, 0.08), 0 1px 2px rgba(17, 23, 34, 0.04);
+  --pf-shadow-lg: 0 12px 30px rgba(17, 23, 34, 0.14), 0 2px 6px rgba(17, 23, 34, 0.05);
+  --pf-inset-highlight: none;
+}
+
+html[data-theme="sepia"] {
+  --pf-bg-canvas: #e5dac3;
+  --pf-bg-sidebar: #f3ebda;
+  --pf-bg-chrome: #f7f0e1;
+  --pf-bg-surface: #fbf6eb;
+  --pf-bg-raised: #ebe1ca;
+  --pf-bg-hover: rgba(66, 48, 22, 0.065);
+  --pf-bg-active: #ecdcba;
+  --pf-bg-overlay: rgba(251, 246, 235, 0.96);
+  --pf-bg-backdrop: rgba(48, 36, 18, 0.42);
+
+  --pf-text: #32281a;
+  --pf-text-secondary: #584a36;
+  --pf-text-muted: #766750;
+
+  --pf-border: rgba(66, 48, 22, 0.12);
+  --pf-border-strong: rgba(66, 48, 22, 0.22);
+  --pf-border-active: rgba(128, 78, 20, 0.36);
+
+  --pf-accent: #824e16;
+  --pf-accent-hover: #693e10;
+  --pf-accent-soft: #efe0bf;
+  --pf-accent-text: #62390d;
+
+  --pf-ok: #2c663b;
+  --pf-ok-dot: #318249;
+  --pf-ok-soft: #e7efe2;
+  --pf-ok-border: rgba(44, 102, 59, 0.25);
+
+  --pf-warn: #7c4909;
+  --pf-warn-dot: #b96d12;
+  --pf-warn-soft: #f5e6c5;
+  --pf-warn-border: rgba(145, 92, 18, 0.3);
+
+  --pf-danger: #91382a;
+  --pf-danger-soft: #f6e4dd;
+  --pf-danger-border: rgba(145, 56, 42, 0.28);
+
+  --pf-shadow-sm: 0 1px 2px rgba(48, 36, 18, 0.07);
+  --pf-shadow-md: 0 4px 14px rgba(48, 36, 18, 0.1), 0 1px 2px rgba(48, 36, 18, 0.05);
+  --pf-shadow-lg: 0 12px 30px rgba(48, 36, 18, 0.16), 0 2px 6px rgba(48, 36, 18, 0.07);
+}
+
+html[data-theme="dark"] {
+  --pf-bg-canvas: #121417;
+  --pf-bg-sidebar: #171a1f;
+  --pf-bg-chrome: #181b20;
+  --pf-bg-surface: #1e2228;
+  --pf-bg-raised: #262b33;
+  --pf-bg-hover: rgba(235, 240, 248, 0.065);
+  --pf-bg-active: #263246;
+  --pf-bg-overlay: rgba(28, 32, 39, 0.96);
+  --pf-bg-backdrop: rgba(8, 10, 14, 0.62);
+
+  --pf-text: #eceff4;
+  --pf-text-secondary: #aab3c2;
+  --pf-text-muted: #7f8999;
+
+  --pf-border: rgba(236, 239, 244, 0.09);
+  --pf-border-strong: rgba(236, 239, 244, 0.16);
+  --pf-border-active: rgba(114, 158, 235, 0.42);
+
+  --pf-accent: #4c7cd4;
+  --pf-accent-hover: #5c8be0;
+  --pf-accent-soft: #23334e;
+  --pf-accent-text: #b7d0ff;
+
+  --pf-ok: #7be0a7;
+  --pf-ok-dot: #38b872;
+  --pf-ok-soft: #162a1f;
+  --pf-ok-border: rgba(56, 184, 114, 0.3);
+
+  --pf-warn: #f5c36b;
+  --pf-warn-dot: #e09a2b;
+  --pf-warn-soft: #2b2111;
+  --pf-warn-border: rgba(224, 154, 43, 0.34);
+
+  --pf-danger: #f3aba4;
+  --pf-danger-soft: #351d1d;
+  --pf-danger-border: rgba(243, 171, 164, 0.28);
+
+  --pf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --pf-shadow-md: 0 6px 16px rgba(0, 0, 0, 0.42);
+  --pf-shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.56);
+  --pf-inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}

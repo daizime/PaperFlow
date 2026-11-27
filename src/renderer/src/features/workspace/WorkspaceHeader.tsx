@@ -1,5 +1,6 @@
 import { type RefObject } from 'react'
 import type { DocumentRecord, DocumentTranslationScope } from '../../../../shared/contracts'
+import { BrandPageIcon } from '../../components/UiIcons'
 
 export type ReadingTheme = 'light' | 'sepia' | 'dark'
 
@@ -92,8 +93,10 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps): React.JSX.Element {
   return (
     <header className="app-header">
-      <div className="brand-mark" aria-hidden="true">P</div>
-      <strong>PaperFlow</strong>
+      <div className="brand-mark" aria-hidden="true">
+        <BrandPageIcon size={15} />
+      </div>
+      <strong>Foliopair</strong>
       <button
         type="button"
         className={libraryCollapsed ? 'app-header__sidebar-toggle is-collapsed' : 'app-header__sidebar-toggle'}

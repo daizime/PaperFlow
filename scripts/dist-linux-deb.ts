@@ -88,7 +88,7 @@ export function buildWrapperScript(): string {
 export function buildDesktopEntry(): string {
   return [
     '[Desktop Entry]',
-    'Name=PaperFlow',
+    'Name=Foliopair',
     'Comment=面向科研论文的本地 PDF 阅读器',
     'GenericName=PDF Reader',
     'Exec=/opt/PaperFlow/paperflow %U',

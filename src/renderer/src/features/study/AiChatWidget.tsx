@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import {
+  BoltIcon,
+  ChatIcon,
+  CompareIcon,
+  DocumentIcon,
+  GlobeSearchIcon,
+  PagesIcon,
+  ReviewIcon,
+  SlidesIcon,
+  StackIcon,
+  SummaryIcon
+} from '../../components/UiIcons'
 import type {
   AcademicSlideDeck,
   AiChatContextDocument,
@@ -774,10 +786,10 @@ export function AiChatWidget({
           height: drawerExpanded ? `${floatSize.height}px` : 'auto'
         }
 
-  const scopePill = (() => {
+  const scopePill: { icon: ReactNode; text: string; title: string } = (() => {
     if (effectiveScope === 'free') {
       return {
-        icon: '💬',
+        icon: <ChatIcon size={13} className="pf-inline-icon" />,
         text: activeDocument ? '自由对话（不带正文）' : 'AI 对话（自由问）',
         title: '自由提问模式：不附带 PDF 页面正文；点击可切换对话范围'
       }
@@ -785,7 +797,7 @@ export function AiChatWidget({
     if (effectiveScope === 'all-open' && openPaneSummaries.length > 0) {
       const fullList = openPaneSummaries.map(item => `${item.label}·${item.title}`).join(' / ')
       return {
-        icon: '📚',
+        icon: <StackIcon size={13} className="pf-inline-icon" />,
         text: `同屏 ${openPaneSummaries.length} 篇（${openPaneSummaries.map(item => item.label).join('/')}）`,
         title: `已识别同屏 ${openPaneSummaries.length} 篇：${fullList}；点击切换`
       }
@@ -793,13 +805,13 @@ export function AiChatWidget({
     if (activeDocument) {
       const title = activeDocument.displayTitle || activeDocument.originalFilename
       return {
-        icon: '📄',
+        icon: <DocumentIcon size={13} className="pf-inline-icon" />,
         text: `${activePaneLabel ? `${activePaneLabel} · ` : ''}${title}`,
         title: `当前识别：${activePaneLabel ? `[${activePaneLabel}] ` : ''}${title}；点击切换范围或分栏`
       }
     }
     return {
-      icon: '💬',
+      icon: <ChatIcon size={13} className="pf-inline-icon" />,
       text: 'AI 对话',
       title: '暂未打开 PDF，可直接自由提问'
     }
@@ -956,7 +968,9 @@ export function AiChatWidget({
                         }
                       }}
                     >
-                      <span className="ai-chat-popover__item-main">📄 当前篇文献 {effectiveScope === 'active' ? '✓' : ''}</span>
+                      <span className="ai-chat-popover__item-main">
+                        <DocumentIcon size={14} className="pf-inline-icon" /> 当前篇文献 {effectiveScope === 'active' ? '✓' : ''}
+                      </span>
                       <span className="ai-chat-popover__item-sub">
                         {activeDocument
                           ? `${activePaneLabel ? `${activePaneLabel} · ` : ''}${activeDocument.displayTitle || activeDocument.originalFilename}`
@@ -974,7 +988,7 @@ export function AiChatWidget({
                         }}
                       >
                         <span className="ai-chat-popover__item-main">
-                          📚 同屏 {openPaneCount} 篇 {effectiveScope === 'all-open' ? '✓' : ''}
+                          <StackIcon size={14} className="pf-inline-icon" /> 同屏 {openPaneCount} 篇 {effectiveScope === 'all-open' ? '✓' : ''}
                         </span>
                         <span className="ai-chat-popover__item-sub">
                           {openPaneSummaries.map(item => `${item.label}·${item.title}`).join(' / ')}
@@ -990,7 +1004,9 @@ export function AiChatWidget({
                         setOpenPopover(null)
                       }}
                     >
-                      <span className="ai-chat-popover__item-main">💬 自由提问模式 {effectiveScope === 'free' ? '✓' : ''}</span>
+                      <span className="ai-chat-popover__item-main">
+                        <ChatIcon size={14} className="pf-inline-icon" /> 自由提问模式 {effectiveScope === 'free' ? '✓' : ''}
+                      </span>
                       <span className="ai-chat-popover__item-sub">纯通用科研对话，不附加 PDF 正文</span>
                     </button>
                   </div>
@@ -1064,8 +1080,8 @@ export function AiChatWidget({
                   {messages.length === 0 ? (
                     <div className="ai-chat-empty">
                       <div className="ai-chat-empty__lead">
-                        <strong>{activeDocument ? '已连接当前文献，想让我如何协助？' : '暂未打开 PDF，可直接自由提问'}</strong>
-                        <span>可直接下方输入问题，或点一键科研技能生成结构化结果</span>
+                        <strong>{activeDocument ? '当前文献助手' : '通用学术助手'}</strong>
+                        <span>输入问题，或输入 / 调用科研技能</span>
                       </div>
                       <div className="ai-chat-starter-grid" data-testid="ai-skill-starter-grid">
                         <button
@@ -1074,7 +1090,9 @@ export function AiChatWidget({
                           disabled={sending || Boolean(runningSkill)}
                           onClick={() => void handleRunSkill('summary-focus')}
                         >
-                          <span className="ai-chat-starter-card__title">📝 深度总结</span>
+                          <span className="ai-chat-starter-card__title">
+                            <SummaryIcon size={14} className="pf-inline-icon" /> 深度总结
+                          </span>
                           <span className="ai-chat-starter-card__desc">FOCUS 精读结构化输出</span>
                         </button>
                         <button
@@ -1083,7 +1101,9 @@ export function AiChatWidget({
                           disabled={sending || Boolean(runningSkill)}
                           onClick={() => void handleRunSkill('ppt-deck')}
                         >
-                          <span className="ai-chat-starter-card__title">📊 生成 PPT</span>
+                          <span className="ai-chat-starter-card__title">
+                            <SlidesIcon size={14} className="pf-inline-icon" /> 生成 PPT
+                          </span>
                           <span className="ai-chat-starter-card__desc">16:9 汇报可微调导出</span>
                         </button>
                         <button
@@ -1092,7 +1112,9 @@ export function AiChatWidget({
                           disabled={sending || Boolean(runningSkill)}
                           onClick={() => void handleRunSkill('peer-review')}
                         >
-                          <span className="ai-chat-starter-card__title">🔍 审稿批判</span>
+                          <span className="ai-chat-starter-card__title">
+                            <ReviewIcon size={14} className="pf-inline-icon" /> 审稿批判
+                          </span>
                           <span className="ai-chat-starter-card__desc">优势、漏洞与复现风险</span>
                         </button>
                         {onOpenLiteratureSearch ? (
@@ -1101,7 +1123,9 @@ export function AiChatWidget({
                             data-testid="ai-skill-starter-search-lit-btn"
                             onClick={handleTriggerLiteratureSearch}
                           >
-                            <span className="ai-chat-starter-card__title">🌐 搜相关文献</span>
+                            <span className="ai-chat-starter-card__title">
+                              <GlobeSearchIcon size={14} className="pf-inline-icon" /> 搜相关文献
+                            </span>
                             <span className="ai-chat-starter-card__desc">按主题标签检索并入库</span>
                           </button>
                         ) : null}
@@ -1113,7 +1137,9 @@ export function AiChatWidget({
                             disabled={sending || Boolean(runningSkill)}
                             onClick={() => void handleRunSkill('compare-matrix')}
                           >
-                            <span className="ai-chat-starter-card__title">⚖️ 多篇对比</span>
+                            <span className="ai-chat-starter-card__title">
+                              <CompareIcon size={14} className="pf-inline-icon" /> 多篇对比
+                            </span>
                             <span className="ai-chat-starter-card__desc">横向对比同屏 {openPaneCount} 篇文献核心方法与实验指标</span>
                           </button>
                         ) : null}
@@ -1275,7 +1301,9 @@ export function AiChatWidget({
                 {openPopover === 'skills' ? (
                   <div className="ai-chat-popover ai-chat-popover--skills" data-testid="ai-skill-popover">
                     <div className="ai-chat-popover__head">
-                      <span>✦ 一键科研技能（或输入 / 触发）</span>
+                      <span>
+                        <BoltIcon size={13} className="pf-inline-icon" /> 科研技能（或输入 / 触发）
+                      </span>
                       <button type="button" aria-label="关闭技能菜单" onClick={() => setOpenPopover(null)}>
                         ×
                       </button>
@@ -1287,7 +1315,9 @@ export function AiChatWidget({
                         disabled={sending || Boolean(runningSkill)}
                         onClick={() => void handleRunSkill('summary-focus')}
                       >
-                        <span className="ai-chat-popover__item-main">📝 深度总结</span>
+                        <span className="ai-chat-popover__item-main">
+                          <SummaryIcon size={14} className="pf-inline-icon" /> 深度总结
+                        </span>
                         <span className="ai-chat-popover__item-sub">FOCUS 精读法保留数值与方法细节，可导出 .md</span>
                       </button>
                       <button
@@ -1296,7 +1326,9 @@ export function AiChatWidget({
                         disabled={sending || Boolean(runningSkill)}
                         onClick={() => void handleRunSkill('ppt-deck')}
                       >
-                        <span className="ai-chat-popover__item-main">📊 生成 PPT</span>
+                        <span className="ai-chat-popover__item-main">
+                          <SlidesIcon size={14} className="pf-inline-icon" /> 生成 PPT
+                        </span>
                         <span className="ai-chat-popover__item-sub">生成 16:9 汇报大纲与演讲备注，支持微调导出 .pptx</span>
                       </button>
                       <button
@@ -1305,7 +1337,9 @@ export function AiChatWidget({
                         disabled={sending || Boolean(runningSkill)}
                         onClick={() => void handleRunSkill('peer-review')}
                       >
-                        <span className="ai-chat-popover__item-main">🔍 审稿批判</span>
+                        <span className="ai-chat-popover__item-main">
+                          <ReviewIcon size={14} className="pf-inline-icon" /> 审稿批判
+                        </span>
                         <span className="ai-chat-popover__item-sub">模拟顶会审稿人梳理优势、漏洞与复现风险</span>
                       </button>
                       {openPaneCount >= 2 ? (
@@ -1315,7 +1349,9 @@ export function AiChatWidget({
                           disabled={sending || Boolean(runningSkill)}
                           onClick={() => void handleRunSkill('compare-matrix')}
                         >
-                          <span className="ai-chat-popover__item-main">⚖️ 多篇对比</span>
+                          <span className="ai-chat-popover__item-main">
+                            <CompareIcon size={14} className="pf-inline-icon" /> 多篇对比
+                          </span>
                           <span className="ai-chat-popover__item-sub">横向对比同屏多篇文献的算法与实验结果</span>
                         </button>
                       ) : null}
@@ -1325,7 +1361,9 @@ export function AiChatWidget({
                           data-testid="ai-skill-search-lit-btn"
                           onClick={handleTriggerLiteratureSearch}
                         >
-                          <span className="ai-chat-popover__item-main">🌐 搜相关文献</span>
+                          <span className="ai-chat-popover__item-main">
+                            <GlobeSearchIcon size={14} className="pf-inline-icon" /> 搜相关文献
+                          </span>
                           <span className="ai-chat-popover__item-sub">基于当前主题与标签在线检索并一键入库 PDF</span>
                         </button>
                       ) : null}
@@ -1364,7 +1402,9 @@ export function AiChatWidget({
                                 })
                               }
                             >
-                              <span className="ai-chat-popover__item-main">⚡ {item.name}</span>
+                              <span className="ai-chat-popover__item-main">
+                                <BoltIcon size={13} className="pf-inline-icon" /> {item.name}
+                              </span>
                               <span className="ai-chat-popover__item-sub">
                                 {item.description || item.prompt}
                               </span>
@@ -1468,7 +1508,9 @@ export function AiChatWidget({
                 {openPopover === 'sampling' && activeDocument && effectiveScope !== 'free' ? (
                   <div className="ai-chat-popover ai-chat-popover--sampling" data-testid="ai-sampling-popover">
                     <div className="ai-chat-popover__head">
-                      <span>📑 技能与提问读取页码范围</span>
+                      <span>
+                        <PagesIcon size={13} className="pf-inline-icon" /> 技能与提问读取页码范围
+                      </span>
                       <button type="button" aria-label="关闭读取范围面板" onClick={() => setOpenPopover(null)}>
                         ×
                       </button>
@@ -1529,7 +1571,7 @@ export function AiChatWidget({
                     <textarea
                       data-testid="ai-chat-input"
                       rows={2}
-                      placeholder="问这篇论文任何问题，或输入 / 呼出科研技能…"
+                      placeholder="输入问题，或按 / 调用科研技能…"
                       value={draft}
                       disabled={sending}
                       onChange={event => {
@@ -1547,10 +1589,12 @@ export function AiChatWidget({
                           type="button"
                           className={`ai-chat-tool-btn ai-chat-popover-trigger${openPopover === 'skills' ? ' is-open' : ''}`}
                           data-testid="ai-skill-trigger-btn"
-                          title="打开一键科研技能（或在输入框输入 /）"
+                          title="打开科研技能（或在输入框输入 /）"
                           onClick={() => setOpenPopover(curr => (curr === 'skills' ? null : 'skills'))}
                         >
-                          <span>✦ 技能</span>
+                          <span>
+                            <BoltIcon size={13} className="pf-inline-icon" /> 技能
+                          </span>
                           {runningSkill ? <span>· 运行中</span> : null}
                           <span aria-hidden="true">▾</span>
                         </button>
@@ -1564,7 +1608,9 @@ export function AiChatWidget({
                             title="切换科研技能与提问的页码读取范围"
                             onClick={() => setOpenPopover(curr => (curr === 'sampling' ? null : 'sampling'))}
                           >
-                            <span>📑 {samplingButtonText}</span>
+                            <span>
+                              <PagesIcon size={13} className="pf-inline-icon" /> {samplingButtonText}
+                            </span>
                             <span aria-hidden="true">▾</span>
                           </button>
                         ) : null}

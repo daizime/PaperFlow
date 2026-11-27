@@ -31,7 +31,7 @@ export async function launchApp(
   })
   try {
     const page = await app.firstWindow()
-    await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
+    await expect(page.getByText('Foliopair', { exact: true })).toBeVisible()
     await expect(page.locator('.app-shell')).toHaveAttribute('data-onboarding-ready', 'true', { timeout: 15000 })
     if (!options.keepOnboardingOpen) {
       const skipBtn = page.getByTestId('onboarding-skip')

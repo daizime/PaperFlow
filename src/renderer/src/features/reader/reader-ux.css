@@ -32,7 +32,7 @@
   width: min(232px, calc(100% - 12px));
   max-width: 100%;
   z-index: 15;
-  box-shadow: 6px 0 22px rgba(20, 34, 62, 0.16);
+  box-shadow: var(--pf-shadow-lg);
 }
 
 .reader-outline__header {
@@ -53,7 +53,8 @@
 
 .reader-outline__badge {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-xs);
+  font-variant-numeric: tabular-nums;
   background: #eaf0fc;
   border: 1px solid #c5d4ee;
   color: #2c529a;

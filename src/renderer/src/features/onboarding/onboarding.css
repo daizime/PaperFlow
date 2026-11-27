@@ -2,8 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(24, 34, 51, 0.5);
-  backdrop-filter: blur(2px);
+  background: var(--pf-bg-backdrop);
   display: grid;
   place-items: center;
   padding: 18px;
@@ -14,10 +13,11 @@
   max-height: calc(100vh - 36px);
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border: 1px solid #d5dde9;
-  border-radius: 12px;
-  box-shadow: 0 20px 52px rgba(24, 34, 51, 0.28);
+  background: var(--pf-bg-surface);
+  border: 1px solid var(--pf-border-strong);
+  border-radius: var(--pf-radius-lg);
+  box-shadow: var(--pf-shadow-lg);
+  border-radius: var(--pf-radius-lg);
   overflow: hidden;
   color: #263143;
 }
@@ -274,31 +274,31 @@
 .onboarding-modal__step-btn {
   padding: 6px 8px;
   font-size: 11.5px;
-  font-weight: 550;
-  border-radius: 7px;
-  background: #f5f7fb;
-  color: #5b6a80;
+  font-weight: 500;
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-bg-raised);
+  color: var(--pf-text-secondary);
 }
 
 .onboarding-modal__step-btn.is-active {
-  background: #eaf0fc;
-  border-color: #4f77c4;
-  color: #2c529a;
-  font-weight: 650;
+  background: var(--pf-accent-soft);
+  border-color: var(--pf-border-active);
+  color: var(--pf-accent-text);
+  font-weight: 600;
 }
 
 .onboarding-modal__summary-banner {
   padding: 9px 11px;
-  border-radius: 8px;
-  border: 1px solid #c8d8f4;
-  background: #f2f6fe;
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border-active);
+  background: var(--pf-accent-soft);
   font-size: 11.5px;
   line-height: 1.5;
 }
 
 .onboarding-modal__summary-banner p {
   margin: 2px 0 0;
-  color: #4a5d7c;
+  color: var(--pf-text-secondary);
 }
 
 .onboarding-modal__rec-list {
@@ -309,9 +309,9 @@
 
 .onboarding-modal__preview {
   padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #e1e7f0;
-  background: #f8fafd;
+  border-radius: var(--pf-radius-md);
+  border: 1px solid var(--pf-border);
+  background: var(--pf-bg-raised);
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -326,7 +326,7 @@
 }
 
 .onboarding-modal__preview-label {
-  color: #64738b;
+  color: var(--pf-text-muted);
 }
 
 .onboarding-modal__preview-tags {
@@ -337,12 +337,12 @@
 
 .onboarding-modal__preview-tag {
   padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid #c5d4ef;
-  background: #ffffff;
-  color: #2c529a;
+  border-radius: var(--pf-radius-xs);
+  border: 1px solid var(--pf-border-active);
+  background: var(--pf-bg-surface);
+  color: var(--pf-accent-text);
   font-size: 11px;
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .onboarding-modal__checkbox {

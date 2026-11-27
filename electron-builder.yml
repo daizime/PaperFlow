@@ -26,7 +26,7 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: PaperFlow
+  shortcutName: Foliopair
 linux:
   executableName: paperflow
   icon: build/icon.png

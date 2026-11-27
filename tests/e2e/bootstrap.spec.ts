@@ -3,7 +3,7 @@ import { createTestData, launchApp } from './helpers'
 test('T01 真实桌面启动、安全隔离与导航阻止', async () => {
   const { app, page } = await launchApp(await createTestData())
   try {
-    await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
+    await expect(page.getByText('Foliopair', { exact: true })).toBeVisible()
     await expect(page.getByText('尚未翻译', { exact: true })).toBeVisible()
     expect(await page.evaluate(() => typeof (globalThis as Record<string, unknown>).require)).toBe('undefined')
     expect(await page.evaluate(() => Object.keys(window.paperflow).sort())).toEqual([

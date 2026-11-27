@@ -13,6 +13,7 @@ import {
 import { RESEARCH_TRACK_OPTIONS, getTrackById } from '../../../../shared/research-onboarding'
 import { FolderSettingsModal } from './FolderSettingsModal'
 import { DOC_DRAG_MIME, setActiveWorkspaceDrag } from '../reader/split-panes'
+import { FolderMoveIcon, FolderTreeIcon, SettingsIcon, SplitIcon } from '../../components/UiIcons'
 import { formatDocumentTitle, type ImportFailureDetail } from './useLibrary'
 import './library.css'
 
@@ -827,7 +828,7 @@ export function LibraryPanel({
                   onOpenInSplit(doc.id)
                 }}
               >
-                ◫
+                <SplitIcon size={13} />
               </button>
             ) : null}
             {onAutoDetectTitle ? (
@@ -867,7 +868,7 @@ export function LibraryPanel({
                   setMovingId(toggleOff ? null : doc.id)
                 }}
               >
-                ↪
+                <FolderMoveIcon size={13} />
               </button>
             ) : null}
             <button
@@ -1006,7 +1007,7 @@ export function LibraryPanel({
                   else setSettingsFolderId(folder.id)
                 }}
               >
-                ⚙
+                <SettingsIcon size={13} />
               </button>
             ) : null}
           </div>
@@ -1579,7 +1580,7 @@ export function LibraryPanel({
           <div className="library-folder-tree__list">
             <div className={`library-folder-row${effectiveFolderFilter === null ? ' is-active' : ''}`}>
               <span className="library-folder-caret-spacer" aria-hidden="true">
-                ▤
+                <FolderTreeIcon size={13} />
               </span>
               <button
                 type="button"
@@ -1793,7 +1794,7 @@ export function LibraryPanel({
           !loadError && (
             <div className="empty-library">
               <span className="library-empty-symbol" aria-hidden="true">
-                ▤
+                <FolderTreeIcon size={18} />
               </span>
               <p>文献库为空</p>
               <small>导入或拖拽 PDF 到此窗口</small>

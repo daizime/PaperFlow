@@ -4807,7 +4807,11 @@ export default function App(): React.JSX.Element {
       </main>
       <UsageToastLayer
         toast={usageToast}
-        unconfiguredPrompt={isCompareMode || annotationsOpen || settingsOpen ? null : unconfiguredPrompt}
+        unconfiguredPrompt={
+          isCompareMode || annotationsOpen || settingsOpen || (aiChatOpen && aiChatDrawerExpanded)
+            ? null
+            : unconfiguredPrompt
+        }
         onDismiss={() => setUsageToast(null)}
         onDismissUnconfiguredPrompt={() => setUnconfiguredPrompt(null)}
         onOpenEngineSettings={() => {

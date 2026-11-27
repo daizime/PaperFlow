@@ -31,6 +31,11 @@ html[data-theme="sepia"] .app-header__divider {
   background: #d8cba8;
 }
 
+html[data-theme="sepia"] .brand-mark {
+  background: #7c4a15;
+  color: #fffdf7;
+}
+
 html[data-theme="sepia"] .app-header__focus-pill,
 html[data-theme="sepia"] .study-companion-pane-badge {
   background: #efe0bf;
@@ -87,8 +92,16 @@ html[data-theme="sepia"] .library-backup-bar {
 }
 
 html[data-theme="sepia"] .reader-floating-pill {
-  background: rgba(250, 245, 232, 0.94);
-  box-shadow: 0 6px 20px rgba(61, 51, 36, 0.14);
+  background: rgba(247, 239, 222, 0.8);
+  border-color: rgba(154, 126, 78, 0.34);
+  box-shadow: var(--pf-shadow-md), inset 0 1px 0 rgba(255, 250, 238, 0.65);
+  color: #4a3f2d;
+}
+
+html[data-theme="sepia"] .reader-floating-pill .reader-toolbar__page input {
+  background: rgba(255, 251, 241, 0.86);
+  border-color: #d6c5a0;
+  color: #3d3324;
 }
 
 html[data-theme="sepia"] .study-peek-card__preview {
@@ -184,6 +197,12 @@ html[data-theme="dark"] .study-drawer__header h3,
 html[data-theme="dark"] .study-explain-card__header strong,
 html[data-theme="dark"] .study-peek-card__header strong {
   color: #edf2fb;
+}
+
+html[data-theme="dark"] .brand-mark {
+  background: #2a3242;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f1f5f9;
 }
 
 html[data-theme="dark"] .local-badge,
@@ -398,7 +417,7 @@ html[data-theme="dark"] .study-color-dot--pink {
 
 html[data-theme="dark"] .study-color-dot.is-selected {
   border-color: #ffffff;
-  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.45);
+  box-shadow: 0 0 0 2px var(--pf-border-strong);
 }
 
 html[data-theme="dark"] .pdf-annotation-highlight--yellow {
@@ -451,13 +470,19 @@ html[data-theme="dark"] .pdf-badge {
   color: #9ec0ff;
 }
 
-html[data-theme="dark"] .reader-floating-pill,
 html[data-theme="dark"] .study-companion-bar,
 html[data-theme="dark"] .study-explain-card,
 html[data-theme="dark"] .study-peek-card,
 html[data-theme="dark"] .document-hover-actions {
   background: rgba(27, 32, 42, 0.95);
   border-color: #384457;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .reader-floating-pill {
+  background: rgba(27, 32, 42, 0.76);
+  border-color: rgba(236, 239, 244, 0.14);
+  box-shadow: var(--pf-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   color: #dce3ef;
 }
 
@@ -676,7 +701,7 @@ html[data-theme="dark"] .translation-resizer.is-dragging::after {
   border-radius: 8px;
   border: 1px solid #cfd9e7;
   background: #ffffff;
-  box-shadow: 0 12px 26px rgba(24, 34, 51, 0.18);
+  box-shadow: var(--pf-shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -725,7 +750,7 @@ html[data-theme="sepia"] .app-header .app-header__theme-btn.is-active {
 html[data-theme="sepia"] .app-header .theme-menu-popover {
   background: #faf4e6;
   border-color: #d4c39e;
-  box-shadow: 0 12px 26px rgba(82, 58, 24, 0.2);
+  box-shadow: var(--pf-shadow-lg);
 }
 
 html[data-theme="sepia"] .app-header .theme-menu-popover button {
@@ -758,7 +783,7 @@ html[data-theme="dark"] .app-header .app-header__theme-btn.is-active {
 html[data-theme="dark"] .app-header .theme-menu-popover {
   background: #1c222e;
   border-color: #354359;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--pf-shadow-lg);
 }
 
 html[data-theme="dark"] .app-header .theme-menu-popover button:not(.study-color-dot) {
@@ -816,6 +841,35 @@ html[data-theme="dark"] .view-mode-switcher {
   border-color: #c8d4e8;
   color: #2c529a;
   font-weight: 600;
+}
+
+html[data-theme="sepia"] .view-mode-switcher button.is-selected {
+  background: #fbf6eb;
+  border-color: #c9a667;
+  color: #5b380f;
+}
+
+html[data-theme="sepia"] .translation-header__btn--primary {
+  background: var(--pf-accent);
+  border-color: var(--pf-accent);
+  color: #fffdf7;
+}
+
+html[data-theme="sepia"] .translation-header__btn--primary:hover:enabled {
+  background: var(--pf-accent-hover);
+  border-color: var(--pf-accent-hover);
+}
+
+html[data-theme="sepia"] .translation-sync-toggle {
+  background: #faf5e8;
+  border-color: #d8cba8;
+  color: #4a3f2d;
+}
+
+html[data-theme="sepia"] .translation-sync-toggle.is-locked {
+  background: #efe0bf;
+  border-color: #c9a667;
+  color: #5b380f;
 }
 
 html[data-theme="dark"] .view-mode-switcher button.is-selected {

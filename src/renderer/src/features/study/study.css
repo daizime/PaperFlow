@@ -42,8 +42,10 @@
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid #d0dae8;
   border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(24, 34, 51, 0.16);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--pf-shadow-md);
+  background: var(--pf-bg-overlay);
+  border-color: var(--pf-border-strong);
+  border-radius: var(--pf-radius-lg);
 }
 
 .study-peek-card {
@@ -192,7 +194,7 @@
 
 .study-color-dot.is-selected {
   border-color: #1e3a8a;
-  box-shadow: 0 0 0 2px rgba(56, 100, 181, 0.28);
+  box-shadow: 0 0 0 2px var(--pf-border-strong);
 }
 
 .study-companion-btn {
@@ -400,9 +402,9 @@ html[data-theme='dark'] .study-companion-btn--danger {
   bottom: 0;
   width: min(336px, 88vw);
   z-index: 36;
-  background: #fff;
-  border-left: 1px solid #d5dde9;
-  box-shadow: -8px 0 24px rgba(24, 34, 51, 0.12);
+  background: var(--pf-bg-surface);
+  border-left: 1px solid var(--pf-border);
+  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
 }
@@ -412,37 +414,39 @@ html[data-theme='dark'] .study-companion-btn--danger {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid #e4eaf3;
+  border-bottom: 1px solid var(--pf-border);
 }
 
 .study-drawer__header h3 {
   font-size: 14px;
-  font-weight: 650;
-  color: #263143;
+  font-weight: 600;
+  color: var(--pf-text);
 }
 
 .study-drawer__count {
+  font-family: var(--pf-font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
-  color: #6b788b;
+  color: var(--pf-text-muted);
 }
 
 .study-drawer__filters {
   display: flex;
   gap: 6px;
-  padding: 9px 14px;
-  border-bottom: 1px solid #edf1f7;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--pf-border);
 }
 
 .study-drawer__filters button {
-  padding: 3px 9px;
+  padding: 4px 10px;
   font-size: 11px;
-  border-radius: 999px;
+  border-radius: var(--pf-radius-sm);
 }
 
 .study-drawer__filters button.is-active {
-  background: #eaf0fc;
-  border-color: #a9bee9;
-  color: #2c529a;
+  background: var(--pf-accent-soft);
+  border-color: var(--pf-border-active);
+  color: var(--pf-accent-text);
   font-weight: 600;
 }
 
@@ -762,14 +766,14 @@ html[data-theme='dark'] .study-companion-btn--danger {
   justify-content: center;
   min-width: 22px;
   padding: 2px 6px;
-  border: 1px solid #cdd7e6;
+  border: 1px solid var(--pf-border-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
-  background: #fff;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  border-radius: var(--pf-radius-xs);
+  background: var(--pf-bg-surface);
+  font-family: var(--pf-font-mono);
   font-size: 11px;
   font-weight: 600;
-  color: #354258;
+  color: var(--pf-text);
 }
 
 .study-citation-reextract {

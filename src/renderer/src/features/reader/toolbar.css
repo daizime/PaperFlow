@@ -1,14 +1,14 @@
 .workspace-topbar {
-  height: 42px;
+  height: 40px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
   gap: 8px;
-  padding: 0 14px;
-  border-bottom: 1px solid #dfe5ee;
-  background: #fcfcfd;
-  color: #4f5f77;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--pf-border);
+  background: var(--pf-bg-chrome);
+  color: var(--pf-text-secondary);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -37,8 +37,8 @@
   min-height: 0;
   background: transparent;
   font-size: 12px;
-  font-weight: 550;
-  color: #354258;
+  font-weight: 500;
+  color: var(--pf-text);
   max-width: clamp(120px, 20vw, 280px);
   white-space: nowrap;
   overflow: hidden;
@@ -48,8 +48,10 @@
 
 .workspace-topbar button {
   height: 28px;
-  font-size: 11px;
-  padding: 0 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 0 10px;
+  border-radius: var(--pf-radius-sm);
   white-space: nowrap;
   flex-shrink: 0;
   display: inline-flex;
@@ -61,7 +63,8 @@
 .workspace-topbar .translation-structure-meta {
   max-width: 210px;
   font-size: 11px;
-  color: #64738b;
+  font-variant-numeric: tabular-nums;
+  color: var(--pf-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -70,9 +73,9 @@
 
 .workspace-topbar .reader-toolbar__import {
   margin-left: 0;
-  color: #3864b5;
-  border-color: #cedaf0;
-  background: #f4f7fd;
+  color: var(--pf-accent-text);
+  border-color: var(--pf-border-active);
+  background: var(--pf-accent-soft);
 }
 
 .reader-toolbar__group {
@@ -84,9 +87,9 @@
 
 .reader-toolbar__divider {
   width: 1px;
-  height: 18px;
-  background: #e1e6ee;
-  margin: 0 2px;
+  height: 16px;
+  background: var(--pf-border-strong);
+  margin: 0 4px;
   flex-shrink: 0;
 }
 
@@ -94,12 +97,12 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 20px;
+  bottom: 16px;
   z-index: 9;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 0 16px;
   background: transparent;
   pointer-events: none;
 }
@@ -108,23 +111,25 @@
   pointer-events: auto;
 }
 
+/* 底部悬浮控制条：外 12px / 内 8px 嵌套圆角 + 柔和毛玻璃质感 */
 .reader-floating-pill {
   display: inline-flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 5px;
+  gap: 4px;
   height: 36px;
-  padding: 0 10px;
+  padding: 4px 8px;
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-  border-radius: 999px;
-  border: 1px solid #d4ddeb;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 6px 20px rgba(24, 34, 51, 0.14);
-  color: #4d5d75;
+  border-radius: var(--pf-radius-lg);
+  border: 1px solid rgba(28, 34, 46, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  box-shadow: var(--pf-shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  color: var(--pf-text-secondary);
 }
 
 .reader-floating-pill::-webkit-scrollbar {
@@ -132,12 +137,14 @@
 }
 
 .reader-floating-pill button {
-  height: 26px;
-  font-size: 11px;
+  height: 28px;
+  font-size: 11.5px;
+  font-weight: 500;
   padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid #d7deea;
-  background: rgba(255, 255, 255, 0.96);
+  border-radius: var(--pf-radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--pf-text-secondary);
   white-space: nowrap;
   flex-shrink: 0;
   display: inline-flex;
@@ -145,12 +152,18 @@
   justify-content: center;
 }
 
+.reader-floating-pill button:hover:enabled {
+  background: var(--pf-bg-hover);
+  border-color: transparent;
+  color: var(--pf-text);
+}
+
 .reader-floating-pill button.reader-toolbar__icon {
-  min-width: 26px;
-  width: 26px;
-  height: 26px;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
 }
 
@@ -158,7 +171,9 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 11.5px;
+  font-family: var(--pf-font-mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -166,12 +181,14 @@
 .reader-toolbar__page input {
   width: 38px;
   height: 26px;
-  border: 1px solid #d7deea;
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--pf-border-strong);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-bg-surface);
   text-align: center;
-  font-size: 11px;
-  color: #354258;
+  font-family: var(--pf-font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pf-text);
   appearance: textfield;
   -moz-appearance: textfield;
 }
@@ -183,22 +200,24 @@
 }
 
 .reader-toolbar__page input:disabled {
-  background: #f4f6f9;
-  color: #98a3b2;
+  background: var(--pf-bg-raised);
+  color: var(--pf-text-muted);
 }
 
 .reader-toolbar__zoom {
-  min-width: 38px;
-  font-size: 11px;
+  min-width: 40px;
+  font-family: var(--pf-font-mono);
+  font-size: 11.5px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  color: var(--pf-text);
   white-space: nowrap;
 }
 
-/* 双栏模式下底部悬浮页码与缩放胶囊居中横跨整个阅读区 */
+/* 双栏模式下底部悬浮页码与缩放条居中横跨整个阅读区 */
 .workspace-dual-pill-dock {
   position: absolute;
-  bottom: 20px;
+  bottom: 16px;
   left: calc(var(--library-col-width, 252px) + (100% - var(--library-col-width, 252px)) / 2);
   transform: translateX(-50%);
   z-index: 18;

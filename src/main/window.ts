@@ -66,7 +66,7 @@ export async function createWindow(onCreated?: (window: BrowserWindow) => void):
   const width = Math.min(1440, Math.max(minWidth, Math.floor(workArea.width * 0.92)))
   const height = Math.min(900, Math.max(minHeight, Math.floor(workArea.height * 0.92)))
   const window = new BrowserWindow({
-    title: 'PaperFlow', width, height, minWidth, minHeight, resizable: true, maximizable: true,
+    title: 'Foliopair', width, height, minWidth, minHeight, resizable: true, maximizable: true,
     show: false, autoHideMenuBar: true, backgroundColor: '#f5f6f8',
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {

@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
       const { response } = await dialog.showMessageBox(window, {
         type: 'warning',
         title: '授权本机 AI 程序',
-        message: '确认允许 PaperFlow 以你的系统账号运行此程序',
+        message: '确认允许 Foliopair 以你的系统账号运行此程序',
         detail: [
           `程序：${request.resolvedExecutable}`,
           `参数：${request.args.map(argument => JSON.stringify(argument)).join(' ') || '无'}`,
@@ -88,7 +88,7 @@ app.whenReady().then(async () => {
   })
 }).catch((error: unknown) => {
   if (quitting) return
-  dialog.showErrorBox('PaperFlow 启动失败', error instanceof Error ? error.message : String(error))
+  dialog.showErrorBox('Foliopair 启动失败', error instanceof Error ? error.message : String(error))
   app.quit()
 })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

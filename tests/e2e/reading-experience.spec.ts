@@ -71,6 +71,7 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
   try {
     const { app, page } = running
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     // 1. 主题切换：明亮 -> 护眼（验证 PDF multiply 暖纸层） -> 深色

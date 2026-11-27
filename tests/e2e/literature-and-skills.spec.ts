@@ -85,7 +85,14 @@ test('主动 AI 搜文献、按标签发现并一键导入 PDF，以及 AI 对�
 
       let reply = '常规回答'
       let useSse = false
-      if (joined.includes('academic search strategist')) {
+      if (joined.includes('{"translations"')) {
+        const lastBracket = joined.lastIndexOf('[')
+        const rawBlocks = lastBracket >= 0 ? joined.slice(lastBracket) : '[]'
+        const blocks = JSON.parse(rawBlocks) as Array<{ id: string; text: string }>
+        reply = JSON.stringify({
+          translations: blocks.map(item => ({ id: item.id, text: `自动预译：${item.text.slice(0, 16)}` }))
+        })
+      } else if (joined.includes('academic search strategist')) {
         reply = JSON.stringify(['deterministic layout', 'bilingual reading'])
       } else if (joined.includes('triage assistant')) {
         reply = '本文提出确定性双栏版面分析流水线，实现精准的双语逐句对照。'

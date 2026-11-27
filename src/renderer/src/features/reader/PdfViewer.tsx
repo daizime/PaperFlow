@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { FirstPageCitationSource, FirstPageTextItem } from '../../../../shared/citation'
 import type { AnnotationRecord, DocumentRecord } from '../../../../shared/contracts'
 import { computeTightFigureCropBox } from '../study/figure-crop'
+import { DEFAULT_SHORTCUTS, matchesShortcutEvent, type ShortcutMap } from '../study/shortcuts'
 import { analyzePageLayout, sampleBlockBackgroundColors, type PageLayoutResult } from './layout-analysis'
+import { extractPageGraphicHints, type PdfOperatorListLike } from './pdf-graphics'
 import { type CropInsets } from './margin-crop'
 import { PdfOutline } from './PdfOutline'
 import { PdfPage, type PdfPageData } from './PdfPage'
@@ -49,6 +51,7 @@ export interface ReaderToolbarActions {
   toggleOutline(): void
   toggleSearch(): void
   setScale(scale: number): void
+  adjustScale(delta: number): void
   fitWidth(): void
   toggleCropMargins(): void
 }
@@ -60,6 +63,7 @@ export type LeftSourceInteractEvent =
 
 export interface PdfViewerProps {
   document: DocumentRecord; onPageCount(): Promise<void>
+  layoutKey?: string
   onPageData?(pageNumber: number, data: PdfPageData | null): void
   onPageLayout?(pageNumber: number, result: PageLayoutResult | null): void
   onPageBackdrop?(pageNumber: number, backdrop: PageBackdropSnapshot | null): void
@@ -81,11 +85,11 @@ export interface PdfViewerProps {
   >
   toolbarActionsRef?: MutableRefObject<ReaderToolbarActions | null>
   hideFloatingPill?: boolean
-  floatingPillSpacerOnly?: boolean
   annotationsByPage?: ReadonlyMap<number, readonly AnnotationRecord[]>
   editingAnnotationId?: string | null
   activeSentence?: { pageNumber: number; rects: readonly PageRect[] } | null
   isActivePane?: boolean
+  shortcuts?: ShortcutMap
   onSourceSentenceInteract?(event: LeftSourceInteractEvent): void
   onAnnotationClick?(annotation: AnnotationRecord): void
   onOutlineNavigate?(item: PdfOutlineItem): void
@@ -104,9 +108,14 @@ function isEditableElement(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && target.isContentEditable
 }
 
+function isInsideDialog(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('[role="dialog"]'))
+}
+
 export function PdfViewer({
   document: record,
   onPageCount,
+  layoutKey,
   onPageData,
   onPageLayout,
   onPageBackdrop,
@@ -120,11 +129,11 @@ export function PdfViewer({
   renderRegionPreviewRef,
   toolbarActionsRef,
   hideFloatingPill = false,
-  floatingPillSpacerOnly = false,
   annotationsByPage,
   editingAnnotationId = null,
   activeSentence,
   isActivePane = true,
+  shortcuts = DEFAULT_SHORTCUTS,
   onSourceSentenceInteract,
   onAnnotationClick,
   onOutlineNavigate
@@ -186,6 +195,10 @@ export function PdfViewer({
   const pageInsetsRef = useRef<Record<number, CropInsets>>({})
   const pendingScrollMatchIdRef = useRef<string | null>(null)
   const fitRequest = useRef(0)
+  const autoFitWidthRef = useRef(true)
+  const lastAutoFitWidthRef = useRef(0)
+  const sizeRef = useRef(size)
+  const pageSizesRef = useRef<Record<number, { width: number; height: number }>>({})
 
   const invalidateFit = useCallback((): void => { fitRequest.current++ }, [])
   const cancelAnchor = useCallback((): void => {
@@ -210,6 +223,7 @@ export function PdfViewer({
   const annotationsByPageRef = useRef(annotationsByPage)
   const onOutlineNavigateRef = useRef(onOutlineNavigate)
   const searchOpenRef = useRef(searchOpen)
+  const shortcutsRef = useRef(shortcuts)
   const backdropTokensRef = useRef<Map<number, number>>(new Map())
   const renderedPagesRef = useRef<Map<number, { geometry: PageGeometry; surface: HTMLElement }>>(new Map())
 
@@ -229,7 +243,10 @@ export function PdfViewer({
     loadingRef.current = loading
     cropMarginsRef.current = cropMargins
     searchOpenRef.current = searchOpen
-  }, [scrollRoot, onPageCount, onPageData, onPageLayout, onPageBackdrop, onScrollRootChange, onMirrorStateChange, onSourceSentenceInteract, onAnnotationClick, annotationsByPage, onOutlineNavigate, scale, loading, cropMargins, searchOpen])
+    shortcutsRef.current = shortcuts
+    sizeRef.current = size
+    pageSizesRef.current = pageSizes
+  }, [scrollRoot, onPageCount, onPageData, onPageLayout, onPageBackdrop, onScrollRootChange, onMirrorStateChange, onSourceSentenceInteract, onAnnotationClick, annotationsByPage, onOutlineNavigate, scale, loading, cropMargins, searchOpen, shortcuts, size, pageSizes])
 
   useLayoutEffect(() => {
     if (!cancelNavigationRef) return
@@ -252,6 +269,9 @@ export function PdfViewer({
     activeDocument.current = record.id
     activePdf.current = null
     pageInsetsRef.current = {}
+    pageSizesRef.current = {}
+    autoFitWidthRef.current = true
+    lastAutoFitWidthRef.current = 0
     tokens.clear()
     pagesMap.clear()
     pendingScrollMatchIdRef.current = null
@@ -334,8 +354,14 @@ export function PdfViewer({
         const first = await loaded.getPage(1)
         const viewport = first.getViewport({ scale: 1 })
         if (cancelled || activeDocument.current !== record.id) return
-        const width = rootRef.current?.clientWidth ?? 720
-        const initialScale = saved?.scale ?? clampScale((width - 56) / viewport.width)
+        const measuredWidth = rootRef.current?.clientWidth ?? 0
+        const width = measuredWidth > 100 ? measuredWidth : 720
+        const fitEstimate = clampScale((width - 56) / viewport.width)
+        const initialScale = saved?.scale ?? fitEstimate
+        autoFitWidthRef.current =
+          saved?.scale === undefined || (measuredWidth > 100 && Math.abs(saved.scale - fitEstimate) <= 0.03)
+        lastAutoFitWidthRef.current = measuredWidth > 100 ? measuredWidth : 0
+        sizeRef.current = { width: viewport.width, height: viewport.height }
         const initialPage = Math.min(loaded.numPages, saved?.pageNumber ?? 1)
         current.current = initialPage
         scaleRef.current = initialScale
@@ -425,6 +451,7 @@ export function PdfViewer({
   const applyScale = useCallback((value: number): void => {
     const next = clampScale(value)
     cancelNavigation()
+    autoFitWidthRef.current = false
     if (next === scaleRef.current) return
     scaleRef.current = next
     anchorIntent.current = { request: fitRequest.current, pageNumber: current.current, resetHorizontal: false }
@@ -449,6 +476,8 @@ export function PdfViewer({
       const contentFraction = insets ? Math.max(0.35, 1 - insets.left - insets.right) : 1
       const targetWidth = viewport.width * contentFraction
       if (!Number.isFinite(targetWidth) || targetWidth <= 0) return
+      autoFitWidthRef.current = true
+      lastAutoFitWidthRef.current = root.clientWidth
       anchorIntent.current = { request, pageNumber: number, resetHorizontal: true }
       // 向下保留两位，避免四舍五入使较宽页面超出可用区域。
       const next = clampScale(Math.floor((available / targetWidth) * 100) / 100)
@@ -460,6 +489,32 @@ export function PdfViewer({
       // 页面错误由 PdfPage 呈现；销毁或过期的请求不覆盖阅读状态。
     }
   }, [pdf, loading])
+
+  useLayoutEffect(() => {
+    if (!pdf || loading || error || !layoutKey) return
+    const root = rootRef.current
+    if (!root || activePdf.current !== pdf || !autoFitWidthRef.current) return
+    if (root.clientWidth <= 100) return
+    if (Math.abs(root.clientWidth - lastAutoFitWidthRef.current) <= 40) return
+    const pages = root.querySelector<HTMLElement>('.pdf-pages')
+    const pageSize = pageSizesRef.current[current.current] ?? sizeRef.current
+    if (!pages || !Number.isFinite(pageSize.width) || pageSize.width <= 0) return
+    const style = getComputedStyle(pages)
+    const available =
+      root.clientWidth - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0)
+    if (available <= 0) return
+    const insets = cropMarginsRef.current ? pageInsetsRef.current[current.current] : undefined
+    const contentFraction = insets ? Math.max(0.35, 1 - insets.left - insets.right) : 1
+    const targetWidth = pageSize.width * contentFraction
+    if (!Number.isFinite(targetWidth) || targetWidth <= 0) return
+    const request = ++fitRequest.current
+    const next = clampScale(Math.floor((available / targetWidth) * 100) / 100)
+    lastAutoFitWidthRef.current = root.clientWidth
+    anchorIntent.current = { request, pageNumber: current.current, resetHorizontal: true }
+    scaleRef.current = next
+    setScale(next)
+    setFitCommit(request)
+  }, [layoutKey, pdf, loading, error])
 
   useLayoutEffect(() => {
     const intent = anchorIntent.current
@@ -512,14 +567,19 @@ export function PdfViewer({
         const pageObj = await active.getPage(targetPage)
         try {
           const viewport = pageObj.getViewport({ scale: 1 })
-          const textContent = (await pageObj.getTextContent({ includeMarkedContent: true })) as Parameters<
-            typeof analyzePageLayout
-          >[0]
-          return analyzePageLayout(textContent, {
+          const geometry: PageGeometry = {
             pageNumber: targetPage,
             viewport,
             outputScale: { x: 1, y: 1 }
-          })
+          }
+          const textContent = (await pageObj.getTextContent({ includeMarkedContent: true })) as Parameters<
+            typeof analyzePageLayout
+          >[0]
+          const operatorList = await pageObj.getOperatorList().catch(() => null)
+          const graphicHints = operatorList
+            ? extractPageGraphicHints(operatorList as unknown as PdfOperatorListLike, geometry)
+            : undefined
+          return analyzePageLayout(textContent, geometry, { graphicHints })
         } finally {
           if (!pageObj.destroyed) pageObj.cleanup()
         }
@@ -822,56 +882,59 @@ export function PdfViewer({
 
   useEffect(() => {
     const panel = bodyRef.current?.closest<HTMLElement>('.reader-panel') ?? null
-    const handlePanelKeyDown = (event: KeyboardEvent): void => {
-      if (!activePdf.current || loadingRef.current) return
-      const mod = event.ctrlKey || event.metaKey
-      if (mod && !event.altKey) {
-        const lower = event.key.toLowerCase()
-        if (lower === 'f') {
-          event.preventDefault()
-          openAndFocusSearch()
-          return
-        }
-        if (event.key === '=' || event.key === '+') {
-          event.preventDefault()
-          applyScale(scaleRef.current + 0.1)
-          return
-        }
-        if (event.key === '-' || event.key === '_') {
-          event.preventDefault()
-          applyScale(scaleRef.current - 0.1)
-          return
-        }
-        if (event.key === '0') {
-          event.preventDefault()
-          void fitWidth()
-          return
-        }
-      }
-      if (mod || event.altKey || event.shiftKey) return
-      if (isEditableElement(document.activeElement) || isEditableElement(event.target)) return
 
-      if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+    const dispatchPdfShortcut = (event: KeyboardEvent): void => {
+      if (!activePdf.current || loadingRef.current) return
+      const activeShortcuts = shortcutsRef.current
+      const editable = isEditableElement(document.activeElement) || isEditableElement(event.target)
+      const hasModifier = event.ctrlKey || event.metaKey || event.altKey
+      if (editable && !hasModifier) return
+
+      if (matchesShortcutEvent(event, activeShortcuts.findInDoc)) {
+        event.preventDefault()
+        openAndFocusSearch()
+        return
+      }
+      if (editable) return
+
+      if (matchesShortcutEvent(event, activeShortcuts.zoomIn)) {
+        event.preventDefault()
+        applyScale(scaleRef.current + 0.1)
+      } else if (matchesShortcutEvent(event, activeShortcuts.zoomOut)) {
+        event.preventDefault()
+        applyScale(scaleRef.current - 0.1)
+      } else if (matchesShortcutEvent(event, activeShortcuts.zoomReset)) {
+        event.preventDefault()
+        void fitWidth()
+      } else if (matchesShortcutEvent(event, activeShortcuts.prevPage)) {
         event.preventDefault()
         navigate(current.current - 1)
-      } else if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+      } else if (matchesShortcutEvent(event, activeShortcuts.nextPage)) {
         event.preventDefault()
         navigate(current.current + 1)
-      } else if (event.key === 'Home') {
+      } else if (matchesShortcutEvent(event, activeShortcuts.firstPage)) {
         event.preventDefault()
         navigate(1)
-      } else if (event.key === 'End') {
+      } else if (matchesShortcutEvent(event, activeShortcuts.lastPage)) {
         event.preventDefault()
         navigate(activePdf.current.numPages)
+      } else if (!hasModifier && !event.shiftKey && event.key === 'PageUp') {
+        event.preventDefault()
+        navigate(current.current - 1)
+      } else if (!hasModifier && !event.shiftKey && event.key === 'PageDown') {
+        event.preventDefault()
+        navigate(current.current + 1)
       }
     }
 
+    const handlePanelKeyDown = (event: KeyboardEvent): void => {
+      dispatchPdfShortcut(event)
+    }
+
     const handleWindowKeyDown = (event: KeyboardEvent): void => {
-      if (!isActivePane || event.defaultPrevented || !activePdf.current || loadingRef.current) return
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        openAndFocusSearch()
-      }
+      if (!isActivePane || event.defaultPrevented) return
+      if (isInsideDialog(event.target) || isInsideDialog(document.activeElement)) return
+      dispatchPdfShortcut(event)
     }
 
     panel?.addEventListener('keydown', handlePanelKeyDown)
@@ -908,6 +971,7 @@ export function PdfViewer({
   }, [])
 
   const sizeCallback = useCallback((number: number, pageSize: { width: number; height: number }): void => {
+    pageSizesRef.current[number] = pageSize
     setPageSizes(old => {
       const existing = old[number]
       if (existing && existing.width === pageSize.width && existing.height === pageSize.height) return old
@@ -942,7 +1006,9 @@ export function PdfViewer({
       } else {
         renderedPagesRef.current.delete(number)
       }
-      const layoutResult = analyzePageLayout(data.textContent, data.geometry)
+      const layoutResult = analyzePageLayout(data.textContent, data.geometry, {
+        graphicHints: data.graphicHints
+      })
       onPageLayoutRef.current?.(number, layoutResult)
       if (onPageBackdropRef.current && data.canvas.width > 0 && data.canvas.height > 0 && typeof createImageBitmap === 'function') {
         const docId = record.id
@@ -966,18 +1032,20 @@ export function PdfViewer({
 
   const measureHeaderOffset = useCallback((): void => {
     const body = bodyRef.current
-    const panel = body?.closest<HTMLElement>('.reader-panel') ?? null
-    if (!body || !panel) return
-    const offset = Math.max(0, Math.round(body.getBoundingClientRect().top - panel.getBoundingClientRect().top))
+    const container =
+      body?.closest<HTMLElement>('.split-pane-source-slot') ?? body?.closest<HTMLElement>('.reader-panel') ?? null
+    if (!body || !container) return
+    const offset = Math.max(0, Math.round(body.getBoundingClientRect().top - container.getBoundingClientRect().top))
     setHeaderOffsetPx(prev => (prev === offset ? prev : offset))
   }, [])
 
   useEffect(() => {
     const body = bodyRef.current
-    const panel = body?.closest<HTMLElement>('.reader-panel') ?? null
-    if (!body || !panel) return
+    const container =
+      body?.closest<HTMLElement>('.split-pane-source-slot') ?? body?.closest<HTMLElement>('.reader-panel') ?? null
+    if (!body || !container) return
     const observer = new ResizeObserver(() => measureHeaderOffset())
-    observer.observe(panel)
+    observer.observe(container)
     observer.observe(body)
     return () => observer.disconnect()
   }, [measureHeaderOffset])
@@ -1009,6 +1077,7 @@ export function PdfViewer({
         else openAndFocusSearch()
       },
       setScale: applyScale,
+      adjustScale: delta => applyScale(scaleRef.current + delta),
       fitWidth: () => { void fitWidth() },
       toggleCropMargins: () => {
         cancelNavigation()
@@ -1152,24 +1221,22 @@ export function PdfViewer({
         })}</div>}
         </div>
         {!hideFloatingPill ? (
-          <div className="reader-pill-dock" aria-hidden={floatingPillSpacerOnly ? true : undefined}>
-            {!floatingPillSpacerOnly ? (
-              <ReaderToolbar
-                pageNumber={pageNumber}
-                pageCount={pdf?.numPages ?? 0}
-                scale={scale}
-                disabled={!pdf || loading}
-                cropMargins={cropMargins}
-                onNavigate={navigate}
-                onScale={applyScale}
-                onFitWidth={() => { void fitWidth() }}
-                onToggleCropMargins={() => {
-                  cancelNavigation()
-                  setCropMargins(crop => !crop)
-                  setCropCommit(value => value + 1)
-                }}
-              />
-            ) : null}
+          <div className="reader-pill-dock">
+            <ReaderToolbar
+              pageNumber={pageNumber}
+              pageCount={pdf?.numPages ?? 0}
+              scale={scale}
+              disabled={!pdf || loading}
+              cropMargins={cropMargins}
+              onNavigate={navigate}
+              onScale={applyScale}
+              onFitWidth={() => { void fitWidth() }}
+              onToggleCropMargins={() => {
+                cancelNavigation()
+                setCropMargins(crop => !crop)
+                setCropCommit(value => value + 1)
+              }}
+            />
           </div>
         ) : null}
       </div>

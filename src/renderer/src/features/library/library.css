@@ -36,17 +36,6 @@
   white-space: nowrap;
 }
 
-.library-heading__title > span {
-  flex-shrink: 0;
-  min-width: 22px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #edf1f7;
-  color: #64738b;
-  font-size: 11px;
-  text-align: center;
-}
-
 .library-heading__actions {
   display: inline-flex;
   align-items: center;
@@ -1899,11 +1888,6 @@ html[data-theme='sepia'] .library-popover__item {
 
 html[data-theme='sepia'] .library-popover__item:hover:enabled {
   background: #efe2c4;
-}
-
-html[data-theme='dark'] .library-heading__title > span {
-  background: #232a36;
-  color: #aebcd1;
 }
 
 html[data-theme='dark'] .library-more-btn,

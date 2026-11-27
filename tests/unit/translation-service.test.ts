@@ -8,6 +8,7 @@ import Database from 'better-sqlite3'
 import { LibraryDatabase } from '../../src/main/services/database'
 import {
   buildAcademicPrompt,
+  buildExplainPrompt,
   detectLocalAiClients,
   hasAllExpectedFormulaPlaceholders,
   normalizeTranslatedBlockText,
@@ -485,7 +486,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     expect(normalizeTranslatedBlockText('第一行\n\n第二行  结束')).toBe('第一行第二行 结束')
   })
 
-  test('buildAcademicPrompt 明确不遗漏、保留公式符号原貌、1:1 句边界与无换行纯文本约束', () => {
+  test('buildAcademicPrompt 明确不遗漏、保留公式符号与英文专有名词、1:1 句边界与无换行纯文本约束', () => {
     const prompt = buildAcademicPrompt('zh-CN', [
       {
         blockId: 'blk-formula-inline',
@@ -496,6 +497,10 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     ])
     expect(prompt).toContain('绝不遗漏')
     expect(prompt).toContain('完整保留公式与符号原貌')
+    expect(prompt).toContain('保留专有英文名词不译')
+    expect(prompt).toContain('ScaleStore')
+    expect(prompt).toContain('DRAM、NVMe、SSD、RDMA')
+    expect(prompt).toContain('μs、GB/s')
     expect(prompt).toContain('⟪M1⟫')
     expect(prompt).toContain('保持与原文块一致的自然句数量与句末标点边界')
     expect(prompt).toContain('禁止在块内插入多余换行符、空行或 Markdown 标记')
@@ -503,6 +508,13 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     expect(jsonTail).toEqual([{ id: 'blk-formula-inline', kind: 'paragraph', text: 'Compute δV_R in O(1) time [44].' }])
     expect(hasAllExpectedFormulaPlaceholders('Use ⟪M1⟫ and ⟪M2⟫ here.', '在此使用 ⟪M1⟫ 与 ⟪M2⟫。')).toBe(true)
     expect(hasAllExpectedFormulaPlaceholders('Use ⟪M1⟫ and ⟪M2⟫ here.', '在此仅使用 ⟪M1⟫。')).toBe(false)
+
+    const selectionTranslatePrompt = buildExplainPrompt(
+      { pageNumber: 1, mode: 'translate', selectedText: 'ScaleStore uses RDMA with 5.0 μs latency.' },
+      'zh-CN'
+    )
+    expect(selectionTranslatePrompt).toContain('英文专有名词一律保留英文原文不译')
+    expect(selectionTranslatePrompt).toContain('μs、GB/s')
   })
 
   test('TranslationService 对批量响应中丢失 ⟪M#⟫ 占位符的块自动单块重试并支持优雅兜底', async () => {

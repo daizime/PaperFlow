@@ -98,6 +98,7 @@ test('方案三固定顶栏防抖动、连续译、单段重译、术语表、�
   try {
     const { app, page } = running
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     // 1. 验证方案三：拖拽中间分屏轴时，顶部统一工具栏按钮 0 位移、底部悬浮胶囊保持单行且不与正文顶边错位
@@ -160,13 +161,30 @@ test('方案三固定顶栏防抖动、连续译、单段重译、术语表、�
     await expect(page.getByRole('button', { name: '打开新 PDF', exact: true })).toHaveCount(0)
 
     const dualCenterAudit = await page.evaluate(() => {
+      const workspace = document.querySelector('.workspace')?.getBoundingClientRect()
+      const leftScrollEl = document.querySelector<HTMLElement>('.pdf-scroll')
+      const leftScroll = leftScrollEl?.getBoundingClientRect()
+      const rightScroll = document.querySelector('.translation-scroll')?.getBoundingClientRect()
       const resizer = document.querySelector('.translation-resizer')?.getBoundingClientRect()
       const pill = document.querySelector('.reader-floating-pill')?.getBoundingClientRect()
-      return resizer && pill ? { seamX: resizer.left + resizer.width / 2, pillLeft: pill.left, pillRight: pill.right } : null
+      return workspace && leftScrollEl && leftScroll && rightScroll && resizer && pill
+        ? {
+            seamX: resizer.left + resizer.width / 2,
+            pillLeft: pill.left,
+            pillRight: pill.right,
+            pillBottom: pill.bottom,
+            leftBottomDiff: Math.abs(workspace.bottom - leftScroll.bottom),
+            scrollBottomDiff: Math.abs(leftScroll.bottom - rightScroll.bottom),
+            leftClientBottom: leftScroll.top + leftScrollEl.clientHeight
+          }
+        : null
     })
     expect(dualCenterAudit).not.toBeNull()
     expect(dualCenterAudit!.pillLeft).toBeLessThan(dualCenterAudit!.seamX)
     expect(dualCenterAudit!.pillRight).toBeGreaterThan(dualCenterAudit!.seamX)
+    expect(dualCenterAudit!.leftBottomDiff).toBeLessThanOrEqual(2)
+    expect(dualCenterAudit!.scrollBottomDiff).toBeLessThanOrEqual(2)
+    expect(dualCenterAudit!.pillBottom).toBeLessThanOrEqual(dualCenterAudit!.leftClientBottom)
 
     const translateBtn = page.getByRole('button', { name: '翻译本页', exact: true })
     await expect(translateBtn).toHaveClass(/translation-header__btn--primary/)
@@ -311,6 +329,7 @@ test('划词框选句内局部片段时仅高亮选区范围与对应文字，�
   try {
     const { app, page } = running
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     const targetSpan = page

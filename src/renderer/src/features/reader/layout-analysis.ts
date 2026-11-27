@@ -6,9 +6,14 @@ import {
   type PageTextContent
 } from './pdf-geometry'
 import { composeAffine, displayScaleForViewport, viewportToDisplayRect } from './selection-bridges'
+import type { PageGraphicHints } from './pdf-graphics'
 
-export type LayoutBlockKind = 'heading' | 'paragraph' | 'caption' | 'formula' | 'list-item'
+export type LayoutBlockKind = 'heading' | 'paragraph' | 'caption' | 'formula' | 'list-item' | 'table' | 'figure'
 export type FilteredReason = 'header' | 'footer' | 'page-number' | 'margin-stamp'
+
+export interface AnalyzePageLayoutOptions {
+  graphicHints?: PageGraphicHints
+}
 
 export interface FilteredLayoutItem {
   text: string
@@ -123,6 +128,8 @@ interface LineSegment {
   columnIndex: number
   /** 当同行右侧附着孤立公式编号如 (1) 时记录，仅供分类和合并使用。 */
   trailingEquationTag?: LineSegment
+  /** 跨栏预分类标记，避免整幅图表/表格被双栏阅读带劈裂。 */
+  preClassifiedKind?: 'table' | 'figure'
 }
 
 interface LayoutBand {
@@ -161,8 +168,14 @@ const SUBSECTION_HEADING_RE = /^\d+\.\d+(?:\.\d+)*\.?\s+\S/
 const STANDARD_HEADING_RE =
   /^(?:abstract|introduction|background|related work|methods?|methodology|materials and methods|experimental|experiments?|results?|discussion|conclusions?|acknowledg?ments?|references|appendix|摘要|引言|绪论|相关工作|方法|实验|结果|讨论|结论|致谢|参考文献)\s*$/i
 const LIST_ITEM_RE = /^(?:[•●▪◦‣–—-]\s+|\[\d+\]\s*|\(\d+\)\s+|\([a-zA-Z]\)\s+|\d+\)\s+|(?:\d+\.)\s+(?=[A-Za-z\u4e00-\u9fff]))/
-const MATH_OP_RE = /[=<>±∓×÷∑∏∫∂∇√∞≈≠≤≥∈∉∀∃⊕⊗⊖⊙⊘∘→←↔⇒⇔↦∅∩∪⊂⊃⊆⊇∧∨¬⊥⊤‖λμσωαβγδεθπφψ︷︸⏞⏟^_{}]/g
-const MATH_OP_TEST_RE = /[=<>±∓×÷∑∏∫∂∇√∞≈≠≤≥∈∉∀∃⊕⊗⊖⊙⊘∘→←↔⇒⇔↦∅∩∪⊂⊃⊆⊇∧∨¬⊥⊤‖λμσωαβγδεθπφψ︷︸⏞⏟^_{}]/
+const MATH_OP_RE =
+  /[=<>±∓×÷∑∏∫∂∇√∞≈≠≤≥∈∉∀∃⊕⊗⊖⊙⊘∘→←↔⇒⇔↦∅∩∪⊂⊃⊆⊇∧∨¬⊥⊤‖∝∼≃≅≡≢≪≫≺≻⪯⪰∣∤∥∠≜≔≕⟨⟩⌈⌉⌊⌋⋯⋮⋱′″\u2212·⋅∗ℝℕℤℚℂℙ𝔼\u0391-\u03A9\u03B1-\u03C9︷︸⏞⏟^_{}]/g
+const MATH_OP_TEST_RE =
+  /[=<>±∓×÷∑∏∫∂∇√∞≈≠≤≥∈∉∀∃⊕⊗⊖⊙⊘∘→←↔⇒⇔↦∅∩∪⊂⊃⊆⊇∧∨¬⊥⊤‖∝∼≃≅≡≢≪≫≺≻⪯⪰∣∤∥∠≜≔≕⟨⟩⌈⌉⌊⌋⋯⋮⋱′″\u2212·⋅∗ℝℕℤℚℂℙ𝔼\u0391-\u03A9\u03B1-\u03C9︷︸⏞⏟^_{}]/
+const MATH_CLAUSE_WORDS = new Set([
+  'if', 'else', 'otherwise', 'for', 'all', 'where', 'and', 'or',
+  'subject', 'to', 'such', 'that', 'minimize', 'maximize', 'with', 'given', 'let', 'st'
+])
 const MATH_FUNC_AND_GREEK_WORDS = new Set([
   'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
   'log', 'ln', 'exp', 'lim', 'limsup', 'liminf', 'min', 'max', 'argmin', 'argmax', 'sup', 'inf',
@@ -736,10 +749,15 @@ function clusterIntoLineSegments(items: ProjectedTextItem[]): LineSegment[] {
   return segments.sort((a, b) => a.logicalBaseline - b.logicalBaseline || a.logicalRect.x - b.logicalRect.x)
 }
 
-function splitEquationTagIfNotFormula(lines: LineSegment[], bodyFontSize = 0): LineSegment[] {
+function splitEquationTagIfNotFormula(
+  lines: LineSegment[],
+  bodyFontSize = 0,
+  bodyFontName = '',
+  fractionBars: readonly PageRect[] = []
+): LineSegment[] {
   const expanded: LineSegment[] = []
   for (const line of lines) {
-    if (line.trailingEquationTag && !looksLikeFormulaLine(line, bodyFontSize, true)) {
+    if (line.trailingEquationTag && !looksLikeFormulaLine(line, bodyFontSize, true, bodyFontName, fractionBars)) {
       const tag = line.trailingEquationTag
       line.trailingEquationTag = undefined
       expanded.push(line, tag)
@@ -1014,6 +1032,42 @@ function findBestGutterFromItemSpans(lines: readonly LineSegment[], bodyFontSize
   return best
 }
 
+function isValidSecondaryColumnSplit(subsetLines: readonly LineSegment[], candidate: GutterCandidate): boolean {
+  const rows = buildVisualRows(subsetLines)
+  if (rows.length < 4) return false
+  const minX = Math.min(...subsetLines.map(l => l.logicalRect.x))
+  const maxX = Math.max(...subsetLines.map(l => l.logicalRect.x + l.logicalRect.width))
+  const subsetSpan = Math.max(1, maxX - minX)
+
+  let nonCaptionCount = 0
+  let crossingCount = 0
+  let crossingProseCount = 0
+  let hasCrossingCaption = false
+
+  for (const row of rows) {
+    const text = row.text.trim()
+    const crosses = row.segments.some(
+      seg => seg.logicalRect.x < candidate.splitX - 2 && seg.logicalRect.x + seg.logicalRect.width > candidate.splitX + 2
+    )
+    if (CAPTION_RE.test(text)) {
+      if (crosses) hasCrossingCaption = true
+      continue
+    }
+    nonCaptionCount += 1
+    if (crosses) {
+      crossingCount += 1
+      if (countProseWords(text).total >= 4 && row.rect.width >= subsetSpan * 0.55) {
+        crossingProseCount += 1
+      }
+    }
+  }
+
+  if (nonCaptionCount < 4) return false
+  if (crossingProseCount >= 2) return false
+  if (hasCrossingCaption && crossingProseCount >= 1) return false
+  return crossingCount <= Math.floor(nonCaptionCount * 0.2)
+}
+
 function detectColumnGutters(lines: readonly LineSegment[], bodyFontSize: number): GutterCandidate[] {
   const firstSplit = findBestColumnGutter(lines, bodyFontSize) ?? findBestGutterFromItemSpans(lines, bodyFontSize)
   if (!firstSplit) return []
@@ -1022,14 +1076,22 @@ function detectColumnGutters(lines: readonly LineSegment[], bodyFontSize: number
   const leftSubset = lines.filter(l => l.logicalRect.x + l.logicalRect.width <= firstSplit.splitX + 2)
   const rightSubset = lines.filter(l => l.logicalRect.x >= firstSplit.splitX - 2)
 
-  // 最多支持 3 栏检测（在左右任意一侧若宽度仍够且出现清晰副栏隙，可继续细分）
+  // 最多支持 3 栏检测（在左右任意一侧若宽度仍够且出现清晰副栏隙，可继续细分，同时拒绝栏内表格伪栏隙）
   const leftSecond = findBestColumnGutter(leftSubset, bodyFontSize) ?? findBestGutterFromItemSpans(leftSubset, bodyFontSize)
-  if (leftSecond && Math.abs(leftSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6)) {
+  if (
+    leftSecond &&
+    Math.abs(leftSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6) &&
+    isValidSecondaryColumnSplit(leftSubset, leftSecond)
+  ) {
     gutters.push(leftSecond)
   } else {
     const rightSecond =
       findBestColumnGutter(rightSubset, bodyFontSize) ?? findBestGutterFromItemSpans(rightSubset, bodyFontSize)
-    if (rightSecond && Math.abs(rightSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6)) {
+    if (
+      rightSecond &&
+      Math.abs(rightSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6) &&
+      isValidSecondaryColumnSplit(rightSubset, rightSecond)
+    ) {
       gutters.push(rightSecond)
     }
   }
@@ -1121,6 +1183,203 @@ function assignColumnIndex(line: LineSegment, splits: readonly number[]): number
   return splits.length + 1
 }
 
+function toLogicalGraphicHints(
+  hints: PageGraphicHints | undefined,
+  natW: number,
+  natH: number,
+  orientation: ReadingOrientation
+): PageGraphicHints | null {
+  if (!hints) return null
+  if (orientation === 0) return hints
+  const mapRects = (rects: readonly PageRect[]): PageRect[] =>
+    rects.map(r => rectToLogical(r, natW, natH, orientation))
+  return {
+    imageRects: mapRects(hints.imageRects),
+    vectorDiagramRects: mapRects(hints.vectorDiagramRects),
+    horizontalRules: mapRects(hints.horizontalRules),
+    verticalRules: mapRects(hints.verticalRules),
+    tableRuleRegions: mapRects(hints.tableRuleRegions),
+    fractionBars: mapRects(hints.fractionBars)
+  }
+}
+
+interface VisualRow {
+  segments: LineSegment[]
+  rect: PageRect
+  baseline: number
+  em: number
+  isBold: boolean
+  text: string
+  hasTrailingEquationTag: boolean
+  preKind?: 'table' | 'figure' | 'formula' | 'caption' | null
+}
+
+function buildVisualRows(lines: readonly LineSegment[]): VisualRow[] {
+  if (lines.length === 0) return []
+  const ordered = [...lines].sort((a, b) => a.logicalBaseline - b.logicalBaseline || a.logicalRect.x - b.logicalRect.x)
+  const rows: Array<{ baseline: number; minEm: number; segments: LineSegment[] }> = []
+
+  for (const line of ordered) {
+    const prev = rows[rows.length - 1]
+    if (prev && Math.abs(line.logicalBaseline - prev.baseline) <= Math.max(Math.min(prev.minEm, line.em) * 0.48, 3)) {
+      prev.segments.push(line)
+      prev.baseline = (prev.baseline * (prev.segments.length - 1) + line.logicalBaseline) / prev.segments.length
+      prev.minEm = Math.min(prev.minEm, line.em)
+    } else {
+      rows.push({ baseline: line.logicalBaseline, minEm: line.em, segments: [line] })
+    }
+  }
+
+  return rows.map(group => {
+    const segments = [...group.segments].sort((a, b) => a.logicalRect.x - b.logicalRect.x)
+    const rect = unionRects(segments.map(s => s.logicalRect))
+    const em = weightedMedian(segments.map(s => ({ value: s.em, weight: Math.max(1, s.text.length) })))
+    const boldChars = segments.reduce((sum, s) => sum + (s.isBold ? s.text.length : 0), 0)
+    const totalChars = segments.reduce((sum, s) => sum + s.text.length, 0)
+    return {
+      segments,
+      rect,
+      baseline: group.baseline,
+      em,
+      isBold: totalChars > 0 && boldChars * 2 >= totalChars,
+      text: segments.map(s => s.text.trim()).filter(Boolean).join(' '),
+      hasTrailingEquationTag: segments.some(s => Boolean(s.trailingEquationTag))
+    }
+  })
+}
+
+function rectOverlapArea(a: PageRect, b: PageRect): number {
+  const ow = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+  const oh = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+  return ow > 0 && oh > 0 ? ow * oh : 0
+}
+
+function isRectInsideRegion(inner: PageRect, region: PageRect, tol = 4): boolean {
+  const cx = inner.x + inner.width / 2
+  const cy = inner.y + inner.height / 2
+  if (
+    cx >= region.x - tol &&
+    cx <= region.x + region.width + tol &&
+    cy >= region.y - tol &&
+    cy <= region.y + region.height + tol
+  ) {
+    return true
+  }
+  const innerArea = Math.max(1, inner.width * inner.height)
+  const padded: PageRect = {
+    x: region.x - tol,
+    y: region.y - tol,
+    width: region.width + tol * 2,
+    height: region.height + tol * 2
+  }
+  return rectOverlapArea(inner, padded) / innerArea >= 0.5
+}
+
+function isCompactTableCellText(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (/^(?:[-–—]+|[\d,.]+%?|\$\s*[\d,.]+|\[[^\]]{1,16}\])$/.test(t)) return true
+  return countProseWords(t).total <= 4 && t.length <= 36
+}
+
+function isTabularMultiCellRow(row: VisualRow): boolean {
+  if (row.hasTrailingEquationTag || row.segments.length < 2) return false
+  const firstText = row.segments[0].text.trim()
+  if (CAPTION_RE.test(firstText)) return false
+
+  if (row.segments.length === 2 && LIST_ITEM_RE.test(firstText) && countProseWords(row.segments[1].text).total >= 4) {
+    return false
+  }
+
+  if (row.segments.length >= 3) {
+    const wordCounts = row.segments.map(s => countProseWords(s.text).total).sort((a, b) => a - b)
+    const medianWords = wordCounts[Math.floor(wordCounts.length / 2)]
+    return medianWords <= 5
+  }
+
+  // row.segments.length === 2
+  const gap = row.segments[1].logicalRect.x - (row.segments[0].logicalRect.x + row.segments[0].logicalRect.width)
+  if (gap < Math.max(row.em * 1.6, 14)) return false
+  const hasCompactMetric = row.segments.some(s =>
+    /^(?:[-–—]+|\d+(?:\.\d+)?%?|\[\$\/[^\]]+\]|\[[^\]]{1,16}\])$/.test(s.text.trim())
+  )
+  if (hasCompactMetric) return true
+  return row.segments.every(s => isCompactTableCellText(s.text))
+}
+
+function markSpanningTablesAndFigures(
+  lines: LineSegment[],
+  splits: readonly number[],
+  logicalHints: PageGraphicHints | null,
+  bodyFontSize: number
+): void {
+  if (splits.length === 0 || lines.length === 0) return
+  const rows = buildVisualRows(lines)
+  const firstSplit = splits[0]
+  const lastSplit = splits[splits.length - 1]
+  const crossesAnySplit = (r: PageRect): boolean =>
+    splits.some(sx => r.x < sx - Math.max(bodyFontSize, 8) && r.x + r.width > sx + Math.max(bodyFontSize, 8))
+
+  // 1. 跨栏 tableRuleRegions 与无框多格跨栏行（>= 3 格且跨越 split）预标记为 spanning table
+  const spanningTableRegions = (logicalHints?.tableRuleRegions ?? []).filter(reg => crossesAnySplit(reg))
+  const rowTabularSpanning = rows.map(row => {
+    if (row.segments.some(s => CAPTION_RE.test(s.text.trim()))) return false
+    const inRuleBox = spanningTableRegions.some(reg => isRectInsideRegion(row.rect, reg, 4))
+    if (inRuleBox) {
+      if (row.segments.length <= 2 && row.segments.every(s => countProseWords(s.text).total >= 9)) {
+        return false
+      }
+      return !(row.segments.length === 1 && countProseWords(row.segments[0].text).total >= 12)
+    }
+    const spansCols = row.rect.x < firstSplit - 8 && row.rect.x + row.rect.width > lastSplit + 8
+    if (!spansCols || row.segments.length < 3 || row.hasTrailingEquationTag) return false
+    const wordCounts = row.segments.map(s => countProseWords(s.text).total).sort((a, b) => a - b)
+    return wordCounts[Math.floor(wordCounts.length / 2)] <= 4
+  })
+
+  for (let i = 0; i < rows.length; i += 1) {
+    if (!rowTabularSpanning[i]) continue
+    let j = i
+    while (
+      j + 1 < rows.length &&
+      rowTabularSpanning[j + 1] &&
+      rows[j + 1].baseline - rows[j].baseline <= bodyFontSize * 3.5
+    ) {
+      j += 1
+    }
+    const inRuleRegion = spanningTableRegions.some(reg => isRectInsideRegion(rows[i].rect, reg, 4))
+    if (j - i + 1 >= 2 || inRuleRegion) {
+      for (let k = i; k <= j; k += 1) {
+        for (const seg of rows[k].segments) {
+          seg.preClassifiedKind = 'table'
+        }
+      }
+    }
+    i = j
+  }
+
+  // 2. 跨栏矢量图/栅格图内部标签预标记为 spanning figure
+  if (logicalHints) {
+    const spanningImages = logicalHints.imageRects.filter(r => crossesAnySplit(r))
+    const spanningDiagrams = logicalHints.vectorDiagramRects.filter(
+      r => crossesAnySplit(r) && !spanningTableRegions.some(tr => rectOverlapArea(r, tr) >= r.width * r.height * 0.7)
+    )
+    for (const row of rows) {
+      if (row.segments.some(s => s.preClassifiedKind || CAPTION_RE.test(s.text.trim()))) continue
+      const inImage = spanningImages.some(img => isRectInsideRegion(row.rect, img, 3))
+      const inDiagram = spanningDiagrams.some(diag => isRectInsideRegion(row.rect, diag, 3))
+      if (inImage || inDiagram) {
+        if (row.segments.length === 1 && countProseWords(row.segments[0].text).total >= 12 && SENTENCE_TERMINAL_RE.test(row.text)) {
+          continue
+        }
+        for (const seg of row.segments) {
+          seg.preClassifiedKind = 'figure'
+        }
+      }
+    }
+  }
+}
+
 function buildReadingBands(lines: LineSegment[], splits: readonly number[], bodyFontSize: number): { bands: LayoutBand[]; columnCount: number } {
   if (lines.length === 0) return { bands: [], columnCount: 0 }
   if (splits.length === 0) {
@@ -1144,14 +1403,26 @@ function buildReadingBands(lines: LineSegment[], splits: readonly number[], body
   }
 
   for (const line of ordered) {
-    if (isSpanningLine(line, splits, bodyFontSize)) {
+    if (line.preClassifiedKind || isSpanningLine(line, splits, bodyFontSize)) {
       flushColumnBand()
       line.columnIndex = 0
-      bands.push({
-        kind: 'spanning',
-        columnCount: totalColumns,
-        linesByColumn: new Map([[0, [line]]])
-      })
+      const prevBand = bands[bands.length - 1]
+      const prevSpanLines = prevBand?.kind === 'spanning' ? prevBand.linesByColumn.get(0) : undefined
+      const prevKind = prevSpanLines?.[0]?.preClassifiedKind
+      if (
+        line.preClassifiedKind &&
+        prevBand?.kind === 'spanning' &&
+        prevKind === line.preClassifiedKind &&
+        prevSpanLines
+      ) {
+        prevSpanLines.push(line)
+      } else {
+        bands.push({
+          kind: 'spanning',
+          columnCount: totalColumns,
+          linesByColumn: new Map([[0, [line]]])
+        })
+      }
     } else {
       const col = assignColumnIndex(line, splits)
       line.columnIndex = col
@@ -1178,7 +1449,7 @@ function stripControlCharsAndWhitespace(text: string): string {
   return out
 }
 
-function countProseWords(text: string): { total: number; long: number } {
+function countProseWords(text: string, excludeWords?: ReadonlySet<string>): { total: number; long: number } {
   let total = 0
   let long = 0
 
@@ -1196,7 +1467,9 @@ function countProseWords(text: string): { total: number; long: number } {
     const prevChar = start > 0 ? text[start - 1] : ''
     const nextChar = end < text.length ? text[end] : ''
     if ((prevChar && adjMarkerRe.test(prevChar)) || (nextChar && adjMarkerRe.test(nextChar))) continue
-    if (MATH_FUNC_AND_GREEK_WORDS.has(token.toLowerCase())) continue
+    const lower = token.toLowerCase()
+    if (MATH_FUNC_AND_GREEK_WORDS.has(lower)) continue
+    if (excludeWords?.has(lower)) continue
     total += 1
     if (token.length >= 4) long += 1
   }
@@ -1204,10 +1477,48 @@ function countProseWords(text: string): { total: number; long: number } {
   return { total, long }
 }
 
+function touchesFractionBar(line: LineSegment, bars: readonly PageRect[]): boolean {
+  if (bars.length === 0) return false
+  const lr = line.logicalRect
+  for (const bar of bars) {
+    const overlapX = Math.min(lr.x + lr.width, bar.x + bar.width) - Math.max(lr.x, bar.x)
+    if (overlapX < Math.min(lr.width, bar.width) * 0.4) continue
+    const barCy = bar.y + bar.height / 2
+    const gapY = barCy < lr.y ? lr.y - barCy : barCy > lr.y + lr.height ? barCy - (lr.y + lr.height) : 0
+    if (gapY <= Math.max(line.em * 1.4, 8)) return true
+  }
+  return false
+}
+
+function isDominantNonBodyMathFont(line: LineSegment, bodyFontName: string, bodyFontSize: number): boolean {
+  if (!bodyFontName || line.spans.length === 0 || line.isBold) return false
+  if (bodyFontSize > 0 && line.em > bodyFontSize * 1.12 && !MATH_OP_TEST_RE.test(line.text)) return false
+  let nonBodyChars = 0
+  let totalChars = 0
+  let mathFamilyChars = 0
+  for (const sp of line.spans) {
+    const len = sp.item.str.replace(/\s+/g, '').length
+    if (len === 0) continue
+    totalChars += len
+    if (sp.item.fontName && sp.item.fontName !== bodyFontName) {
+      nonBodyChars += len
+      if (/symbol|cm[msre]x|math|stix|latinmodern-math/i.test(sp.item.fontFamily)) {
+        mathFamilyChars += len
+      }
+    }
+  }
+  if (totalChars === 0 || nonBodyChars * 2 < totalChars) return false
+  const prose = countProseWords(line.text)
+  if (mathFamilyChars * 2 >= totalChars && prose.long <= 1) return true
+  return prose.total <= 1 && prose.long === 0
+}
+
 function looksLikeFormulaLine(
   line: LineSegment,
   bodyFontSize = 0,
-  hasEquationTag = Boolean(line.trailingEquationTag)
+  hasEquationTag = Boolean(line.trailingEquationTag),
+  bodyFontName = '',
+  fractionBars: readonly PageRect[] = []
 ): boolean {
   if (hasEquationTag) {
     // 有 (1) 编号的行只要包含数学运算符或短表达式即判定公式
@@ -1221,9 +1532,36 @@ function looksLikeFormulaLine(
   if (CAPTION_RE.test(text) || LIST_ITEM_RE.test(text) || NUMBERED_HEADING_RE.test(text)) return false
 
   const prose = countProseWords(text)
-  // 含明显自然语言词句的行（如夹杂行内符号的定义/引理叙述句）不视作纯公式行
-  if (!hasEquationTag && (prose.total >= 3 || (prose.total >= 2 && prose.long >= 1))) {
+  const clauseProse = countProseWords(text, MATH_CLAUSE_WORDS)
+  const hasFractionBar = touchesFractionBar(line, fractionBars)
+  const hasNonBodyMathFont = isDominantNonBodyMathFont(line, bodyFontName, bodyFontSize)
+
+  if (hasFractionBar && prose.long <= 1 && text.length <= 60) {
+    return true
+  }
+
+  // 分段条件与优化约束行（如 subject to Ax ≤ b / x^2 + 1, if x > 0 / 0, otherwise）
+  const isPiecewiseClause =
+    text.length <= 65 &&
+    clauseProse.total <= 1 &&
+    clauseProse.long === 0 &&
+    (/^\s*(?:[\d.+-]+\s*,\s*)?(?:otherwise|else|if\s+\S|where\s+\S|for\s+all\s+\S|subject\s+to\b|s\.t\.|minimize\b|maximize\b)/i.test(
+      text
+    ) ||
+      (/,\s*(?:if|otherwise|else|for all)\b/i.test(text) && (MATH_OP_TEST_RE.test(text) || /\d/.test(text))))
+  if (isPiecewiseClause) {
+    return true
+  }
+
+  if (
+    !hasEquationTag &&
+    (clauseProse.total >= 3 || (clauseProse.total >= 2 && clauseProse.long >= 1))
+  ) {
     return false
+  }
+
+  if (hasNonBodyMathFont && text.length <= 90) {
+    return true
   }
 
   if (prose.total === 0) {
@@ -1248,15 +1586,29 @@ function looksLikeFormulaLine(
   const ops = text.match(MATH_OP_RE) ?? []
   const opCount = ops.length
   const longWords = (text.match(/[A-Za-z]{4,}/g) ?? []).length
-  if (opCount >= 2 && longWords <= 2 && text.length <= 90) return true
-  if (opCount >= 3 && opCount * 6 >= text.length && longWords <= 4) return true
-  if (/^[a-zA-Z0-9\s()[\],.+\-*/=<>^_|\\]{3,55}$/.test(text) && opCount >= 1 && longWords <= 1) return true
+  const clauseLongWords = countProseWords(text, MATH_CLAUSE_WORDS).long
+  if (opCount >= 2 && clauseLongWords <= 1 && longWords <= 3 && text.length <= 90) return true
+  if (opCount >= 3 && opCount * 6 >= text.length && clauseLongWords <= 2 && longWords <= 4) return true
+  if (
+    /^[a-zA-Z0-9\s()[\],.+\-*/=<>^_|\\]{3,55}$/.test(text) &&
+    longWords <= 1 &&
+    (opCount >= 1 || (clauseProse.total === 0 && prose.total === 0 && /[+*/]/.test(text) && text.length <= 35))
+  ) {
+    return true
+  }
   return false
 }
 
-function looksLikeHeadingLine(line: LineSegment, bodyFontSize: number): boolean {
+function looksLikeHeadingLine(
+  line: LineSegment,
+  bodyFontSize: number,
+  bodyFontName = '',
+  fractionBars: readonly PageRect[] = []
+): boolean {
   const text = line.text.trim()
-  if (!text || CAPTION_RE.test(text) || looksLikeFormulaLine(line, bodyFontSize)) return false
+  if (!text || CAPTION_RE.test(text) || looksLikeFormulaLine(line, bodyFontSize, Boolean(line.trailingEquationTag), bodyFontName, fractionBars)) {
+    return false
+  }
   if (!/[A-Za-z\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(text)) return false
   if (/^(?:[•●▪◦‣–—-]\s+|\[\d+\]\s*|\(\d+\)\s+|\([a-zA-Z]\)\s+)/.test(text)) return false
   if (line.em >= bodyFontSize * 1.12 && text.length <= 160 && !/[.?!。？！]$/.test(text)) return true
@@ -1276,11 +1628,262 @@ function looksLikeHeadingLine(line: LineSegment, bodyFontSize: number): boolean 
   return false
 }
 
-function groupLinesIntoBlocks(lines: readonly LineSegment[], columnIndex: number, bodyFontSize: number): DraftBlock[] {
+function hasHorizontalRuleBetweenRows(
+  prevRow: VisualRow,
+  nextRow: VisualRow,
+  rules: readonly PageRect[],
+  colLeft: number,
+  colRight: number
+): boolean {
+  if (rules.length === 0) return false
+  const topBound = prevRow.baseline - 1
+  const bottomBound = nextRow.rect.y + nextRow.rect.height * 0.5
+  const spanWidth = Math.max(1, colRight - colLeft)
+  for (const r of rules) {
+    const ry = r.y + r.height / 2
+    if (ry < topBound || ry > bottomBound) continue
+    const overlapX = Math.min(colRight, r.x + r.width) - Math.max(colLeft, r.x)
+    if (overlapX >= Math.min(r.width, spanWidth) * 0.45) return true
+  }
+  return false
+}
+
+function classifyVisualRows(
+  rows: VisualRow[],
+  colWidth: number,
+  typicalStep: number,
+  bodyFontSize: number,
+  bodyFontName: string,
+  logicalHints: PageGraphicHints | null
+): void {
+  const tableRegions = logicalHints?.tableRuleRegions ?? []
+  const imageRects = logicalHints?.imageRects ?? []
+  const diagramRects = (logicalHints?.vectorDiagramRects ?? []).filter(
+    diag => !tableRegions.some(tr => rectOverlapArea(diag, tr) >= diag.width * diag.height * 0.7)
+  )
+  const fractionBars = logicalHints?.fractionBars ?? []
+
+  // Pass 1: 确定 caption、跨栏预标记以及图形框表线匹配
+  const rawMultiCellFlags = rows.map(row => isTabularMultiCellRow(row))
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]
+    const firstText = row.segments[0]?.text.trim() ?? ''
+    if (row.segments.some(s => s.preClassifiedKind === 'table')) {
+      row.preKind = 'table'
+      continue
+    }
+    if (row.segments.some(s => s.preClassifiedKind === 'figure')) {
+      row.preKind = 'figure'
+      continue
+    }
+    if (CAPTION_RE.test(firstText)) {
+      row.preKind = 'caption'
+      continue
+    }
+    const inTableRule = tableRegions.some(reg => isRectInsideRegion(row.rect, reg, 4))
+    if (inTableRule) {
+      const longProseSingle = row.segments.length === 1 && countProseWords(row.segments[0].text).total >= 12
+      if (!longProseSingle) {
+        row.preKind = 'table'
+        continue
+      }
+    }
+  }
+
+  // Pass 2: 无图形表线时的规则多格表聚类（连续 >= 2 行多格表行，或紧邻 Table 表注的多格行）
+  for (let i = 0; i < rows.length; i += 1) {
+    if (rows[i].preKind || !rawMultiCellFlags[i]) continue
+    let j = i
+    while (j + 1 < rows.length) {
+      if (rows[j + 1].preKind === 'caption') break
+      if (rows[j + 1].baseline - rows[j].baseline > Math.max(typicalStep * 2.4, bodyFontSize * 3.2)) break
+      if (rawMultiCellFlags[j + 1]) {
+        j += 1
+        continue
+      }
+      // 允许表行之间夹 1 行窄跨列子表头/换行单元（下一行仍是 multiCell）
+      if (
+        j + 2 < rows.length &&
+        !rows[j + 1].preKind &&
+        rawMultiCellFlags[j + 2] &&
+        countProseWords(rows[j + 1].text).total <= 6 &&
+        rows[j + 1].rect.width <= colWidth * 0.92 &&
+        rows[j + 2].baseline - rows[j + 1].baseline <= Math.max(typicalStep * 2.4, bodyFontSize * 3.2)
+      ) {
+        j += 2
+        continue
+      }
+      break
+    }
+
+    const prevCaption = i > 0 && rows[i - 1].preKind === 'caption' ? rows[i - 1].text : ''
+    const followsTableCaption = /^(?:Table|Tab\.|表)\b/i.test(prevCaption)
+    if (j > i || (followsTableCaption && (rows[i].segments.length >= 3 || rawMultiCellFlags[i]))) {
+      for (let k = i; k <= j; k += 1) {
+        if (!rows[k].preKind) rows[k].preKind = 'table'
+      }
+    }
+    i = j
+  }
+
+  // Pass 3: 栅格图 & 矢量图区域内文字标注归为 figure（防止带框多行左对齐正文误伤）
+  for (const diagRect of diagramRects) {
+    const insideIndices: number[] = []
+    for (let i = 0; i < rows.length; i += 1) {
+      if (rows[i].preKind) continue
+      if (isRectInsideRegion(rows[i].rect, diagRect, 3)) {
+        insideIndices.push(i)
+      }
+    }
+    if (insideIndices.length === 0) continue
+    const looksLikeProseBox =
+      insideIndices.length >= 2 &&
+      insideIndices.every(idx => rows[idx].segments.length === 1 && countProseWords(rows[idx].text).total >= 6) &&
+      insideIndices.every(
+        idx => Math.abs(rows[idx].rect.x - rows[insideIndices[0]].rect.x) <= 6 && rows[idx].rect.width >= diagRect.width * 0.72
+      ) &&
+      insideIndices.some(idx => SENTENCE_TERMINAL_RE.test(rows[idx].text.trim()))
+    if (!looksLikeProseBox) {
+      for (const idx of insideIndices) {
+        rows[idx].preKind = 'figure'
+      }
+    }
+  }
+
+  for (let i = 0; i < rows.length; i += 1) {
+    if (rows[i].preKind) continue
+    if (imageRects.some(img => isRectInsideRegion(rows[i].rect, img, 3))) {
+      rows[i].preKind = 'figure'
+    }
+  }
+
+  // Pass 4: 纯文本兜底——紧邻 Figure/Fig./Chart/Scheme 图注上方离散短标签标注
+  for (let c = 1; c < rows.length; c += 1) {
+    if (rows[c].preKind !== 'caption') continue
+    if (!/^(?:Fig\.|Figure|Chart|Scheme|图)\b/i.test(rows[c].text.trim())) continue
+    const candidateIndices: number[] = []
+    let cursorY = rows[c].baseline
+    for (let r = c - 1; r >= 0; r -= 1) {
+      if (rows[r].preKind) break
+      if (cursorY - rows[r].baseline > Math.max(typicalStep * 2.8, bodyFontSize * 4)) break
+      const seg = rows[r].segments[0]
+      const prose = countProseWords(rows[r].text)
+      const looksLikeHeading =
+        rows[r].segments.length === 1 && looksLikeHeadingLine(seg, bodyFontSize, bodyFontName, fractionBars)
+      const isLeftAlignedProseSentence =
+        rows[r].segments.length === 1 && SENTENCE_TERMINAL_RE.test(rows[r].text.trim()) && prose.total >= 4
+      if (looksLikeHeading || isLeftAlignedProseSentence) break
+      const isShortScattered =
+        (rows[r].segments.length >= 2 && prose.total <= 8) ||
+        (rows[r].segments.length === 1 && rows[r].rect.width < colWidth * 0.65 && prose.total <= 5)
+      if (!isShortScattered) break
+      candidateIndices.push(r)
+      cursorY = rows[r].baseline
+    }
+    if (candidateIndices.length >= 2) {
+      const xs = candidateIndices.flatMap(idx => rows[idx].segments.map(s => s.logicalRect.x))
+      const xSpread = Math.max(...xs) - Math.min(...xs)
+      const hasMultiSeg = candidateIndices.some(idx => rows[idx].segments.length >= 2)
+      if (hasMultiSeg || xSpread >= bodyFontSize * 2.5) {
+        for (const idx of candidateIndices) {
+          rows[idx].preKind = 'figure'
+        }
+      }
+    }
+  }
+}
+
+function refineColumnDraftBlocks(
+  blocks: DraftBlock[],
+  colWidth: number,
+  bodyFontSize: number,
+  bodyFontName: string,
+  fractionBars: readonly PageRect[]
+): DraftBlock[] {
+  if (blocks.length === 0) return blocks
+
+  // 1. 夹在两个公式块之间或同处分数线旁的极短分式分子/分母块回并入公式块
+  const merged = [...blocks]
+  let idx = 0
+  while (idx < merged.length) {
+    const cur = merged[idx]
+    if (cur.kind !== 'formula') {
+      idx += 1
+      continue
+    }
+
+    if (idx + 2 < merged.length && merged[idx + 2].kind === 'formula') {
+      const mid = merged[idx + 1]
+      if (mid.kind !== 'heading' && mid.kind !== 'caption' && mid.kind !== 'list-item' && mid.kind !== 'table' && mid.kind !== 'figure') {
+        const curBottom = Math.max(...cur.lines.map(l => l.logicalRect.y + l.logicalRect.height))
+        const midTop = Math.min(...mid.lines.map(l => l.logicalRect.y))
+        const midBottom = Math.max(...mid.lines.map(l => l.logicalRect.y + l.logicalRect.height))
+        const nextTop = Math.min(...merged[idx + 2].lines.map(l => l.logicalRect.y))
+        const midRect = unionRects(mid.lines.map(l => l.logicalRect))
+        const midText = mid.lines.map(l => l.text).join(' ')
+        const midProse = countProseWords(midText, MATH_CLAUSE_WORDS)
+        if (
+          midTop - curBottom <= bodyFontSize * 2.2 &&
+          nextTop - midBottom <= bodyFontSize * 2.2 &&
+          midRect.width < colWidth * 0.55 &&
+          midProse.total <= 2 &&
+          midProse.long === 0
+        ) {
+          cur.lines = [...cur.lines, ...mid.lines, ...merged[idx + 2].lines]
+          merged.splice(idx + 1, 2)
+          continue
+        }
+      }
+    }
+
+    if (idx + 1 < merged.length) {
+      const nxt = merged[idx + 1]
+      if (
+        nxt.kind === 'paragraph' &&
+        nxt.lines.length <= 2 &&
+        nxt.lines.some(l => touchesFractionBar(l, fractionBars)) &&
+        countProseWords(nxt.lines.map(l => l.text).join(' '), MATH_CLAUSE_WORDS).long <= 1
+      ) {
+        cur.lines = [...cur.lines, ...nxt.lines]
+        merged.splice(idx + 1, 1)
+        continue
+      }
+    }
+
+    idx += 1
+  }
+
+  // 2. 缩进多行公式块整体升级（允许偶发短条件/变量行共存）
+  for (const blk of merged) {
+    if (blk.kind !== 'paragraph' || blk.lines.length < 2) continue
+    const formulaCount = blk.lines.filter(l =>
+      looksLikeFormulaLine(l, bodyFontSize, Boolean(l.trailingEquationTag), bodyFontName, fractionBars)
+    ).length
+    if (formulaCount / blk.lines.length < 0.6) continue
+    const combinedText = blk.lines.map(l => l.text).join(' ')
+    const remainingProse = countProseWords(combinedText, MATH_CLAUSE_WORDS)
+    const minLeft = Math.min(...blk.lines.map(l => l.logicalRect.x))
+    const hasIndentOrOp = minLeft >= bodyFontSize * 1.1 || (combinedText.match(MATH_OP_RE) ?? []).length >= blk.lines.length
+    if (hasIndentOrOp && remainingProse.total <= blk.lines.length * 1.2 && remainingProse.long <= 1) {
+      blk.kind = 'formula'
+    }
+  }
+
+  return merged
+}
+
+function groupLinesIntoBlocks(
+  lines: readonly LineSegment[],
+  columnIndex: number,
+  bodyFontSize: number,
+  bodyFontName = '',
+  logicalHints: PageGraphicHints | null = null
+): DraftBlock[] {
   if (lines.length === 0) return []
+  const visualRows = buildVisualRows(lines)
   const lineGaps: number[] = []
-  for (let i = 1; i < lines.length; i += 1) {
-    const g = lines[i].logicalBaseline - lines[i - 1].logicalBaseline
+  for (let i = 1; i < visualRows.length; i += 1) {
+    const g = visualRows[i].baseline - visualRows[i - 1].baseline
     if (g > 0 && g < bodyFontSize * 2.5) lineGaps.push(g)
   }
   const typicalStep = lineGaps.length > 0
@@ -1290,59 +1893,122 @@ function groupLinesIntoBlocks(lines: readonly LineSegment[], columnIndex: number
   const colLeft = Math.min(...lines.map(l => l.logicalRect.x))
   const colRight = Math.max(...lines.map(l => l.logicalRect.x + l.logicalRect.width))
   const colWidth = Math.max(1, colRight - colLeft)
+  const fractionBars = logicalHints?.fractionBars ?? []
+  const horizontalRules = logicalHints?.horizontalRules ?? []
+
+  classifyVisualRows(visualRows, colWidth, typicalStep, bodyFontSize, bodyFontName, logicalHints)
+
+  const groupUnits: VisualRow[] = []
+  for (const row of visualRows) {
+    if (
+      row.preKind === 'table' ||
+      row.preKind === 'figure' ||
+      row.preKind === 'caption' ||
+      row.segments.length <= 1
+    ) {
+      groupUnits.push(row)
+      continue
+    }
+    for (const seg of row.segments) {
+      groupUnits.push({
+        segments: [seg],
+        rect: seg.logicalRect,
+        baseline: seg.logicalBaseline,
+        em: seg.em,
+        isBold: seg.isBold,
+        text: seg.text.trim(),
+        hasTrailingEquationTag: Boolean(seg.trailingEquationTag),
+        preKind: row.preKind
+      })
+    }
+  }
 
   const blocks: DraftBlock[] = []
-  let currentLines: LineSegment[] = [lines[0]]
+  let currentRows: VisualRow[] = [groupUnits[0]]
 
-  const classifyGroup = (group: LineSegment[]): LayoutBlockKind => {
-    const firstText = group[0].text.trim()
+  const classifyGroup = (group: VisualRow[]): LayoutBlockKind => {
+    if (group.some(r => r.preKind === 'table')) return 'table'
+    if (group.some(r => r.preKind === 'figure')) return 'figure'
+    const allSegs = group.flatMap(r => r.segments)
+    const firstText = allSegs[0].text.trim()
     if (CAPTION_RE.test(firstText)) return 'caption'
-    if (group.every(l => looksLikeFormulaLine(l, bodyFontSize))) return 'formula'
-    if (group.length <= 3 && group.every(l => looksLikeHeadingLine(l, bodyFontSize))) return 'heading'
+    if (allSegs.every(l => looksLikeFormulaLine(l, bodyFontSize, Boolean(l.trailingEquationTag), bodyFontName, fractionBars))) {
+      return 'formula'
+    }
+    if (
+      allSegs.length <= 3 &&
+      allSegs.every(l => looksLikeHeadingLine(l, bodyFontSize, bodyFontName, fractionBars))
+    ) {
+      return 'heading'
+    }
     if (LIST_ITEM_RE.test(firstText)) return 'list-item'
     return 'paragraph'
   }
 
   const flush = (): void => {
-    if (currentLines.length === 0) return
-    const kind = classifyGroup(currentLines)
-    const fontSize = weightedMedian(currentLines.map(l => ({ value: l.em, weight: Math.max(1, l.text.length) })))
-    const boldCount = currentLines.filter(l => l.isBold).length
+    if (currentRows.length === 0) return
+    const kind = classifyGroup(currentRows)
+    const groupLines = currentRows.flatMap(r => r.segments)
+    const fontSize = weightedMedian(groupLines.map(l => ({ value: l.em, weight: Math.max(1, l.text.length) })))
+    const boldCount = groupLines.filter(l => l.isBold).length
     blocks.push({
       kind,
       columnIndex,
-      lines: currentLines,
+      lines: groupLines,
       fontSize,
-      isBold: boldCount * 2 >= currentLines.length
+      isBold: boldCount * 2 >= groupLines.length
     })
-    currentLines = []
+    currentRows = []
   }
 
-  for (let i = 1; i < lines.length; i += 1) {
-    const prev = currentLines[currentLines.length - 1]
-    const next = lines[i]
-    const nextTrimmed = next.text.trim()
-    const step = next.logicalBaseline - prev.logicalBaseline
-    const prevKindHint = classifyGroup(currentLines)
-    const nextIsFormula = looksLikeFormulaLine(next, bodyFontSize)
-    const nextIsHeading = looksLikeHeadingLine(next, bodyFontSize)
-    const nextIsCaption = CAPTION_RE.test(nextTrimmed)
+  for (let i = 1; i < groupUnits.length; i += 1) {
+    const prevRow = currentRows[currentRows.length - 1]
+    const nextRow = groupUnits[i]
+    const prevKindHint = classifyGroup(currentRows)
+    const prevIsSpecial = prevKindHint === 'table' || prevKindHint === 'figure'
+    const nextIsSpecial = nextRow.preKind === 'table' || nextRow.preKind === 'figure'
+
+    if (prevIsSpecial || nextIsSpecial) {
+      const sameSpecial = prevKindHint === nextRow.preKind &&
+        nextRow.baseline - prevRow.baseline <= Math.max(typicalStep * 2.8, bodyFontSize * 3.8)
+      if (!sameSpecial) flush()
+      currentRows.push(nextRow)
+      continue
+    }
+
+    const prevSeg = prevRow.segments[prevRow.segments.length - 1]
+    const nextSeg = nextRow.segments[0]
+    const nextTrimmed = nextSeg.text.trim()
+    const step = nextRow.baseline - prevRow.baseline
+    const nextIsFormula = nextRow.segments.every(l =>
+      looksLikeFormulaLine(l, bodyFontSize, Boolean(l.trailingEquationTag), bodyFontName, fractionBars)
+    )
+    const nextIsHeading = nextRow.segments.every(l =>
+      looksLikeHeadingLine(l, bodyFontSize, bodyFontName, fractionBars)
+    )
+    const nextIsCaption = nextRow.preKind === 'caption' || CAPTION_RE.test(nextTrimmed)
     const nextStartsInlineCitation = /^\[\d+(?:\s*[-–—,]\s*\d+)*\][.,;:]/.test(nextTrimmed)
     const nextIsList =
       LIST_ITEM_RE.test(nextTrimmed) &&
-      !(nextStartsInlineCitation && prevKindHint === 'paragraph' && !SENTENCE_TERMINAL_RE.test(prev.text.trim()))
+      !(nextStartsInlineCitation && prevKindHint === 'paragraph' && !SENTENCE_TERMINAL_RE.test(prevSeg.text.trim()))
 
-    const fontJump = Math.abs(next.em - prev.em) >= Math.max(prev.em, next.em) * 0.16
-    const largeVerticalGap = step > Math.max(typicalStep * 1.38, Math.max(prev.em, next.em) * 1.72)
-    const boldSwitch = prev.isBold !== next.isBold && (prevKindHint === 'heading' || nextIsHeading)
+    const bothFormula = prevKindHint === 'formula' && nextIsFormula && !nextIsCaption && !nextIsHeading
+    const fontJump = !bothFormula && Math.abs(nextRow.em - prevRow.em) >= Math.max(prevRow.em, nextRow.em) * 0.16
+    const largeVerticalGap = bothFormula
+      ? step > Math.max(typicalStep * 2.1, bodyFontSize * 2.6)
+      : step > Math.max(typicalStep * 1.38, Math.max(prevRow.em, nextRow.em) * 1.72)
+    const boldSwitch =
+      (prevRow.isBold !== nextRow.isBold && (prevKindHint === 'heading' || nextIsHeading)) ||
+      (prevKindHint === 'caption' && prevRow.isBold && !nextRow.isBold && SENTENCE_TERMINAL_RE.test(prevRow.text.trim()))
+    const ruleBreak = hasHorizontalRuleBetweenRows(prevRow, nextRow, horizontalRules, colLeft, colRight)
     const indentedStart =
       prevKindHint === 'paragraph' &&
-      next.logicalRect.x - colLeft >= bodyFontSize * 0.85 &&
-      (prev.logicalRect.x + prev.logicalRect.width < colRight - colWidth * 0.16 || SENTENCE_TERMINAL_RE.test(prev.text.trim()))
+      nextRow.rect.x - colLeft >= bodyFontSize * 0.85 &&
+      (prevRow.rect.x + prevRow.rect.width < colRight - colWidth * 0.16 || SENTENCE_TERMINAL_RE.test(prevRow.text.trim()))
     const shortLineBreak =
       prevKindHint === 'paragraph' &&
-      prev.logicalRect.width < colWidth * 0.72 &&
-      SENTENCE_TERMINAL_RE.test(prev.text.trim()) &&
+      prevRow.rect.width < colWidth * 0.72 &&
+      SENTENCE_TERMINAL_RE.test(prevRow.text.trim()) &&
       !nextIsFormula &&
       /^[A-Z\u4e00-\u9fff0-9"(\[]/.test(nextTrimmed)
 
@@ -1351,12 +2017,13 @@ function groupLinesIntoBlocks(lines: readonly LineSegment[], columnIndex: number
       nextIsHeading &&
       (NUMBERED_HEADING_RE.test(nextTrimmed) ||
         STANDARD_HEADING_RE.test(nextTrimmed) ||
-        (prevIsHeading && Math.abs(next.em - prev.em) >= Math.max(prev.em, next.em) * 0.1))
+        (prevIsHeading && Math.abs(nextRow.em - prevRow.em) >= Math.max(prevRow.em, nextRow.em) * 0.1))
 
     const shouldBreak =
       fontJump ||
       largeVerticalGap ||
       boldSwitch ||
+      ruleBreak ||
       nextIsCaption ||
       (nextIsList && !nextIsHeading) ||
       nextIsFormula !== (prevKindHint === 'formula') ||
@@ -1366,11 +2033,11 @@ function groupLinesIntoBlocks(lines: readonly LineSegment[], columnIndex: number
       shortLineBreak
 
     if (shouldBreak) flush()
-    currentLines.push(next)
+    currentRows.push(nextRow)
   }
   flush()
 
-  return blocks
+  return refineColumnDraftBlocks(blocks, colWidth, bodyFontSize, bodyFontName, fractionBars)
 }
 
 function shouldKeepTrailingHyphen(lineTextBeforeHyphen: string): boolean {
@@ -1709,10 +2376,65 @@ function isScriptSpanItem(item: ProjectedTextItem, line: LineSegment): boolean {
   return item.em <= line.em * 0.85 && Math.abs(item.baseline - line.logicalBaseline) >= line.em * 0.14
 }
 
-function isMathTokenItem(item: ProjectedTextItem, line: LineSegment, bodyFontName: string): boolean {
+const SI_MICRO_UNIT_RE = /^[μ\u00B5](?:s|ms|m|g|l|L|w|W|a|A|v|V|f|F|N|Hz|mol|Ω)\b/
+const MICRO_UNIT_SUFFIX_RE = /^(?:s|ms|m|g|l|L|w|W|a|A|v|V|f|F|N|Hz|mol|Ω)(?:[^A-Za-z]|$)/
+const SINGLE_GREEK_OR_UNICODE_MATH_RE = /^[\u0391-\u03A9\u03B1-\u03C9\u2100-\u214F\u2200-\u22FF\u2A00-\u2AFF]$/
+
+function isUnitMicroSpan(spans: readonly LineSpan[], index: number, lineEm: number): boolean {
+  const curItem = spans[index]?.item
+  if (!curItem) return false
+  const cur = curItem.str.trim()
+  if (!/^[μ\u00B5]/.test(cur)) return false
+  if (SI_MICRO_UNIT_RE.test(cur)) return true
+  if (cur === 'μ' || cur === '\u00B5') {
+    const nextItem = spans[index + 1]?.item
+    if (nextItem) {
+      const gap = nextItem.logicalRect.x - (curItem.logicalRect.x + curItem.logicalRect.width)
+      if (gap <= lineEm * 0.55 && MICRO_UNIT_SUFFIX_RE.test(nextItem.str.trim())) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function isCompactInlineMathSpan(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.length > 36) return false
+  if (/^(?:O|Ω|Θ|o|ω)\([^()]{1,24}\)$/.test(trimmed)) return true
+  if (/^[A-Za-z]\([A-Za-z0-9,+\-−*/\s′]{1,16}\)$/.test(trimmed) && !/^[a-z]\(s\)$/i.test(trimmed)) return true
+  if (/^[A-Za-z\u0391-\u03A9\u03B1-\u03C9]+_[A-Za-z0-9,+\-−]+$/.test(trimmed)) return true
+  if (
+    /^[A-Za-z0-9\u0391-\u03A9\u03B1-\u03C9′_()[\]]{1,8}\s*(?:[=<>≤≥≠≈∈∉±×÷·⊕⊗\u2212])\s*[A-Za-z0-9\u0391-\u03A9\u03B1-\u03C9′_()[\].+\-*/]{1,10}$/.test(
+      trimmed
+    )
+  ) {
+    return true
+  }
+  return false
+}
+
+function isMathTokenItem(
+  item: ProjectedTextItem,
+  line: LineSegment,
+  bodyFontName: string,
+  spans: readonly LineSpan[],
+  spanIndex: number
+): boolean {
   const trimmed = item.str.trim()
   if (!trimmed) return false
-  if (isScriptSpanItem(item, line)) return true
+  if (isUnitMicroSpan(spans, spanIndex, line.em)) return false
+
+  const prose = countProseWords(trimmed)
+  if (isScriptSpanItem(item, line)) {
+    return prose.total <= 1
+  }
+  if (prose.total >= 2 || prose.long >= 1) {
+    return false
+  }
+
+  if (isCompactInlineMathSpan(trimmed)) return true
+
   if (
     MATH_OP_TEST_RE.test(trimmed) ||
     /[\u2100-\u214F\u2200-\u22FF\u2A00-\u2AFF]/.test(trimmed) ||
@@ -1721,7 +2443,7 @@ function isMathTokenItem(item: ProjectedTextItem, line: LineSegment, bodyFontNam
   ) {
     return true
   }
-  if (bodyFontName && item.fontName && item.fontName !== bodyFontName && countProseWords(trimmed).long === 0) {
+  if (bodyFontName && item.fontName && item.fontName !== bodyFontName && prose.long === 0) {
     if (/^[()[\]{}|,=+−\-*/<>:;.'′]+$/.test(trimmed)) return true
     if (
       trimmed.length <= 4 &&
@@ -1761,7 +2483,7 @@ function isSandwichedFormulaConnector(
 
 function extractLineInlineFormulas(line: LineSegment, bodyFontName: string): RawInlineFormulaMatch[] {
   if (line.spans.length === 0) return []
-  const marked = line.spans.map(span => isMathTokenItem(span.item, line, bodyFontName))
+  const marked = line.spans.map((span, idx) => isMathTokenItem(span.item, line, bodyFontName, line.spans, idx))
 
   for (let i = 1; i < line.spans.length - 1; i += 1) {
     if (marked[i] || !marked[i - 1] || !marked[i + 1]) continue
@@ -1777,20 +2499,31 @@ function extractLineInlineFormulas(line: LineSegment, bodyFontName: string): Raw
     }
   }
 
-  // 紧贴合并公式边缘的数字/短斜体符号前缀后缀（如 a_{n+1} 被拆成的 an + +1，或 nm+m− 后紧跟的 1）
+  // 紧贴合并公式边缘的数字/短斜体符号前缀后缀（如 a_{n+1} 被拆成的 an + +1，或 p < 0.05、V_R）
   for (let pass = 0; pass < 2; pass += 1) {
     let changed = false
     for (let i = 0; i < line.spans.length; i += 1) {
       if (marked[i]) continue
       const curItem = line.spans[i].item
       const trimmed = curItem.str.trim()
-      if (!trimmed) continue
+      if (!trimmed || isUnitMicroSpan(line.spans, i, line.em)) continue
       const curR = curItem.logicalRect
       if (i > 0 && marked[i - 1]) {
         const prevItem = line.spans[i - 1].item
         const prevR = prevItem.logicalRect
         const gap = curR.x - (prevR.x + prevR.width)
-        if (gap <= 1.5 && /[+\-−=*/^_({\[]$/.test(prevItem.str.trim()) && /^\d+$/.test(trimmed)) {
+        const prevTrim = prevItem.str.trim()
+        if (gap <= 1.5 && /[+\-−=*/^_({\[]$/.test(prevTrim) && /^\d+$/.test(trimmed)) {
+          marked[i] = true
+          changed = true
+          continue
+        }
+        if (
+          gap <= line.em * 0.75 &&
+          /^[=<>≤≥≠≈∈∉]$/.test(prevTrim) &&
+          /^(?:\d+(?:\.\d+)?|[A-Za-z\u0391-\u03A9\u03B1-\u03C9][A-Za-z0-9_′()[\]]{0,6})$/.test(trimmed) &&
+          !COMMON_SHORT_ENGLISH_WORDS.has(trimmed.toLowerCase())
+        ) {
           marked[i] = true
           changed = true
           continue
@@ -1800,13 +2533,34 @@ function extractLineInlineFormulas(line: LineSegment, bodyFontName: string): Raw
         const nextItem = line.spans[i + 1].item
         const nextR = nextItem.logicalRect
         const gap = nextR.x - (curR.x + curR.width)
+        const nextTrim = nextItem.str.trim()
         if (
           gap <= 1.5 &&
           bodyFontName &&
           curItem.fontName &&
           curItem.fontName !== bodyFontName &&
           /^[A-Za-z]{1,3}$/.test(trimmed) &&
-          /^[+\-−=^_0-9]/.test(nextItem.str.trim())
+          /^[+\-−=^_0-9]/.test(nextTrim)
+        ) {
+          marked[i] = true
+          changed = true
+          continue
+        }
+        if (
+          gap <= 1.5 &&
+          /^[A-Za-z]{1,2}$/.test(trimmed) &&
+          !COMMON_SHORT_ENGLISH_WORDS.has(trimmed.toLowerCase()) &&
+          isScriptSpanItem(nextItem, line)
+        ) {
+          marked[i] = true
+          changed = true
+          continue
+        }
+        if (
+          gap <= line.em * 0.75 &&
+          /^[=<>≤≥≠≈∈∉]$/.test(nextTrim) &&
+          /^[A-Za-z0-9\u0391-\u03A9\u03B1-\u03C9′()[\]]{1,4}$/.test(trimmed) &&
+          !COMMON_SHORT_ENGLISH_WORDS.has(trimmed.toLowerCase())
         ) {
           marked[i] = true
           changed = true
@@ -1865,6 +2619,7 @@ function extractLineInlineFormulas(line: LineSegment, bodyFontName: string): Raw
     const fallbackText = line.text.slice(startInLine, endInLine).trim()
     if (!fallbackText) continue
 
+    if (SI_MICRO_UNIT_RE.test(fallbackText)) continue
     if (/^\[\d+(?:\s*[-–—,]\s*\d+)*\]$/.test(fallbackText)) continue
     if (/^\((?:\d+|[ivx]+|[a-z])\)$/i.test(fallbackText)) continue
     if (/^[.,;:]+$/.test(fallbackText)) continue
@@ -1888,17 +2643,21 @@ function extractLineInlineFormulas(line: LineSegment, bodyFontName: string): Raw
     }
 
     const hasScript = groupSpans.some(sp => isScriptSpanItem(sp.item, line))
+    const hasSingleGreekOrUnicodeOp =
+      fallbackText.length === 1 && SINGLE_GREEK_OR_UNICODE_MATH_RE.test(fallbackText)
     const hasMathSym =
-      (MATH_OP_TEST_RE.test(fallbackText) ||
+      hasSingleGreekOrUnicodeOp ||
+      ((MATH_OP_TEST_RE.test(fallbackText) ||
         /[\u2100-\u214F\u2200-\u22FF\u2A00-\u2AFF′″]/.test(fallbackText)) &&
-      fallbackText.length >= 2
+        fallbackText.length >= 2)
     const hasMathFontConstruct =
       (groupSpans.length >= 2 &&
         groupSpans.some(sp => Boolean(bodyFontName && sp.item.fontName && sp.item.fontName !== bodyFontName)) &&
         fallbackText.length >= 2) ||
       groupSpans.some(sp => /^[A-Za-z]\d+$/.test(sp.item.str.trim()))
+    const hasCompactMath = isCompactInlineMathSpan(fallbackText)
 
-    if (!hasScript && !hasMathSym && !hasMathFontConstruct) continue
+    if (!hasScript && !hasMathSym && !hasMathFontConstruct && !hasCompactMath) continue
 
     const displayRect = unionRects(groupSpans.map(sp => sp.item.displayRect))
     results.push({
@@ -2021,7 +2780,8 @@ function buildBlocksAndSentences(
   bodyFontSize: number,
   bodyFontName: string,
   dominantOrientation: ReadingOrientation,
-  geometry: PageGeometry | null
+  geometry: PageGeometry | null,
+  logicalHints: PageGraphicHints | null
 ): { blocks: AnalyzedBlock[]; sentences: AnalyzedSentence[] } {
   const allBlocks: AnalyzedBlock[] = []
 
@@ -2036,7 +2796,7 @@ function buildBlocksAndSentences(
     const { text, contributions } = assembleLinesText(draft.lines)
 
     const rawSlices: RawSentenceSlice[] =
-      draft.kind === 'heading' || draft.kind === 'formula'
+      draft.kind === 'heading' || draft.kind === 'formula' || draft.kind === 'table' || draft.kind === 'figure'
         ? [{ text: text.trim(), startOffset: text.indexOf(text.trim()), endOffset: text.indexOf(text.trim()) + text.trim().length }]
         : splitAcademicSentences(text)
 
@@ -2074,7 +2834,11 @@ function buildBlocksAndSentences(
     }
 
     const inlineFormulaMeta =
-      draft.kind !== 'formula' && dominantOrientation === 0 && draft.lines.length > 0
+      draft.kind !== 'formula' &&
+      draft.kind !== 'table' &&
+      draft.kind !== 'figure' &&
+      dominantOrientation === 0 &&
+      draft.lines.length > 0
         ? buildInlineFormulaLinesText(draft.lines, bodyFontName)
         : null
 
@@ -2101,7 +2865,7 @@ function buildBlocksAndSentences(
   for (const band of bands) {
     if (band.kind === 'spanning') {
       const spanLines = band.linesByColumn.get(0) ?? []
-      for (const draft of groupLinesIntoBlocks(spanLines, 0, bodyFontSize)) {
+      for (const draft of groupLinesIntoBlocks(spanLines, 0, bodyFontSize, bodyFontName, logicalHints)) {
         allBlocks.push(materializeDraftBlock(draft, allBlocks.length))
       }
       continue
@@ -2112,7 +2876,7 @@ function buildBlocksAndSentences(
 
     for (const colIndex of colIndices) {
       const colLines = band.linesByColumn.get(colIndex) ?? []
-      const drafts = groupLinesIntoBlocks(colLines, colIndex, bodyFontSize)
+      const drafts = groupLinesIntoBlocks(colLines, colIndex, bodyFontSize, bodyFontName, logicalHints)
       const materialized = drafts.map(d => {
         const block = materializeDraftBlock(d, allBlocks.length)
         allBlocks.push(block)
@@ -2210,7 +2974,11 @@ function resequencePageBlocks(blocks: AnalyzedBlock[], pageNumber: number): { bl
   return { blocks: cleanedBlocks, sentences }
 }
 
-export function analyzePageLayout(textContent: PageTextContent, geometry: PageGeometry): PageLayoutResult {
+export function analyzePageLayout(
+  textContent: PageTextContent,
+  geometry: PageGeometry,
+  options?: AnalyzePageLayoutOptions
+): PageLayoutResult {
   const { items, dominantOrientation, natWidth, natHeight, logicalHeight, logicalWidth } = projectTextItems(
     textContent,
     geometry
@@ -2259,25 +3027,12 @@ export function analyzePageLayout(textContent: PageTextContent, geometry: PageGe
     }
   }
 
+  const logicalHints = toLogicalGraphicHints(options?.graphicHints, natWidth, natHeight, dominantOrientation)
   const clusteredLines = clusterIntoLineSegments(readingItems)
   const bodyFontSize = weightedMedian(
     clusteredLines.map(line => ({ value: line.em, weight: Math.max(1, line.text.trim().length) }))
   )
-  const rawLines = splitEquationTagIfNotFormula(clusteredLines, bodyFontSize)
 
-  const edgeFilter = filterSinglePageEdgeItems(rawLines, logicalHeight, bodyFontSize)
-  filteredItems.push(...edgeFilter.filtered)
-
-  const gutters = detectColumnGutters(edgeFilter.bodyLines, bodyFontSize)
-  const gutterSplitLines =
-    gutters.length > 0
-      ? splitEquationTagIfNotFormula(splitLinesAtColumnGutters(edgeFilter.bodyLines, gutters), bodyFontSize)
-      : edgeFilter.bodyLines
-  const { bands, columnCount } = buildReadingBands(
-    gutterSplitLines,
-    gutters.map(g => g.splitX),
-    bodyFontSize
-  )
   const fontWeights = new Map<string, number>()
   for (const item of readingItems) {
     if (!item.fontName) continue
@@ -2295,13 +3050,29 @@ export function analyzePageLayout(textContent: PageTextContent, geometry: PageGe
     }
   }
 
+  const fractionBars = logicalHints?.fractionBars ?? []
+  const rawLines = splitEquationTagIfNotFormula(clusteredLines, bodyFontSize, bodyFontName, fractionBars)
+
+  const edgeFilter = filterSinglePageEdgeItems(rawLines, logicalHeight, bodyFontSize)
+  filteredItems.push(...edgeFilter.filtered)
+
+  const gutters = detectColumnGutters(edgeFilter.bodyLines, bodyFontSize)
+  const gutterSplitLines =
+    gutters.length > 0
+      ? splitEquationTagIfNotFormula(splitLinesAtColumnGutters(edgeFilter.bodyLines, gutters), bodyFontSize, bodyFontName, fractionBars)
+      : edgeFilter.bodyLines
+  const splitXs = gutters.map(g => g.splitX)
+  markSpanningTablesAndFigures(gutterSplitLines, splitXs, logicalHints, bodyFontSize)
+  const { bands, columnCount } = buildReadingBands(gutterSplitLines, splitXs, bodyFontSize)
+
   const { blocks, sentences } = buildBlocksAndSentences(
     bands,
     geometry.pageNumber,
     bodyFontSize,
     bodyFontName,
     dominantOrientation,
-    geometry
+    geometry,
+    logicalHints
   )
 
   return {
@@ -2457,7 +3228,7 @@ export function sampleBlockBackgroundColors(
   const scaleY = geometry.outputScale.y
 
   for (const block of layout.blocks) {
-    if (block.kind === 'formula') continue
+    if (block.kind === 'formula' || block.kind === 'table' || block.kind === 'figure') continue
     const key = computeStableTranslationBlockKey(block)
     const viewRect = pdfRectToViewport(geometry, block.bounds)
     const pxLeft = Math.max(0, Math.min(canvas.width - 1, Math.floor(viewRect.x * scaleX) - 1))

@@ -4,6 +4,7 @@ import { ZERO_CROP_INSETS, measureCanvasCropInsets, type CropInsets } from './ma
 import { buildHighlightPolygons } from './highlight-polygon'
 import { TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from './pdf-engine'
 import { computeCanvasRenderRatio, pdfRectToViewport, type PageGeometry, type PageRect, type PageTextContent } from './pdf-geometry'
+import { extractPageGraphicHints, type PageGraphicHints, type PdfOperatorListLike } from './pdf-graphics'
 import { buildPageTextIndex, findTextRangesForMatch, type SearchMatch, type TextSpan } from './pdf-search'
 import { attachSelectionHighlight } from './selection-highlight'
 import { alignSingleCharacterAdvances } from './text-layer-layout'
@@ -14,6 +15,7 @@ import './page.css'
 export interface PdfPageData {
   geometry: PageGeometry
   textContent: PageTextContent
+  graphicHints?: PageGraphicHints
   textLayer: TextLayer
   element: HTMLDivElement
   canvas: HTMLCanvasElement
@@ -257,6 +259,11 @@ export function PdfPage({
           }
         }
         const geometry = { pageNumber, viewport, outputScale }
+        const operatorList = await page.getOperatorList().catch(() => null)
+        if (cancelled) return
+        const graphicHints = operatorList
+          ? extractPageGraphicHints(operatorList as unknown as PdfOperatorListLike, geometry)
+          : undefined
         if (scrollRoot) {
           releaseSelection = attachTextSelection(textElement, textLayer.textDivs, scrollRoot)
           releaseHighlight = attachSelectionHighlight(surface, canvas, textElement, scrollRoot, geometry, textContent, textLayer.textDivs)
@@ -269,7 +276,7 @@ export function PdfPage({
           textDivs: textLayer.textDivs
         }
         callbacks.current.onTextStatus(pageNumber, textContent.items.some(item => 'str' in item && item.str.trim().length > 0))
-        callbacks.current.onPageData?.(pageNumber, { geometry, textContent, textLayer, element, canvas })
+        callbacks.current.onPageData?.(pageNumber, { geometry, textContent, graphicHints, textLayer, element, canvas })
         completed = true
         setRenderVersion(version => version + 1)
         setStatus('ready')

@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { PDFDocument } from 'pdf-lib'
 import layoutManifest from '../fixtures/verification/layout-analysis/manifest.json'
 import { createTestData, importFixture, launchApp } from './helpers'
 
@@ -80,8 +81,15 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
   try {
     const { app, page } = running
 
-    // 1. 导入双栏学术 PDF，验证默认 1:1 等宽对半展示、文献库可收起与单双栏模式切换
+    // 1. 导入双栏学术 PDF，验证新打开默认进入「原文」模式并弹出未配置小浮窗，再切至「双栏」验证 1:1 对半展示、文献库可收起与单双栏模式切换
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', { timeout: 30000 })
+    await expect(page.locator('.translation-panel')).toHaveCount(0)
+    await expect(
+      page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '原文', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('translation-unconfigured-prompt')).toBeVisible({ timeout: 10000 })
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     const initialWidths = await page.evaluate(() => {
@@ -214,8 +222,20 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
       )
       const overflowCount = translatedEls.filter(el => {
         const text = el.querySelector<HTMLElement>('.translation-overlay-block__text')
-        return text ? text.scrollHeight > el.clientHeight + 2 : false
+        return text ? text.scrollHeight > el.clientHeight : false
       }).length
+      const translatedBoxes = translatedEls.map(el => el.getBoundingClientRect())
+      let verticalOverlapCount = 0
+      for (let i = 0; i < translatedBoxes.length; i += 1) {
+        const a = translatedBoxes[i]
+        for (let j = i + 1; j < translatedBoxes.length; j += 1) {
+          const b = translatedBoxes[j]
+          if (Math.min(a.right, b.right) - Math.max(a.left, b.left) <= 2) continue
+          const upper = a.top <= b.top ? a : b
+          const lower = a.top <= b.top ? b : a
+          if (upper.bottom > lower.top + 0.5) verticalOverlapCount += 1
+        }
+      }
       const maskEl = document.querySelector<HTMLElement>('.translation-page[data-page-number="1"] .translation-overlay-mask')
       const nextRightBlock = document.querySelector<HTMLElement>(
         '.translation-page[data-page-number="1"] .translation-overlay-block[data-block-id="p1-b007"]'
@@ -231,6 +251,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
         totalOverlayBlocks,
         formulaOverlayCount: formulaOverlays.length,
         overflowCount,
+        verticalOverlapCount,
         maskNoOverlapNext: maskEl !== null && nextRightBlock !== null && maskBottom <= nextBlockTop + 0.5,
         crossFontPx,
         firstTitle: translatedEls[0]?.innerText.trim() ?? '',
@@ -243,6 +264,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     expect(overlayAudit.totalOverlayBlocks).toBe(8)
     expect(overlayAudit.formulaOverlayCount).toBe(0)
     expect(overlayAudit.overflowCount).toBe(0)
+    expect(overlayAudit.verticalOverlapCount).toBe(0)
     expect(overlayAudit.maskNoOverlapNext).toBe(true)
     expect(overlayAudit.crossFontPx).toBeGreaterThanOrEqual(8)
     expect(overlayAudit.firstTitle).toBe('面向本地科研阅读器的确定性版面流水线')
@@ -483,13 +505,15 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
           const range = document.createRange()
           range.setStart(node, idx)
           range.setEnd(node, idx + 2)
-          const rect = range.getClientRects()[0]
-          if (rect && rect.width > 0 && rect.height > 0) {
+          const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 && r.height > 0)
+          const firstRect = rects[0]
+          const lastRect = rects[rects.length - 1]
+          if (firstRect && lastRect) {
             return {
-              startX: rect.left + 1,
-              startY: rect.top + rect.height / 2,
-              endX: rect.right - 1,
-              endY: rect.top + rect.height / 2
+              startX: firstRect.left + 1,
+              startY: firstRect.top + firstRect.height / 2,
+              endX: lastRect.right - 1,
+              endY: lastRect.top + lastRect.height / 2
             }
           }
         }
@@ -523,6 +547,9 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     p2.on('pageerror', error => failures.push(error.message))
 
     await waitForPageReady(p2, 1)
+    await expect(
+      p2.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
     await expect(p2.locator('.translation-overlay-block.is-translated')).toHaveCount(8, { timeout: 15000 })
     await expect(p2.locator('.translation-overlay-block.is-translated').first()).toContainText('面向本地科研阅读器的确定性版面流水线')
     expect(httpRequests).toBe(callsAfterFirstTranslate)
@@ -580,7 +607,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
 
 test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出译中并在完成后切回即见完整译文', async () => {
   let releaseDelayedTranslation = (): void => {}
-  let translateRequestCount = 0
+  let docATranslateRequestCount = 0
 
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = []
@@ -592,9 +619,10 @@ test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出
     const arrStart = userPrompt.lastIndexOf('[')
     const blocks = JSON.parse(userPrompt.slice(arrStart)) as Array<{ id: string; text: string }>
     const isTestPing = blocks.length === 1 && blocks[0]?.id === 'test-b001'
-    if (!isTestPing) {
-      translateRequestCount += 1
-      if (translateRequestCount === 1) {
+    const isDocA = blocks.some(b => /Deterministic Two-Column|Modern readers/i.test(b.text))
+    if (!isTestPing && isDocA) {
+      docATranslateRequestCount += 1
+      if (docATranslateRequestCount === 1) {
         await new Promise<void>(resolveDelay => {
           releaseDelayedTranslation = resolveDelay
           setTimeout(resolveDelay, 12000)
@@ -620,6 +648,7 @@ test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出
   try {
     const { app, page } = running
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
     const docsAfterFirst = await page.evaluate(() => window.paperflow.listDocuments())
     const docAId = docsAfterFirst[0].id
@@ -639,7 +668,7 @@ test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出
 
     // 在 docA 启动整页翻译（服务端暂挂起响应），随即切换到 docB
     await page.getByRole('button', { name: '翻译本页', exact: true }).click()
-    await expect.poll(() => translateRequestCount).toBe(1)
+    await expect.poll(() => docATranslateRequestCount).toBe(1)
 
     await page.getByTestId(`pdf-tab-${docBId}`).locator('button.workspace-tab__select').click()
     await expect(page.getByTestId(`pdf-tab-translating-${docAId}`)).toHaveText('译中')
@@ -652,7 +681,7 @@ test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出
     await page.getByTestId(`pdf-tab-${docAId}`).locator('button.workspace-tab__select').click()
     await expect(page.locator('.translation-overlay-block.is-translated')).toHaveCount(8, { timeout: 10000 })
     await expect(page.locator('.translation-overlay-block.is-translated').first()).toContainText('后台持久译文：')
-    expect(translateRequestCount).toBe(1)
+    expect(docATranslateRequestCount).toBe(1)
     expect(failures).toEqual([])
   } finally {
     releaseDelayedTranslation()
@@ -720,6 +749,7 @@ test('支持余额接口时翻译后自动刷新顶栏与 5 秒完成浮窗、�
   try {
     const { app, page } = running
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     await page.getByRole('button', { name: '翻译设置', exact: true }).click()
@@ -789,5 +819,199 @@ test('支持余额接口时翻译后自动刷新顶栏与 5 秒完成浮窗、�
   } finally {
     await running.app.close()
     await new Promise<void>(resolveClose => server.close(() => resolveClose()))
+  }
+})
+
+test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可点击小窗跳设置、非中文 PDF 自动预译前两页而中文 PDF 不触发（合成素材）', async () => {
+  const requests: Array<{ firstText: string }> = []
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of req) chunks.push(Buffer.from(chunk))
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      messages: Array<{ role: string; content: string }>
+    }
+    const userPrompt = body.messages[body.messages.length - 1]?.content ?? ''
+    const arrStart = userPrompt.lastIndexOf('[')
+    const blocks = JSON.parse(userPrompt.slice(arrStart)) as Array<{ id: string; text: string }>
+    const isTestPing = blocks.length === 1 && blocks[0]?.id === 'test-b001'
+    if (!isTestPing && blocks[0]?.text) {
+      requests.push({ firstText: blocks[0].text })
+    }
+    const translations = blocks.map(item => ({
+      id: item.id,
+      text: `预译：${item.text.slice(0, 22)}`
+    }))
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }))
+  })
+
+  await new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', () => resolveListen()))
+  const apiBaseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`
+
+  const workDir = await mkdtemp(join(tmpdir(), 'paperflow-auto-pretrans-'))
+  const zhPdfPath = join(workDir, 'synthetic-zh-paper.pdf')
+  const en1Path = join(workDir, 'synthetic-en-paper-1.pdf')
+  const en2Path = join(workDir, 'synthetic-en-paper-2.pdf')
+
+  const makeEnglishPdf = async (filePath: string, prefix: string): Promise<void> => {
+    const doc = await PDFDocument.create()
+    for (let p = 1; p <= 3; p += 1) {
+      const page = doc.addPage()
+      page.drawText(
+        `${prefix} Page ${p} Marker: Distributed in-memory transaction processing across RDMA clusters.`,
+        { x: 48, y: 720, size: 12 }
+      )
+      page.drawText(
+        `This English academic paragraph evaluates cache coherence and tail latency on page ${p}.`,
+        { x: 48, y: 696, size: 10.5 }
+      )
+    }
+    await writeFile(filePath, new Uint8Array(await doc.save()))
+  }
+  await makeEnglishPdf(en1Path, 'EN1')
+  await makeEnglishPdf(en2Path, 'EN2')
+
+  const importLocalPath = async (
+    appInstance: Awaited<ReturnType<typeof launchApp>>['app'],
+    pageInstance: Page,
+    filePath: string
+  ): Promise<void> => {
+    await appInstance.evaluate(({ dialog }, target) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] })
+    }, filePath)
+    await pageInstance.getByRole('button', { name: '导入 PDF', exact: true }).click()
+    await expect(pageInstance.getByRole('button', { name: '导入 PDF', exact: true })).toBeEnabled({ timeout: 30000 })
+  }
+
+  const dataDir = await createTestData()
+  let running = await launchApp(dataDir, { deviceScaleFactor: 1 })
+  const failures: string[] = []
+  running.page.on('pageerror', error => failures.push(error.message))
+
+  try {
+    const { app, page } = running
+
+    // 生成真实包含中文可提取文本的双页合成中文 PDF（合成素材）
+    const zhPdfBytes = await app.evaluate(async ({ BrowserWindow }) => {
+      const win = new BrowserWindow({ show: false, width: 794, height: 1123, webPreferences: { sandbox: true } })
+      try {
+        const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>body{font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;padding:48px;font-size:15px;line-height:1.8;} .p2{page-break-before:always;}</style></head><body><h1>基于分布式内存架构的高性能事务引擎研究</h1><p>随着高速互联网络与非易失性存储硬件的发展，传统单机数据库在扩展性与尾延迟控制方面面临显著挑战。本文提出一种面向分布式存储集群的协同缓冲池机制。</p><div class="p2"><h2>第二节 核心架构</h2><p>通过局部性感知调度与远程内存访问优化，系统实现了稳定且高效的多节点事务处理吞吐。</p></div></body></html>`
+        await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+        const buf = await win.webContents.printToPDF({ printBackground: false })
+        return Array.from(buf)
+      } finally {
+        win.destroy()
+      }
+    })
+    await writeFile(zhPdfPath, Buffer.from(zhPdfBytes))
+
+    // 1. 未配置引擎时打开中文 PDF：默认显示原文，且不弹出未配置提醒、不发起翻译
+    await importLocalPath(app, page, zhPdfPath)
+    await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', {
+      timeout: 30000
+    })
+    await expect(page.locator('.pdf-page[data-page-number="1"] .textLayer')).toContainText('高性能事务引擎', {
+      timeout: 15000
+    })
+    await expect(page.locator('.translation-panel')).toHaveCount(0)
+    await page.waitForTimeout(800)
+    await expect(page.getByTestId('translation-unconfigured-prompt')).toHaveCount(0)
+    expect(requests.length).toBe(0)
+
+    // 2. 未配置引擎时打开英文 3 页 PDF（en1）：默认显示原文，弹出可点击的未配置小窗口；点击后跳到「翻译与 AI 引擎设置」
+    await importLocalPath(app, page, en1Path)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .textLayer')).toContainText('EN1 Page 1 Marker', {
+      timeout: 20000
+    })
+    await expect(page.locator('.translation-panel')).toHaveCount(0)
+    await expect(
+      page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '原文', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    const promptToast = page.getByTestId('translation-unconfigured-prompt')
+    await expect(promptToast).toBeVisible({ timeout: 10000 })
+    await promptToast.click()
+
+    const settingsDialog = page.getByRole('dialog', { name: '翻译与 AI 引擎设置', exact: true })
+    await expect(settingsDialog).toBeVisible()
+    await page.getByLabel('API Base URL', { exact: true }).fill(apiBaseUrl)
+    await page.getByLabel('API 模型名称', { exact: true }).fill('mock-auto-pretrans-v1')
+    await page.getByLabel('API Key', { exact: true }).fill('sk-auto-e2e-123456')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect(settingsDialog).toHaveCount(0)
+
+    // 保存后仍停留在「原文」模式，同时后台自动预译前 2 页（第 3 页不预译）
+    await expect.poll(() => requests.filter(r => r.firstText.includes('EN1 Page 1 Marker')).length, { timeout: 15000 }).toBe(1)
+    await expect.poll(() => requests.filter(r => r.firstText.includes('EN1 Page 2 Marker')).length, { timeout: 15000 }).toBe(1)
+    await expect(requests.filter(r => r.firstText.includes('EN1 Page 3 Marker')).length).toBe(0)
+
+    // 切换至「双栏」验证前两页译文已就绪，第 3 页未翻译
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
+    await waitForPageReady(page, 1)
+    await expect(
+      page.locator('.translation-page[data-page-number="1"] .translation-overlay-block.is-translated').first()
+    ).toContainText('预译：', { timeout: 15000 })
+    await page.getByRole('spinbutton', { name: '当前页码' }).fill('2')
+    await page.getByRole('spinbutton', { name: '当前页码' }).press('Enter')
+    await waitForPageReady(page, 2)
+    await expect(
+      page.locator('.translation-page[data-page-number="2"] .translation-overlay-block.is-translated').first()
+    ).toContainText('预译：', { timeout: 15000 })
+    await page.getByRole('spinbutton', { name: '当前页码' }).fill('3')
+    await page.getByRole('spinbutton', { name: '当前页码' }).press('Enter')
+    await waitForPageReady(page, 3)
+    await expect(page.locator('.translation-page[data-page-number="3"] .translation-overlay-block.is-translated')).toHaveCount(0)
+
+    // 3. 已配置状态下打开全新英文 PDF（en2）：默认显示原文，且自动后台预译第 1-2 页（第 3 页不译）
+    await importLocalPath(app, page, en2Path)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .textLayer')).toContainText('EN2 Page 1 Marker', {
+      timeout: 20000
+    })
+    await expect(page.locator('.translation-panel')).toHaveCount(0)
+    await expect(promptToast).toHaveCount(0)
+    await expect.poll(() => requests.filter(r => r.firstText.includes('EN2 Page 1 Marker')).length, { timeout: 15000 }).toBe(1)
+    await expect.poll(() => requests.filter(r => r.firstText.includes('EN2 Page 2 Marker')).length, { timeout: 15000 }).toBe(1)
+    expect(requests.filter(r => r.firstText.includes('EN2 Page 3 Marker')).length).toBe(0)
+
+    // 4. 切回 en1 并设为「译文」模式，重启后应恢复「译文」模式；切回中文 PDF 仍保持「原文」模式且不翻译
+    const docs = await page.evaluate(() => window.paperflow.listDocuments())
+    const zhDoc = docs.find(d => d.originalFilename === 'synthetic-zh-paper.pdf')!
+    const en1Doc = docs.find(d => d.originalFilename === 'synthetic-en-paper-1.pdf')!
+    await page.getByTestId(`pdf-tab-${en1Doc.id}`).locator('button.workspace-tab__select').click()
+    await page.getByRole('spinbutton', { name: '当前页码' }).fill('1')
+    await page.getByRole('spinbutton', { name: '当前页码' }).press('Enter')
+    await waitForPageReady(page, 1)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '译文', exact: true }).click()
+    await expect(
+      page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '译文', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    await running.app.close()
+    running = await launchApp(dataDir, { deviceScaleFactor: 1 })
+    const p2 = running.page
+    p2.on('pageerror', error => failures.push(error.message))
+
+    await expect(
+      p2.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '译文', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true', { timeout: 15000 })
+    await expect(p2.locator('.translation-page[data-page-number="1"] .translation-overlay-block.is-translated').first()).toBeVisible({
+      timeout: 15000
+    })
+
+    await p2.getByTestId(`pdf-tab-${zhDoc.id}`).locator('button.workspace-tab__select').click()
+    await expect(p2.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', {
+      timeout: 20000
+    })
+    await expect(
+      p2.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '原文', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
+    await expect(p2.locator('.translation-panel')).toHaveCount(0)
+    expect(requests.filter(r => r.firstText.includes('分布式') || r.firstText.includes('协同缓冲池')).length).toBe(0)
+
+    expect(failures).toEqual([])
+  } finally {
+    await running.app.close()
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()))
+    await rm(workDir, { recursive: true, force: true })
   }
 })

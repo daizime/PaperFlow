@@ -67,9 +67,7 @@ html[data-theme="sepia"] .library-panel {
 html[data-theme="sepia"] .reader-panel,
 html[data-theme="sepia"] .reader-viewport,
 html[data-theme="sepia"] .pdf-scroll,
-html[data-theme="sepia"] .reader-pill-dock,
-html[data-theme="sepia"] .translation-scroll,
-html[data-theme="sepia"] .translation-bottom-dock {
+html[data-theme="sepia"] .translation-scroll {
   background: #e6dcc6;
 }
 
@@ -86,6 +84,11 @@ html[data-theme="sepia"] .library-backup-bar {
   background: #faf5e8;
   border-color: #d8cba8;
   color: #3d3324;
+}
+
+html[data-theme="sepia"] .reader-floating-pill {
+  background: rgba(250, 245, 232, 0.94);
+  box-shadow: 0 6px 20px rgba(61, 51, 36, 0.14);
 }
 
 html[data-theme="sepia"] .study-peek-card__preview {
@@ -192,9 +195,7 @@ html[data-theme="dark"] .library-panel .library-heading > span {
 html[data-theme="dark"] .reader-panel,
 html[data-theme="dark"] .reader-viewport,
 html[data-theme="dark"] .pdf-scroll,
-html[data-theme="dark"] .reader-pill-dock,
-html[data-theme="dark"] .translation-scroll,
-html[data-theme="dark"] .translation-bottom-dock {
+html[data-theme="dark"] .translation-scroll {
   background: #111419;
 }
 

@@ -8,6 +8,7 @@ import {
   isTranslatableBlock,
   matchSelectionRegionsToSentences,
   resolveMirrorDragSelection,
+  resolveOverlayBlockGeometries,
   splitTextWithInlineFormulas,
   splitTranslatedSentences
 } from '../../src/renderer/src/features/translation/sentence-alignment'
@@ -497,6 +498,8 @@ describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testi
     expect(isTranslatableBlock(buildBlock('list-item', '[1] First item in list.'))).toBe(true)
 
     expect(isTranslatableBlock(buildBlock('formula', 'E = mc^2 (1)'))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('table', 'DRAM 5000 0.1 92.0'))).toBe(false)
+    expect(isTranslatableBlock(buildBlock('figure', 'Client RDMA Read'))).toBe(false)
     expect(isTranslatableBlock(buildBlock('paragraph', ''))).toBe(false)
     expect(isTranslatableBlock(buildBlock('paragraph', '123'))).toBe(false)
     expect(isTranslatableBlock(buildBlock('paragraph', '\u0005\u0006'))).toBe(false)
@@ -684,5 +687,187 @@ describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testi
     const smallMarquee = resolveMirrorDragSelection(layout, { x: 282, y: 145 }, { x: 164, y: 153 })
     expect(smallMarquee?.sentenceIds).toEqual(['s2'])
     expect(smallMarquee?.usedMarquee).toBe(true)
+  })
+
+  test('resolveOverlayBlockGeometries eliminates adjacent vertical overlaps across tight blocks, obstacles, and masks (合成素材)', () => {
+    const mkBlock = (
+      id: string,
+      opts: {
+        kind: AnalyzedBlock['kind']
+        col: number
+        fontSize: number
+        rect: PageRect
+        text?: string
+        continued?: boolean
+      }
+    ): AnalyzedBlock => {
+      const sentenceText = opts.text ?? ''
+      const sentences: AnalyzedSentence[] = sentenceText
+        ? [
+            {
+              id: `${id}-s1`,
+              pageNumber: 1,
+              order: 1,
+              blockId: id,
+              blockKind: opts.kind,
+              columnIndex: opts.col,
+              text: sentenceText,
+              rects: [opts.rect],
+              displayRects: [opts.rect],
+              bounds: opts.rect,
+              displayBounds: opts.rect,
+              fragments: [],
+              crossColumn: false
+            }
+          ]
+        : []
+      return {
+        id,
+        pageNumber: 1,
+        order: 1,
+        kind: opts.kind,
+        columnIndex: opts.col,
+        fontSize: opts.fontSize,
+        isBold: opts.kind === 'caption',
+        continuedFromPrevColumn: opts.continued,
+        bounds: opts.rect,
+        displayBounds: opts.rect,
+        sentences
+      }
+    }
+
+    // 1. 极紧邻的两段 7pt 版权/脚注（含 1pt 间隙与 -1pt 原始包围盒重叠）以及下方紧贴的短单行块
+    const tightTop1 = mkBlock('b-top1', {
+      kind: 'paragraph',
+      col: 1,
+      fontSize: 7,
+      rect: { x: 54, y: 700, width: 220, height: 22 },
+      text: 'Permission to make digital or hard copies.'
+    })
+    const tightNext2 = mkBlock('b-next2', {
+      kind: 'paragraph',
+      col: 1,
+      fontSize: 7,
+      rect: { x: 54, y: 721, width: 220, height: 32 },
+      text: 'Copyrights for components owned by others must be honored.'
+    })
+    const shortLineAboveDoi = mkBlock('b-isbn', {
+      kind: 'paragraph',
+      col: 1,
+      fontSize: 7.5,
+      rect: { x: 54, y: 754, width: 180, height: 8 },
+      text: 'ACM ISBN 978-1-4503-9249-5.'
+    })
+    const doiLine = mkBlock('b-doi', {
+      kind: 'paragraph',
+      col: 1,
+      fontSize: 7.5,
+      rect: { x: 54, y: 763, width: 190, height: 8 },
+      text: 'https://doi.org/10.1145/3514221.3526187'
+    })
+
+    // 2. 题注紧邻不可译表格障碍物，及栏首空续句遮罩紧贴下一段
+    const captionAboveTable = mkBlock('b-cap', {
+      kind: 'caption',
+      col: 2,
+      fontSize: 9,
+      rect: { x: 312, y: 120, width: 220, height: 10 },
+      text: 'Table 1: Hardware metrics.'
+    })
+    const tableObstacle = mkBlock('b-tab', {
+      kind: 'table',
+      col: 2,
+      fontSize: 9,
+      rect: { x: 312, y: 131, width: 220, height: 60 },
+      text: 'DRAM 5000 0.1 92.0'
+    })
+    const prevColMask = mkBlock('b-mask', {
+      kind: 'paragraph',
+      col: 2,
+      fontSize: 9.5,
+      rect: { x: 312, y: 210, width: 220, height: 18 },
+      continued: true
+    })
+    const afterMask = mkBlock('b-after-mask', {
+      kind: 'paragraph',
+      col: 2,
+      fontSize: 9.5,
+      rect: { x: 312, y: 229, width: 220, height: 42 },
+      text: 'However, in-memory DBMSs incur high costs.'
+    })
+    // 3. 间距充裕的普通正文（允许适度往下扩高，且不受另一栏影响）
+    const spacedPara = mkBlock('b-spaced', {
+      kind: 'paragraph',
+      col: 2,
+      fontSize: 10,
+      rect: { x: 312, y: 290, width: 220, height: 32 },
+      text: 'A spacious paragraph with generous vertical gap.'
+    })
+    const belowSpaced = mkBlock('b-below-spaced', {
+      kind: 'paragraph',
+      col: 2,
+      fontSize: 10,
+      rect: { x: 312, y: 342, width: 220, height: 30 },
+      text: 'Following section continues normally.'
+    })
+
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [
+        tightTop1,
+        tightNext2,
+        shortLineAboveDoi,
+        doiLine,
+        captionAboveTable,
+        tableObstacle,
+        prevColMask,
+        afterMask,
+        spacedPara,
+        belowSpaced
+      ],
+      sentences: [],
+      filteredItems: []
+    }
+
+    const colLefts = computeColumnLeftEdges(layout.blocks)
+    const colRights = new Map<number, number>([
+      [1, 274],
+      [2, 540]
+    ])
+    const solved = resolveOverlayBlockGeometries(layout, 1, colLefts, colRights)
+
+    expect(solved.has('b-tab')).toBe(false)
+
+    const g1 = solved.get('b-top1')!
+    const g2 = solved.get('b-next2')!
+    expect(g1.top + g1.height).toBeLessThanOrEqual(g2.top)
+    expect(g1.tightBottom).toBe(true)
+    expect(g2.tightTop).toBe(true)
+    expect(g1.maxSafeHeight).toBe(g1.height)
+
+    // 短单行不再因 15px 保底高度而侵占下一行
+    const gIsbn = solved.get('b-isbn')!
+    const gDoi = solved.get('b-doi')!
+    expect(gIsbn.top + gIsbn.height).toBeLessThanOrEqual(gDoi.top)
+    expect(gIsbn.tightBottom).toBe(true)
+    expect(gDoi.tightTop).toBe(true)
+
+    // 题注不覆盖紧邻表格障碍物，遮罩不覆盖下方段落
+    const gCap = solved.get('b-cap')!
+    expect(gCap.top + gCap.height).toBeLessThanOrEqual(tableObstacle.displayBounds.y)
+    const gMask = solved.get('b-mask')!
+    const gAfterMask = solved.get('b-after-mask')!
+    expect(gMask.top + gMask.height).toBeLessThanOrEqual(gAfterMask.top)
+
+    // 间距充裕段落允许扩高且保留至少 3px 呼吸距
+    const gSpaced = solved.get('b-spaced')!
+    const gBelow = solved.get('b-below-spaced')!
+    expect(gSpaced.maxSafeHeight).toBeGreaterThan(gSpaced.height)
+    expect(gSpaced.top + gSpaced.maxSafeHeight).toBeLessThanOrEqual(gBelow.top - 3)
   })
 })

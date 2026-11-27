@@ -170,8 +170,9 @@ test('全量三大工作流优化：后台连续译与分片跳过、手工改�
     let { app, page } = running
 
     await importPdfPath(app, page, pdfBPath)
-    await waitForPageReady(page, 1)
+    await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', { timeout: 30000 })
     await importPdfPath(app, page, pdfAPath)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     const docs = await page.evaluate(() => window.paperflow.listDocuments())

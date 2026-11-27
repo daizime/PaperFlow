@@ -408,7 +408,6 @@ export function LibraryPanel({
     renameInputRef.current?.select()
   }, [activeEditingId])
 
-  const count = documents.length === 0 && (loading || loadError) ? '—' : documents.length
   const visibleNotice = !importing && notice && dismissedNotice !== notice ? notice : null
   const activeFilterCount =
     (starOnly ? 1 : 0) +
@@ -1028,7 +1027,6 @@ export function LibraryPanel({
         <div className="library-heading">
           <div className="library-heading__title">
             <h2>我的文献</h2>
-            <span aria-label={count === '—' ? '文献数量待读取' : `共 ${count} 篇文献`}>{count}</span>
           </div>
           <div className="library-heading__actions">
             {onOpenLiteratureSearch ? (

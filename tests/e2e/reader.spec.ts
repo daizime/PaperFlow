@@ -53,6 +53,10 @@ test('T03 真实多页Canvas、Worker、文字选取复制、缩放与关闭恢�
     await page.getByRole('button', { name: '下一页', exact: true }).click()
     await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('2')
     await waitForPage(page, 2)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
+    await expect(page.locator('.translation-page[data-page-number="2"]')).toHaveAttribute('data-analyzed', 'true', {
+      timeout: 30000
+    })
     const scrollBox = (await page.getByLabel('PDF 阅读区域', { exact: true }).boundingBox())!
     await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2)
     await page.mouse.wheel(0, scrollBox.height * 3)

@@ -330,6 +330,7 @@ test('导入本地文件夹、批注同步导出、乱码标题识别、排序�
     }, port)
 
     // 先对文档页块执行一次基于当前作用域的缓存翻译
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', {
       timeout: 30000
     })

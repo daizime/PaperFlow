@@ -86,7 +86,7 @@ export function buildSingleBlockTranslationInput(
   const targetBlock = layout.blocks.find(
     block => isTranslatableBlock(block) && computeStableTranslationBlockKey(block) === blockKey
   )
-  if (!targetBlock || targetBlock.kind === 'formula') return null
+  if (!targetBlock || !isTranslatableBlock(targetBlock)) return null
   const sourceText = getBlockTranslationSourceText(targetBlock)
   if (!sourceText) return null
   return {

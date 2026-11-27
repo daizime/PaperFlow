@@ -27,10 +27,10 @@ import { mapColorToDarkPaperFilter } from './dark-paper-color'
 import {
   alignBlockSentences,
   computeColumnLeftEdges,
-  computeOverlayBlockIndent,
   getBlockTranslationSourceText,
   isTranslatableBlock,
   resolveMirrorDragSelection,
+  resolveOverlayBlockGeometries,
   splitTextWithInlineFormulas
 } from './sentence-alignment'
 import './translation.css'
@@ -70,6 +70,7 @@ export interface TranslationPanelProps {
   activeSentenceIds: ReadonlySet<string>
   onSelectTargetSentences?(selection: TargetSentenceSelection | null): void
   onChangeSplitRatio?(ratio: number | null): void
+  onZoomDelta?(delta: number): void
   getSplitDragContext?: () => { leftWidth: number; rightWidth: number } | null
   bottomPill?: React.ReactNode
   splitDropActive?: boolean
@@ -377,6 +378,12 @@ const OverlayPageContent = memo(function OverlayPageContent({
       if (rightEdge > prev) columnRightByIndex.set(b.columnIndex, rightEdge)
     }
   }
+  const overlayBoxGeometries = resolveOverlayBlockGeometries(
+    layout,
+    scale,
+    columnLeftByIndex,
+    columnRightByIndex
+  )
 
   const hasTranslatedBlocks =
     Boolean(translations && translations.size > 0) &&
@@ -388,7 +395,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
       return Boolean(cached && cached.sourceHash === sourceHash && cached.translatedText.trim())
     })
 
-  // 先利用同栏右侧安全留白避免无谓缩微字号，再自适应微调字号/行高确保 0px 纵向漂移
+  // 先利用同栏右侧安全留白与下侧无碰撞留白避免无谓缩微字号，再严格零溢出微调字号/行高
   useLayoutEffect(() => {
     const root = layerRef.current
     if (!root) return
@@ -399,45 +406,65 @@ const OverlayPageContent = memo(function OverlayPageContent({
       const initialPx = Number.parseFloat(blockEl.dataset.baseFontPx || '11')
       const baseWidthPx = Number.parseFloat(blockEl.dataset.baseWidthPx || String(blockEl.clientWidth))
       const maxWidthPx = Number.parseFloat(blockEl.dataset.maxWidthPx || String(baseWidthPx))
+      const baseHeightPx = Number.parseFloat(blockEl.dataset.baseHeightPx || String(blockEl.clientHeight))
+      const maxHeightPx = Number.parseFloat(blockEl.dataset.maxHeightPx || String(baseHeightPx))
 
       blockEl.style.width = `${baseWidthPx}px`
+      blockEl.style.height = `${baseHeightPx}px`
+      const computed = window.getComputedStyle(blockEl)
+      const padY = (Number.parseFloat(computed.paddingTop) || 0) + (Number.parseFloat(computed.paddingBottom) || 0)
+      const getAvailableHeight = (): number => Math.max(4, Math.floor(blockEl.clientHeight - padY))
+
       let fontPx = initialPx
       textEl.style.fontSize = `${fontPx}px`
       textEl.style.lineHeight = '1.36'
 
-      if (textEl.scrollHeight > blockEl.clientHeight + 1 && maxWidthPx > baseWidthPx + 2) {
+      if (textEl.scrollHeight > getAvailableHeight() && maxWidthPx > baseWidthPx + 2) {
         blockEl.style.width = `${maxWidthPx}px`
       }
-      if (textEl.scrollHeight > blockEl.clientHeight + 1) {
+      if (textEl.scrollHeight > getAvailableHeight()) {
         textEl.style.lineHeight = '1.24'
+      }
+      if (textEl.scrollHeight > getAvailableHeight() && maxHeightPx > baseHeightPx + 1) {
+        blockEl.style.height = `${Math.min(maxHeightPx, Math.ceil(textEl.scrollHeight + padY))}px`
       }
 
       let guard = 0
-      while (textEl.scrollHeight > blockEl.clientHeight + 1 && fontPx > 6.5 && guard < 18) {
+      while (textEl.scrollHeight > getAvailableHeight() && fontPx > 6.5 && guard < 18) {
         fontPx = Math.max(6.5, Math.round(fontPx * 0.9 * 10) / 10)
         textEl.style.fontSize = `${fontPx}px`
         guard += 1
       }
-      if (textEl.scrollHeight > blockEl.clientHeight + 1) {
-        textEl.style.lineHeight = '1.08'
-        while (textEl.scrollHeight > blockEl.clientHeight + 1 && fontPx > 5.5 && guard < 24) {
-          fontPx = Math.max(5.5, Math.round(fontPx * 0.9 * 10) / 10)
+      if (textEl.scrollHeight > getAvailableHeight()) {
+        textEl.style.lineHeight = '1.14'
+        const minFontPx = Math.max(4.5, Math.min(5.5, Math.round(initialPx * 0.55 * 10) / 10))
+        while (textEl.scrollHeight > getAvailableHeight() && fontPx > minFontPx && guard < 24) {
+          fontPx = Math.max(minFontPx, Math.round(fontPx * 0.9 * 10) / 10)
+          textEl.style.fontSize = `${fontPx}px`
+          guard += 1
+        }
+      }
+      if (textEl.scrollHeight > getAvailableHeight()) {
+        textEl.style.lineHeight = '1.06'
+        while (textEl.scrollHeight > getAvailableHeight() && fontPx > 4.5 && guard < 28) {
+          fontPx = Math.max(4.5, Math.round(fontPx * 0.9 * 10) / 10)
           textEl.style.fontSize = `${fontPx}px`
           guard += 1
         }
       } else if (
+        fontPx === initialPx &&
         (blockEl.dataset.blockKind === 'paragraph' || blockEl.dataset.blockKind === 'list-item') &&
         blockEl.clientHeight >= fontPx * 2.6 &&
-        textEl.scrollHeight <= blockEl.clientHeight - fontPx * 0.65
+        textEl.scrollHeight <= getAvailableHeight() - fontPx * 0.65
       ) {
         for (const relaxedLineHeight of ['1.44', '1.52', '1.6']) {
           const prevLineHeight = textEl.style.lineHeight
           textEl.style.lineHeight = relaxedLineHeight
-          if (textEl.scrollHeight > blockEl.clientHeight + 1) {
+          if (textEl.scrollHeight > getAvailableHeight()) {
             textEl.style.lineHeight = prevLineHeight
             break
           }
-          if (textEl.scrollHeight >= blockEl.clientHeight * 0.88) break
+          if (textEl.scrollHeight >= getAvailableHeight() * 0.88) break
         }
       }
     }
@@ -633,28 +660,30 @@ const OverlayPageContent = memo(function OverlayPageContent({
     >
       {layout.blocks.map(block => {
         const blockKey = computeStableTranslationBlockKey(block)
-        const baseIndentGeom = computeOverlayBlockIndent(block, columnLeftByIndex)
-        const boxLeft = Math.max(0, baseIndentGeom.anchorX * scale - 1)
-        const boxTop = Math.max(0, block.displayBounds.y * scale - 1)
-        const baseWidth = Math.max(24, baseIndentGeom.anchorWidth * scale + 2)
-        const boxHeight = Math.max(15, block.displayBounds.height * scale + 4)
-        const firstLineIndentPx =
-          baseIndentGeom.firstLineIndent > 0 ? Math.round(baseIndentGeom.firstLineIndent * scale * 10) / 10 : 0
+        const boxGeom = overlayBoxGeometries.get(block.id)
         const bgColor = blockColors?.[blockKey] ?? '#ffffff'
         const darkBgColor = mapColorToDarkPaperFilter(bgColor)
 
         if (block.sentences.length === 0) {
-          if (block.kind !== 'formula' && block.continuedFromPrevColumn && translations && translations.size > 0) {
+          if (
+            block.kind !== 'formula' &&
+            block.kind !== 'table' &&
+            block.kind !== 'figure' &&
+            block.continuedFromPrevColumn &&
+            translations &&
+            translations.size > 0 &&
+            boxGeom
+          ) {
             return (
               <div
                 key={block.id}
                 className="translation-overlay-mask"
                 aria-hidden="true"
                 style={{
-                  left: boxLeft,
-                  top: boxTop,
-                  width: baseWidth,
-                  height: Math.max(4, block.displayBounds.height * scale + 2),
+                  left: boxGeom.left,
+                  top: boxGeom.top,
+                  width: boxGeom.baseWidth,
+                  height: boxGeom.height,
                   '--overlay-bg': bgColor,
                   '--overlay-bg-dark': darkBgColor
                 } as CSSProperties}
@@ -664,7 +693,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
           return null
         }
 
-        // 公式块及纯数字/符号不可译碎片保留底图原样不覆盖译文，同时提供句子级透明镜像高亮与双向点击定位
+        // 公式/表格/插图内部标注及纯数字/符号不可译碎片保留底图原样不覆盖译文，同时提供句子级透明镜像高亮与双向点击定位
         if (!isTranslatableBlock(block)) {
           return block.sentences.map(sentence => {
             const rects = sentence.displayRects.length > 0 ? sentence.displayRects : [block.displayBounds]
@@ -685,12 +714,20 @@ const OverlayPageContent = memo(function OverlayPageContent({
                 toggleIfSame: true
               })
             }
+            const nonTranslatableLabel =
+              block.kind === 'formula'
+                ? `公式第 ${sentence.order} 项`
+                : block.kind === 'table'
+                  ? `表格第 ${sentence.order} 项`
+                  : block.kind === 'figure'
+                    ? `图表第 ${sentence.order} 项`
+                    : `原文第 ${sentence.order} 项`
             return rects.map((r, rIdx) => (
               <div
                 key={`${sentence.id}-m-${rIdx}`}
                 tabIndex={0}
                 role="button"
-                aria-label={block.kind === 'formula' ? `公式第 ${sentence.order} 项` : `原文第 ${sentence.order} 项`}
+                aria-label={nonTranslatableLabel}
                 className={isActive ? 'translation-mirror-sentence is-active' : 'translation-mirror-sentence'}
                 style={{
                   left: Math.max(0, r.x * scale - 1),
@@ -714,28 +751,14 @@ const OverlayPageContent = memo(function OverlayPageContent({
           })
         }
 
-        const pageSafeWidth = Math.max(baseWidth, layout.naturalWidth * scale - 16 - boxLeft)
-        let maxSafeWidth =
-          block.columnIndex > 0
-            ? Math.max(
-                baseWidth,
-                (columnRightByIndex.get(block.columnIndex) ?? block.displayBounds.x + block.displayBounds.width) * scale +
-                  2 -
-                  boxLeft
-              )
-            : pageSafeWidth
-        maxSafeWidth = Math.min(pageSafeWidth, maxSafeWidth)
-        for (const other of layout.blocks) {
-          if (other.id === block.id) continue
-          const oLeft = other.displayBounds.x * scale - 1
-          if (oLeft <= boxLeft + 4) continue
-          const oTop = other.displayBounds.y * scale - 1
-          const oBottom = oTop + other.displayBounds.height * scale + 2
-          if (oBottom >= boxTop - 2 && oTop <= boxTop + boxHeight + 2) {
-            maxSafeWidth = Math.min(maxSafeWidth, Math.max(baseWidth, oLeft - 4 - boxLeft))
-          }
-        }
-        maxSafeWidth = Math.round(maxSafeWidth * 10) / 10
+        if (!boxGeom) return null
+        const boxLeft = boxGeom.left
+        const boxTop = boxGeom.top
+        const baseWidth = boxGeom.baseWidth
+        const maxSafeWidth = boxGeom.maxSafeWidth
+        const boxHeight = boxGeom.height
+        const maxSafeHeight = boxGeom.maxSafeHeight
+        const firstLineIndentPx = boxGeom.firstLineIndentPx
 
         const sourceText = getBlockTranslationSourceText(block)
         const sourceHash = hashTranslationBlockSource(sourceText)
@@ -792,8 +815,10 @@ const OverlayPageContent = memo(function OverlayPageContent({
                 data-block-kind={block.kind}
                 data-column={block.columnIndex}
                 data-base-font-px={baseFontPx}
-                data-base-width-px={Math.round(baseWidth * 10) / 10}
+                data-base-width-px={baseWidth}
                 data-max-width-px={maxSafeWidth}
+                data-base-height-px={boxHeight}
+                data-max-height-px={maxSafeHeight}
               >
                 {isTranslating ? <span>翻译中…</span> : null}
               </div>
@@ -857,15 +882,19 @@ const OverlayPageContent = memo(function OverlayPageContent({
             tabIndex={0}
             className={`translation-overlay-block translation-overlay-block--${block.kind} ${statusClass}${
               isBlockRetranslating ? ' is-retranslating' : ''
-            }${isTopEdgeBlock ? ' is-top-edge' : ''}`}
+            }${isTopEdgeBlock ? ' is-top-edge' : ''}${boxGeom.tightBottom ? ' has-tight-bottom' : ''}${
+              boxGeom.tightTop ? ' has-tight-top' : ''
+            }`}
             style={style}
             data-block-id={block.id}
             data-block-key={blockKey}
             data-block-kind={block.kind}
             data-column={block.columnIndex}
             data-base-font-px={baseFontPx}
-            data-base-width-px={Math.round(baseWidth * 10) / 10}
+            data-base-width-px={baseWidth}
             data-max-width-px={maxSafeWidth}
+            data-base-height-px={boxHeight}
+            data-max-height-px={maxSafeHeight}
             data-first-line-indent-px={firstLineIndentPx > 0 ? firstLineIndentPx : undefined}
             onClick={handleSelectWholeBlock}
             onKeyDown={event => {
@@ -1160,6 +1189,7 @@ export function TranslationPanel({
   activeSentenceIds,
   onSelectTargetSentences,
   onChangeSplitRatio,
+  onZoomDelta,
   getSplitDragContext,
   bottomPill,
   splitDropActive = false,
@@ -1173,8 +1203,10 @@ export function TranslationPanel({
   const suppressNextClickRef = useRef(false)
   const layoutsRef = useRef(layouts)
   const onSelectTargetRef = useRef(onSelectTargetSentences)
+  const onZoomDeltaRef = useRef(onZoomDelta)
   layoutsRef.current = layouts
   onSelectTargetRef.current = onSelectTargetSentences
+  onZoomDeltaRef.current = onZoomDelta
 
   const handleScrollRef = useCallback(
     (element: HTMLDivElement | null): void => {
@@ -1215,6 +1247,20 @@ export function TranslationPanel({
       document.removeEventListener('selectionchange', onSelectionChange)
       document.removeEventListener('mouseup', onMouseUp)
     }
+  }, [hasDocument, scrollContainerEl])
+
+  useEffect(() => {
+    const target = panelRef.current ?? scrollContainerEl
+    if (!hasDocument || !target) return
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return
+      if (!onZoomDeltaRef.current) return
+      event.preventDefault()
+      if (event.deltaY === 0) return
+      onZoomDeltaRef.current(event.deltaY > 0 ? -0.1 : 0.1)
+    }
+    target.addEventListener('wheel', handleWheel, { passive: false })
+    return () => target.removeEventListener('wheel', handleWheel)
   }, [hasDocument, scrollContainerEl])
 
   if (!hasDocument) {
@@ -1410,9 +1456,7 @@ export function TranslationPanel({
           <div className="translation-empty"><h3>正在准备版面结构</h3></div>
         )}
       </div>
-      <div className="translation-bottom-dock" aria-hidden={bottomPill ? undefined : true}>
-        {bottomPill}
-      </div>
+      {bottomPill ? <div className="translation-bottom-dock">{bottomPill}</div> : null}
       {splitDropActive ? (
         <div className="split-drop-overlay split-drop-overlay--full" aria-hidden="true">
           <div className="split-drop-overlay__badge">放到右侧形成双开对照</div>

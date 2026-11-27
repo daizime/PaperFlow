@@ -1,6 +1,42 @@
-import { BrowserWindow, screen, session } from 'electron'
+import { BrowserWindow, Menu, screen, session, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
 import { APP_URL, DEV_ORIGIN, contentSecurityPolicy, developmentUrl } from './services/app-protocol'
+
+let appMenuInstalled = false
+
+function installApplicationMenu(dev: boolean): void {
+  if (appMenuInstalled) return
+  appMenuInstalled = true
+  // 移除内置 View 缩放快捷键（Ctrl+= / Ctrl+- / Ctrl+0），避免 Chromium 缩放整个界面而非 PDF 与译文视图
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? ([{ role: 'appMenu' }] as MenuItemConstructorOptions[]) : []),
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    ...(dev
+      ? ([
+          {
+            label: '开发',
+            submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }]
+          }
+        ] as MenuItemConstructorOptions[])
+      : []),
+    {
+      label: '窗口',
+      submenu: [{ role: 'minimize' }, { role: 'close' }]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 export function installSessionSecurity(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
@@ -22,6 +58,8 @@ export function installSessionSecurity(): void {
   })
 }
 export async function createWindow(onCreated?: (window: BrowserWindow) => void): Promise<BrowserWindow> {
+  const dev = developmentUrl() !== null
+  installApplicationMenu(dev)
   const workArea = screen.getPrimaryDisplay().workAreaSize
   const minWidth = Math.min(1080, Math.max(640, Math.floor(workArea.width * 0.7)))
   const minHeight = Math.min(680, Math.max(440, Math.floor(workArea.height * 0.7)))
@@ -37,7 +75,12 @@ export async function createWindow(onCreated?: (window: BrowserWindow) => void):
       webviewTag: false, allowRunningInsecureContent: false
     }
   })
+  window.setMenuBarVisibility(false)
   onCreated?.(window)
+  void window.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {})
+  window.webContents.on('dom-ready', () => {
+    window.webContents.setZoomFactor(1)
+  })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', event => event.preventDefault())
   window.webContents.on('will-frame-navigate', event => event.preventDefault())

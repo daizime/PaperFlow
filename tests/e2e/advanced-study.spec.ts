@@ -29,6 +29,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
   try {
     const { app, page } = runningA
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     // 1. 无书签 PDF 自动识别章节大纲：点击标题跳转后，目录单选高亮 + 原文/双栏同步高亮对应标题
@@ -98,10 +99,56 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await page.mouse.click(otherBox.x + otherBox.width / 2, otherBox.y + otherBox.height / 2)
     await expect(peekDialog).toHaveCount(0)
 
-    // 3. 快捷键面板 (?) 与阅读快捷键 (t / v / c / Escape)
+    // 3. 快捷键面板 (?) 、自定义改键、冲突检测/互换、恢复默认与阅读快捷键 (t / v / c / Escape)
     await page.keyboard.press('Shift+/')
     const shortcutsDialog = page.getByRole('dialog', { name: '快捷键一览', exact: true })
     await expect(shortcutsDialog).toBeVisible()
+
+    // 改绑「循环切换阅读主题」为 G，Esc 仅取消录制不关闭弹窗，冲突时支持一键互换，最后恢复全部默认
+    const themeBindBtn = shortcutsDialog.getByTestId('shortcut-bind-toggleTheme')
+    await themeBindBtn.click()
+    await expect(themeBindBtn).toHaveAttribute('aria-pressed', 'true')
+    await page.keyboard.press('g')
+    await expect(themeBindBtn).toContainText('G')
+    await expect(shortcutsDialog.getByTestId('shortcut-reset-toggleTheme')).toBeVisible()
+
+    const viewBindBtn = shortcutsDialog.getByTestId('shortcut-bind-cycleViewMode')
+    await viewBindBtn.click()
+    await page.keyboard.press('g')
+    await expect(shortcutsDialog.getByTestId('shortcut-feedback')).toContainText('循环切换阅读主题')
+    await page.keyboard.press('Escape')
+    await expect(shortcutsDialog).toBeVisible()
+    await expect(viewBindBtn).toHaveAttribute('aria-pressed', 'false')
+
+    await page.keyboard.press('Escape')
+    await expect(shortcutsDialog).toHaveCount(0)
+
+    // 验证旧键 T 已失效，新键 G 生效且已写入 localStorage
+    await page.keyboard.press('t')
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
+    await page.keyboard.press('g')
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('sepia')
+    await page.keyboard.press('g')
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+    await page.keyboard.press('g')
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
+    const persistedShortcuts = await page.evaluate(() => window.localStorage.getItem('paperflow:custom-shortcuts'))
+    expect(persistedShortcuts && JSON.parse(persistedShortcuts)).toEqual({ toggleTheme: 'g' })
+
+    // 再开弹窗测试冲突互换与「恢复全部默认」
+    await page.getByRole('button', { name: '快捷键帮助', exact: true }).click()
+    await expect(shortcutsDialog).toBeVisible()
+    await shortcutsDialog.getByTestId('shortcut-bind-cycleViewMode').click()
+    await page.keyboard.press('g')
+    await shortcutsDialog.getByTestId('shortcut-swap-btn').click()
+    await expect(shortcutsDialog.getByTestId('shortcut-bind-cycleViewMode')).toContainText('G')
+    await expect(shortcutsDialog.getByTestId('shortcut-bind-toggleTheme')).toContainText('V')
+
+    const resetAllBtn = shortcutsDialog.getByTestId('shortcuts-reset-all-btn')
+    await expect(resetAllBtn).toBeEnabled()
+    await resetAllBtn.click()
+    await expect(resetAllBtn).toBeDisabled()
+    expect(await page.evaluate(() => window.localStorage.getItem('paperflow:custom-shortcuts'))).toBeNull()
     await page.keyboard.press('Escape')
     await expect(shortcutsDialog).toHaveCount(0)
 
@@ -205,6 +252,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await expect(restoredCard).toBeVisible()
     await expect(restoredCard.getByRole('button', { name: /^取消收藏 / })).toHaveAttribute('aria-pressed', 'true')
     await expect(restoredCard.locator('.document-tag-pill')).toContainText('#Layout')
+    await pageB.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(pageB, 1)
     await expect(pageB.getByRole('button', { name: '批注与笔记', exact: true })).toContainText('批注 (1)')
 

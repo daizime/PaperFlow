@@ -11,6 +11,7 @@ import {
 } from 'react'
 import type { FirstPageCitationSource } from '../../../../shared/citation'
 import type { AnnotationRecord, DocumentRecord, TranslatePageResult } from '../../../../shared/contracts'
+import type { ShortcutMap } from '../study/shortcuts'
 import { LockIcon, TranslationPanel } from '../translation/TranslationPanel'
 import { usePaneTranslation } from '../translation/usePaneTranslation'
 import { computeStableTranslationBlockKey, type PageLayoutResult } from './layout-analysis'
@@ -130,6 +131,7 @@ export interface SplitPdfPaneProps {
   activeDropIsPane: boolean
   translationRevision: number
   activeTranslatingPage?: number | null
+  shortcuts?: ShortcutMap
   onTranslatingPageChange?(docId: string, pageNumber: number | null): void
   onTranslationComplete?(docId: string, result: TranslatePageResult): void
   onTranslationError?(docId: string, message: string): void
@@ -190,6 +192,7 @@ export function SplitPdfPane({
   activeDropIsPane,
   translationRevision,
   activeTranslatingPage = null,
+  shortcuts,
   onTranslatingPageChange,
   onTranslationComplete,
   onTranslationError,
@@ -514,6 +517,28 @@ export function SplitPdfPane({
   if (isExpanded) panelClasses.push('is-pane-expanded')
   if (isDimmed) panelClasses.push('is-pane-dimmed')
 
+  const renderPaneReaderToolbar = (): React.JSX.Element => (
+    <ReaderToolbar
+      pageNumber={mirror.currentPage}
+      pageCount={mirror.pageCount}
+      scale={mirror.scale}
+      disabled={mirror.toolbarDisabled}
+      cropMargins={mirror.cropMargins}
+      onNavigate={page => {
+        navigateToPageRef.current?.(page)
+        if (paneViewMode === 'translation') {
+          const el = paneTranslation.translationScrollEl?.querySelector<HTMLElement>(
+            `.translation-page[data-page-number="${page}"]`
+          )
+          el?.scrollIntoView({ block: 'start', behavior: 'auto' })
+        }
+      }}
+      onScale={next => toolbarActionsRef.current?.setScale(next)}
+      onFitWidth={() => toolbarActionsRef.current?.fitWidth()}
+      onToggleCropMargins={() => toolbarActionsRef.current?.toggleCropMargins()}
+    />
+  )
+
   return (
     <section
       className={panelClasses.join(' ')}
@@ -711,7 +736,9 @@ export function SplitPdfPane({
           <PdfViewer
             key={`${pane.id}-${document.id}`}
             document={document}
+            layoutKey={paneViewMode}
             isActivePane={isFocused}
+            shortcuts={shortcuts}
             onPageCount={onPageCount}
             onPageLayout={paneTranslation.handlePageLayout}
             onPageBackdrop={paneTranslation.handlePageBackdrop}
@@ -724,7 +751,7 @@ export function SplitPdfPane({
             extractCitationSourceRef={extractCitationSourceRef}
             renderRegionPreviewRef={renderRegionPreviewRef}
             toolbarActionsRef={toolbarActionsRef}
-            hideFloatingPill={paneViewMode === 'translation'}
+            hideFloatingPill={paneViewMode !== 'source'}
             annotationsByPage={annotationsByPage}
             editingAnnotationId={editingAnnotationId}
             activeSentence={paneTranslation.activeSourceSentence}
@@ -755,28 +782,14 @@ export function SplitPdfPane({
             activePageNumber={paneTranslation.activeLink?.pageNumber ?? null}
             activeSentenceIds={paneTranslation.activeSentenceIds}
             onSelectTargetSentences={paneTranslation.handleRightSentenceSelect}
-            bottomPill={
-              paneViewMode === 'translation' ? (
-                <ReaderToolbar
-                  pageNumber={mirror.currentPage}
-                  pageCount={mirror.pageCount}
-                  scale={mirror.scale}
-                  disabled={mirror.toolbarDisabled}
-                  cropMargins={mirror.cropMargins}
-                  onNavigate={page => {
-                    navigateToPageRef.current?.(page)
-                    const el = paneTranslation.translationScrollEl?.querySelector<HTMLElement>(
-                      `.translation-page[data-page-number="${page}"]`
-                    )
-                    el?.scrollIntoView({ block: 'start', behavior: 'auto' })
-                  }}
-                  onScale={next => toolbarActionsRef.current?.setScale(next)}
-                  onFitWidth={() => toolbarActionsRef.current?.fitWidth()}
-                  onToggleCropMargins={() => toolbarActionsRef.current?.toggleCropMargins()}
-                />
-              ) : undefined
-            }
+            onZoomDelta={delta => toolbarActionsRef.current?.adjustScale(delta)}
+            bottomPill={paneViewMode === 'translation' ? renderPaneReaderToolbar() : undefined}
           />
+        ) : null}
+        {paneViewMode === 'dual' ? (
+          <div className="split-pane-dual-pill-dock" data-testid={`pane-dual-pill-dock-${index}`}>
+            {renderPaneReaderToolbar()}
+          </div>
         ) : null}
       </div>
       {activeDropZone ? (

@@ -846,12 +846,14 @@ export interface OverlayBlockIndentGeometry {
 }
 
 /**
- * 判定一个版面块是否属于需要送译并覆写译文的文本块（公式块、纯数字或无字母符号碎片保留原底图）。
+ * 判定一个版面块是否属于需要送译并覆写译文的文本块（公式、表格、插图内部标注及纯数字/无字母符号碎片保留原底图）。
  */
 export function isTranslatableBlock(
   block: AnalyzedBlock
-): block is AnalyzedBlock & { kind: Exclude<AnalyzedBlock['kind'], 'formula'> } {
-  if (block.kind === 'formula' || block.sentences.length === 0) return false
+): block is AnalyzedBlock & { kind: Exclude<AnalyzedBlock['kind'], 'formula' | 'table' | 'figure'> } {
+  if (block.kind === 'formula' || block.kind === 'table' || block.kind === 'figure' || block.sentences.length === 0) {
+    return false
+  }
   const raw = block.sentences.map(s => s.text).join(' ')
   let cleaned = ''
   for (let i = 0; i < raw.length; i += 1) {
@@ -982,4 +984,238 @@ export function computeOverlayBlockIndent(
   }
 
   return fallback
+}
+
+export interface ResolvedOverlayBoxGeometry {
+  left: number
+  top: number
+  baseWidth: number
+  maxSafeWidth: number
+  height: number
+  maxSafeHeight: number
+  firstLineIndentPx: number
+  tightBottom: boolean
+  tightTop: boolean
+}
+
+type OverlayLayoutRole = 'translatable' | 'mask' | 'obstacle'
+
+interface InternalOverlayBoxEntry {
+  id: string
+  block: AnalyzedBlock
+  role: OverlayLayoutRole
+  rawTop: number
+  rawBottom: number
+  rawCenterY: number
+  left: number
+  baseWidth: number
+  top: number
+  bottom: number
+  tightTop: boolean
+  tightBottom: boolean
+  firstLineIndentPx: number
+}
+
+function roundPxTenths(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+function entriesOverlapHorizontally(a: InternalOverlayBoxEntry, b: InternalOverlayBoxEntry): boolean {
+  return Math.min(a.left + a.baseWidth, b.left + b.baseWidth) - Math.max(a.left, b.left) > 2
+}
+
+/**
+ * 统一求解整页译文覆盖框的安全边界，消除上下邻接块互相遮挡并预留不可译障碍物安全间距。
+ */
+export function resolveOverlayBlockGeometries(
+  layout: PageLayoutResult,
+  scale: number,
+  columnLeftByIndex: ReadonlyMap<number, number>,
+  columnRightByIndex: ReadonlyMap<number, number>
+): Map<string, ResolvedOverlayBoxGeometry> {
+  const result = new Map<string, ResolvedOverlayBoxGeometry>()
+  if (!Number.isFinite(scale) || scale <= 0 || layout.blocks.length === 0) {
+    return result
+  }
+
+  const pageWidthPx = Math.max(1, layout.naturalWidth * scale)
+  const pageHeightPx = Math.max(1, layout.naturalHeight * scale)
+  const entries: InternalOverlayBoxEntry[] = []
+
+  for (const block of layout.blocks) {
+    let role: OverlayLayoutRole | null = null
+    if (block.sentences.length > 0) {
+      role = isTranslatableBlock(block) ? 'translatable' : 'obstacle'
+    } else if (
+      block.kind !== 'formula' &&
+      block.kind !== 'table' &&
+      block.kind !== 'figure' &&
+      Boolean(block.continuedFromPrevColumn)
+    ) {
+      role = 'mask'
+    }
+    if (!role) continue
+
+    const indentGeom = computeOverlayBlockIndent(block, columnLeftByIndex)
+    const rawLeft = Math.max(0, indentGeom.anchorX * scale)
+    const rawRight = Math.max(rawLeft + 4, (indentGeom.anchorX + indentGeom.anchorWidth) * scale)
+    const rawTop = Math.max(0, block.displayBounds.y * scale)
+    const rawBottom = Math.max(rawTop + 1, (block.displayBounds.y + block.displayBounds.height) * scale)
+    const rawCenterY = (rawTop + rawBottom) / 2
+
+    let left = rawLeft
+    let baseWidth = rawRight - rawLeft
+    let top = rawTop
+    let bottom = rawBottom
+
+    if (role === 'mask') {
+      left = Math.max(0, rawLeft - 1)
+      baseWidth = Math.max(24, rawRight - rawLeft + 2)
+      top = Math.max(0, rawTop - 1)
+      bottom = Math.min(pageHeightPx, Math.max(top + 4, rawBottom + 1))
+    } else if (role === 'translatable') {
+      left = Math.max(0, rawLeft - 1)
+      baseWidth = Math.max(24, rawRight - rawLeft + 2)
+      top = Math.max(0, rawTop - 1)
+      bottom = Math.min(pageHeightPx, Math.max(top + 15, rawBottom + 3))
+    }
+
+    const firstLineIndentPx =
+      indentGeom.firstLineIndent > 0 ? roundPxTenths(indentGeom.firstLineIndent * scale) : 0
+
+    entries.push({
+      id: block.id,
+      block,
+      role,
+      rawTop,
+      rawBottom,
+      rawCenterY,
+      left,
+      baseWidth,
+      top,
+      bottom,
+      tightTop: false,
+      tightBottom: false,
+      firstLineIndentPx
+    })
+  }
+
+  entries.sort((a, b) => a.rawTop - b.rawTop || a.rawBottom - b.rawBottom || a.left - b.left)
+
+  // 1. 纵向碰撞消解：在相邻两块水平有交集时，阻止上方扩高或下方上探越界覆盖
+  for (let i = 0; i < entries.length; i += 1) {
+    const a = entries[i]
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const b = entries[j]
+      if (b.rawCenterY <= a.rawCenterY + 1) continue
+      if (!entriesOverlapHorizontally(a, b)) continue
+      if (a.bottom <= b.top) continue
+
+      if (a.role === 'obstacle' && b.role !== 'obstacle') {
+        b.top = Math.min(b.bottom - 4, Math.max(b.top, Math.ceil(a.bottom)))
+        b.tightTop = true
+      } else if (a.role !== 'obstacle' && b.role === 'obstacle') {
+        a.bottom = Math.max(a.top + 4, Math.min(a.bottom, Math.floor(b.top)))
+        a.tightBottom = true
+      } else if (a.role !== 'obstacle' && b.role !== 'obstacle') {
+        const splitY = Math.round((a.rawBottom + b.rawTop) / 2)
+        const minSplit = Math.ceil(a.top + 4)
+        const maxSplit = Math.floor(b.bottom - 4)
+        if (minSplit <= maxSplit) {
+          const safeSplitY = Math.max(minSplit, Math.min(maxSplit, splitY))
+          a.bottom = Math.min(a.bottom, safeSplitY)
+          b.top = Math.max(b.top, safeSplitY)
+          a.tightBottom = true
+          b.tightTop = true
+        }
+      }
+    }
+  }
+
+  // 2. 紧邻边标记：两块垂直间距 <= 2.5px 时启用内边距防贴边
+  for (let i = 0; i < entries.length; i += 1) {
+    const a = entries[i]
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const b = entries[j]
+      if (b.rawCenterY <= a.rawCenterY + 1) continue
+      if (!entriesOverlapHorizontally(a, b)) continue
+      if (b.top - a.bottom <= 2.5) {
+        if (a.role !== 'obstacle') a.tightBottom = true
+        if (b.role !== 'obstacle') b.tightTop = true
+      }
+    }
+  }
+
+  // 3. 计算最终宽高、安全扩高与安全扩宽上限
+  const finalizedTopHeight = new Map<string, { top: number; height: number }>()
+  for (const e of entries) {
+    const top = roundPxTenths(e.top)
+    const height = Math.max(4, Math.floor((e.bottom - top + 1e-6) * 10) / 10)
+    finalizedTopHeight.set(e.id, { top, height })
+  }
+
+  for (const a of entries) {
+    if (a.role === 'obstacle') continue
+    const geom = finalizedTopHeight.get(a.id)!
+    const top = geom.top
+    const height = geom.height
+    const aLeft = roundPxTenths(a.left)
+    const aBaseWidth = roundPxTenths(a.baseWidth)
+
+    let maxSafeHeight = height
+    if (a.role === 'translatable') {
+      let nearestBelowTop = pageHeightPx
+      for (const b of entries) {
+        if (b.id === a.id) continue
+        if (b.rawCenterY <= a.rawCenterY + 1) continue
+        if (!entriesOverlapHorizontally(a, b)) continue
+        const bTop = finalizedTopHeight.get(b.id)!.top
+        if (bTop >= a.bottom - 0.5 && bTop < nearestBelowTop) {
+          nearestBelowTop = bTop
+        }
+      }
+
+      if (!a.tightBottom && nearestBelowTop - a.bottom > 3) {
+        const freeBelow = Math.max(0, Math.floor(nearestBelowTop - 3) - (top + height))
+        const maxGrow = Math.min(freeBelow, Math.round(Math.max(4, a.block.fontSize * scale * 0.75)))
+        maxSafeHeight = roundPxTenths(height + maxGrow)
+      }
+    }
+
+    const pageSafeWidth = Math.max(aBaseWidth, pageWidthPx - 16 - a.left)
+    let maxSafeWidth =
+      a.block.columnIndex > 0
+        ? Math.max(
+            aBaseWidth,
+            (columnRightByIndex.get(a.block.columnIndex) ?? a.block.displayBounds.x + a.block.displayBounds.width) *
+              scale +
+              2 -
+              a.left
+          )
+        : pageSafeWidth
+    maxSafeWidth = Math.min(pageSafeWidth, maxSafeWidth)
+
+    for (const o of entries) {
+      if (o.id === a.id) continue
+      if (o.left <= a.left + 4) continue
+      const oGeom = finalizedTopHeight.get(o.id)!
+      if (o.bottom >= top - 1 && oGeom.top <= top + maxSafeHeight + 1) {
+        maxSafeWidth = Math.min(maxSafeWidth, Math.max(aBaseWidth, o.left - 4 - a.left))
+      }
+    }
+
+    result.set(a.id, {
+      left: aLeft,
+      top,
+      baseWidth: aBaseWidth,
+      maxSafeWidth: roundPxTenths(maxSafeWidth),
+      height,
+      maxSafeHeight,
+      firstLineIndentPx: a.firstLineIndentPx,
+      tightBottom: a.tightBottom,
+      tightTop: a.tightTop
+    })
+  }
+
+  return result
 }

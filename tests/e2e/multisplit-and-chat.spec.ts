@@ -311,6 +311,54 @@ test('多选批量导入、用户自由拖拽多开与换位、悬浮+抽屉混�
     await outlineRight.getByRole('button', { name: '关闭目录', exact: true }).click()
     await page.getByTestId('pane-mode-2-source').click()
 
+    // 4.6 左栏开启多开内「双栏模式」：左右滚动区顶底平齐且铺满分栏高度（不占固定底行），页码胶囊悬浮于底部内侧且不压滚动条
+    await page.getByTestId('pane-mode-0-dual').click()
+    await expect(page.getByTestId('split-pane-primary')).toHaveAttribute('data-pane-view-mode', 'dual')
+    await expect(page.locator('[data-testid="pane-dual-pill-dock-0"] .reader-floating-pill')).toBeVisible()
+    await expect(
+      page.locator('[data-testid="split-pane-primary"] .translation-page[data-page-number="1"]')
+    ).toHaveAttribute('data-analyzed', 'true', { timeout: 20000 })
+
+    const primaryDualAudit = await page.evaluate(() => {
+      const pane = document.querySelector('[data-testid="split-pane-primary"]')!
+      const paneBody = pane.querySelector('.split-pane-body')!.getBoundingClientRect()
+      const leftScrollEl = pane.querySelector<HTMLElement>('.pdf-scroll')!
+      const leftScroll = leftScrollEl.getBoundingClientRect()
+      const rightPanel = pane.querySelector('.translation-panel')!.getBoundingClientRect()
+      const rightScroll = pane.querySelector('.translation-scroll')!.getBoundingClientRect()
+      const pill = pane.querySelector('[data-testid="pane-dual-pill-dock-0"] .reader-floating-pill')!.getBoundingClientRect()
+      const rightPane = document.querySelector('[data-testid="split-pane-2"]')!
+      const rightPaneBody = rightPane.querySelector('.split-pane-body')!.getBoundingClientRect()
+      const rightPaneScrollEl = rightPane.querySelector<HTMLElement>('.pdf-scroll')!
+      const rightPaneScroll = rightPaneScrollEl.getBoundingClientRect()
+      const rightPanePill = rightPane.querySelector('.reader-pill-dock .reader-floating-pill')!.getBoundingClientRect()
+      return {
+        topDiff: Math.abs(leftScroll.top - rightScroll.top),
+        bottomDiff: Math.abs(leftScroll.bottom - rightScroll.bottom),
+        fillsPaneBody: Math.abs(paneBody.bottom - leftScroll.bottom),
+        seamX: rightPanel.left,
+        pillLeft: pill.left,
+        pillRight: pill.right,
+        pillBottom: pill.bottom,
+        leftScrollBottom: leftScroll.bottom,
+        leftClientBottom: leftScroll.top + leftScrollEl.clientHeight,
+        rightPaneFillsBody: Math.abs(rightPaneBody.bottom - rightPaneScroll.bottom),
+        rightPanePillBottom: rightPanePill.bottom,
+        rightPaneClientBottom: rightPaneScroll.top + rightPaneScrollEl.clientHeight
+      }
+    })
+    expect(primaryDualAudit.topDiff).toBeLessThanOrEqual(2)
+    expect(primaryDualAudit.bottomDiff).toBeLessThanOrEqual(2)
+    expect(primaryDualAudit.fillsPaneBody).toBeLessThanOrEqual(2)
+    expect(primaryDualAudit.pillLeft).toBeLessThan(primaryDualAudit.seamX)
+    expect(primaryDualAudit.pillRight).toBeGreaterThan(primaryDualAudit.seamX)
+    expect(primaryDualAudit.pillBottom).toBeLessThanOrEqual(primaryDualAudit.leftClientBottom)
+    expect(primaryDualAudit.leftScrollBottom - primaryDualAudit.pillBottom).toBeGreaterThanOrEqual(16)
+    expect(primaryDualAudit.rightPaneFillsBody).toBeLessThanOrEqual(2)
+    expect(primaryDualAudit.rightPanePillBottom).toBeLessThanOrEqual(primaryDualAudit.rightPaneClientBottom)
+    await page.getByTestId('pane-mode-0-source').click()
+    await expect(page.getByTestId('split-pane-primary')).toHaveAttribute('data-pane-view-mode', 'source')
+
     // 5. 配置本地模型接口后，打开可拖拽浮窗 + 阅读区抽屉折叠的 AI 对话助手
     await page.evaluate(async serverPort => {
       await window.paperflow.saveTranslationSettings({
@@ -509,7 +557,8 @@ test('多选批量导入、用户自由拖拽多开与换位、悬浮+抽屉混�
     await running.page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '译文', exact: true }).click()
     await running.page.getByTestId('compare-mode-toggle').click()
     await expect(running.page.getByTestId('split-panes-stage')).toHaveAttribute('data-pane-count', '2')
-    // 焦点落在右栏（未渲染单页），再点「退出多开」重建纯译文主视图
+    await running.page.getByTestId('pane-mode-1-translation').click()
+    // 焦点落在右栏（未渲染单页且已选纯译文模式），再点「退出多开」重建纯译文主视图
     await running.page.getByTestId('compare-mode-toggle').click()
     await expect(running.page.getByTestId('split-panes-stage')).toHaveCount(0)
     await expect(running.page.locator('.translation-page[data-page-number="1"]')).toHaveAttribute('data-analyzed', 'true', {

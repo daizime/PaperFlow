@@ -8,6 +8,8 @@ import {
   refineDocumentHeadersFooters,
   type PageLayoutResult
 } from '../../src/renderer/src/features/reader/layout-analysis'
+import { extractPageGraphicHints } from '../../src/renderer/src/features/reader/pdf-graphics'
+import { isTranslatableBlock } from '../../src/renderer/src/features/translation/sentence-alignment'
 import type { PageGeometry, PageTextContent } from '../../src/renderer/src/features/reader/pdf-geometry'
 import layoutManifest from '../fixtures/verification/layout-analysis/manifest.json'
 
@@ -484,5 +486,315 @@ describe('layout-analysis: multi-column reading order, hyphenation, cross-column
     expect(deltaBlock.inlineFormulas?.some(f => f.fallbackText === 'O(1)')).toBe(true)
     expect(deltaBlock.translationSourceText).toContain('[44].')
     expect(deltaBlock.translationSourceText).toContain('⟪M1⟫')
+  })
+
+  test('extractPageGraphicHints extracts scale-invariant tables, images, vector diagrams, and fraction bars while ignoring shading/clips', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport1 = page1.getViewport({ scale: 1 })
+    const viewport2 = page1.getViewport({ scale: 2 })
+    page1.cleanup()
+
+    // 合成 PDF 绘制指令列表（合成素材），覆盖 save/restore/transform/FormXObject/beginGroup/image/constructPath
+    const operatorList = {
+      fnArray: [
+        10, // save (image)
+        12, // transform -> (60, 260, 140x90)
+        85, // paintImageXObject
+        11, // restore
+        // 3 条水平表线（模拟 booktabs 三线表，y_pdf = 580, 560, 500, x = 305..540）
+        91, // constructPath fill (rule 1)
+        91, // constructPath stroke (rule 2)
+        91, // constructPath stroke (rule 3)
+        // 短分式线 (y_pdf = 420, x = 120..146)
+        91,
+        // 矢量图 FormXObject + beginGroup/endGroup（含 3 条描边线）
+        74, // paintFormXObjectBegin
+        76, // beginGroup
+        91, // constructPath stroke
+        91, // constructPath stroke
+        91, // constructPath stroke
+        77, // endGroup
+        75, // paintFormXObjectEnd
+        // 宽大浅色填充底纹框（不得误识别为图片/矢量图）
+        91, // constructPath fill-only (226x70)
+        // 仅裁剪路径 endPath=28（不得进入任何图形分类）
+        91
+      ],
+      argsArray: [
+        null,
+        [140, 0, 0, 90, 60, 260],
+        ['img_0'],
+        null,
+        [22, [], new Float32Array([305, 580, 540, 580.8])],
+        [20, [], new Float32Array([305, 560, 540, 560.8])],
+        [20, [], new Float32Array([305, 500, 540, 500.8])],
+        [22, [], new Float32Array([120, 420, 146, 420.6])],
+        [[1, 0, 0, 1, 320, 180], [0, 0, 200, 110]],
+        [{ needsIsolation: true }],
+        [20, [], [10, 10, 180, 10]],
+        [20, [], [10, 10, 10, 90]],
+        [24, [], [40, 20, 120, 80]],
+        [{}],
+        [],
+        [22, [], new Float32Array([54, 150, 280, 220])],
+        [28, [], new Float32Array([54, 100, 260, 160])]
+      ]
+    }
+
+    const hints1 = extractPageGraphicHints(operatorList, { pageNumber: 1, viewport: viewport1, outputScale: { x: 1, y: 1 } })
+    const hints2 = extractPageGraphicHints(operatorList, { pageNumber: 1, viewport: viewport2, outputScale: { x: 1, y: 1 } })
+
+    expect(hints1.imageRects).toHaveLength(1)
+    expect(hints1.imageRects[0].x).toBeCloseTo(60, 3)
+    expect(hints1.imageRects[0].y).toBeCloseTo(792 - 350, 3)
+    expect(hints1.imageRects[0].width).toBeCloseTo(140, 3)
+    expect(hints1.imageRects[0].height).toBeCloseTo(90, 3)
+
+    expect(hints1.horizontalRules).toHaveLength(3)
+    expect(hints1.tableRuleRegions).toHaveLength(1)
+    expect(hints1.tableRuleRegions[0].x).toBeCloseTo(305, 3)
+    expect(hints1.tableRuleRegions[0].width).toBeCloseTo(235, 3)
+
+    expect(hints1.fractionBars).toHaveLength(1)
+    expect(hints1.vectorDiagramRects).toHaveLength(1)
+    expect(hints1.vectorDiagramRects[0].x).toBeCloseTo(320, 3)
+    expect(hints1.vectorDiagramRects[0].width).toBeCloseTo(200, 3)
+
+    // 验证 scale=1 与 scale=2 归算后的显示坐标一致
+    expect(hints2.imageRects[0].x).toBeCloseTo(hints1.imageRects[0].x, 3)
+    expect(hints2.imageRects[0].y).toBeCloseTo(hints1.imageRects[0].y, 3)
+    expect(hints2.tableRuleRegions[0].y).toBeCloseTo(hints1.tableRuleRegions[0].y, 3)
+    expect(hints2.vectorDiagramRects[0].y).toBeCloseTo(hints1.vectorDiagramRects[0].y, 3)
+  })
+
+  test('isolates table captions from table cells, keeps column & spanning tables non-translatable, and preserves prose paragraphs', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport = page1.getViewport({ scale: 1 })
+    page1.cleanup()
+    const geometry: PageGeometry = { pageNumber: 1, viewport, outputScale: { x: 1, y: 1 } }
+    const mk = (str: string, x: number, pdfY: number, width: number, size = 9.5, bold = false) => ({
+      str,
+      dir: 'ltr',
+      width,
+      height: size,
+      transform: [size, 0, 0, size, x, pdfY] as [number, number, number, number, number, number],
+      fontName: bold ? 'F2' : 'F1',
+      hasEOL: false
+    })
+
+    // 合成左栏常规正文 + 右栏 Table 1（仿截图表结构：粗体表注 + 表头 + 单位 + 3 数据行 + 下方正文）（合成素材）
+    const items = [
+      mk('Left column narrative line one with continuous', 54, 700, 220, 9.5),
+      mk('Left column narrative line two explaining workloads.', 54, 686, 220, 9.5),
+      mk('Left column narrative line three continuing text.', 54, 672, 220, 9.5),
+      mk('Left column narrative line four closing section.', 54, 658, 220, 9.5),
+
+      mk('Table 1: Synthetic hardware cost and latency metrics.', 312, 700, 232, 9.5, true),
+      mk('Price', 385, 680, 22, 9),
+      mk('Read Latency', 428, 680, 56, 9),
+      mk('Bandwidth', 504, 680, 44, 9),
+      mk('[$/TB]', 382, 668, 28, 9),
+      mk('[μs/4 KB]', 434, 668, 40, 9),
+      mk('[GB/s]', 512, 668, 28, 9),
+      mk('DRAM', 312, 650, 28, 9),
+      mk('5000', 386, 650, 20, 9),
+      mk('0.1', 450, 650, 14, 9),
+      mk('92.0', 518, 650, 18, 9),
+      mk('Flash SSDs', 312, 638, 48, 9),
+      mk('200', 388, 638, 16, 9),
+      mk('78.0', 446, 638, 18, 9),
+      mk('12.5', 518, 638, 18, 9),
+      mk('RDMA (IB EDR 4x)', 312, 626, 76, 9),
+      mk('-', 392, 626, 6, 9),
+      mk('5.0', 450, 626, 14, 9),
+      mk('11.2', 518, 626, 18, 9),
+
+      mk('However, memory-only systems incur high costs.', 312, 594, 230, 9.5),
+      mk('They also degrade steeply under cold workloads.', 312, 580, 230, 9.5)
+    ]
+    const textContent: PageTextContent = {
+      items,
+      styles: {
+        F1: { fontFamily: 'Times New Roman', ascent: 0.72, descent: -0.22, vertical: false },
+        F2: { fontFamily: 'Times Bold', ascent: 0.72, descent: -0.22, vertical: false }
+      },
+      lang: null
+    }
+
+    const graphicHints = extractPageGraphicHints(
+      {
+        fnArray: [91, 91, 91],
+        argsArray: [
+          [20, [], [310, 689, 552, 689.7]],
+          [20, [], [310, 661, 552, 661.7]],
+          [20, [], [310, 620, 552, 620.7]]
+        ]
+      },
+      geometry
+    )
+
+    for (const layout of [analyzePageLayout(textContent, geometry, { graphicHints }), analyzePageLayout(textContent, geometry)]) {
+      const caption = layout.blocks.find(b => b.kind === 'caption')
+      expect(caption).toBeDefined()
+      expect(caption!.sentences.map(s => s.text).join(' ')).toBe('Table 1: Synthetic hardware cost and latency metrics.')
+      expect(isTranslatableBlock(caption!)).toBe(true)
+
+      const tableBlocks = layout.blocks.filter(b => b.kind === 'table')
+      expect(tableBlocks.length).toBeGreaterThanOrEqual(1)
+      const tableText = tableBlocks.map(b => b.sentences.map(s => s.text).join(' ')).join(' ')
+      expect(tableText).toContain('Read Latency')
+      expect(tableText).toContain('DRAM')
+      expect(tableText).toContain('RDMA (IB EDR 4x)')
+      for (const tb of tableBlocks) {
+        expect(isTranslatableBlock(tb)).toBe(false)
+      }
+
+      const bodyAfter = layout.blocks.find(b => b.sentences.some(s => s.text.includes('memory-only systems')))
+      expect(bodyAfter?.kind).toBe('paragraph')
+      expect(isTranslatableBlock(bodyAfter!)).toBe(true)
+    }
+
+    // 验证跨双栏全宽表格在 spanning band 内保持整体 table 不拆分
+    const spanningItems = [
+      mk('Upper left column discusses query plans.', 54, 700, 210, 10),
+      mk('Upper right column discusses storage cost.', 326, 700, 210, 10),
+      mk('Table 2: Synthetic cross-column comparison.', 54, 650, 260, 10, true),
+      mk('System', 60, 628, 36, 9.5),
+      mk('Storage', 200, 628, 38, 9.5),
+      mk('Latency', 350, 628, 38, 9.5),
+      mk('Throughput', 470, 628, 54, 9.5),
+      mk('AlphaEngine', 60, 612, 60, 9.5),
+      mk('NVMe', 200, 612, 30, 9.5),
+      mk('12.0 us', 350, 612, 36, 9.5),
+      mk('4.5 Mops', 470, 612, 46, 9.5),
+      mk('Lower left column resumes normal prose.', 54, 570, 210, 10),
+      mk('Lower right column completes normal prose.', 326, 570, 210, 10)
+    ]
+    const spanLayout = analyzePageLayout({ items: spanningItems, styles: textContent.styles, lang: null }, geometry)
+    const spanTableBlocks = spanLayout.blocks.filter(b => b.kind === 'table')
+    expect(spanTableBlocks.length).toBe(1)
+    expect(spanTableBlocks[0].columnIndex).toBe(0)
+    expect(isTranslatableBlock(spanTableBlocks[0])).toBe(false)
+    expect(spanLayout.blocks.filter(b => b.kind === 'paragraph').length).toBeGreaterThanOrEqual(4)
+  })
+
+  test('marks embedded figures, multi-line formulas, and inline math tokens non-translatable while preserving μs units and shaded callout prose', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport = page1.getViewport({ scale: 1 })
+    page1.cleanup()
+    const geometry: PageGeometry = { pageNumber: 1, viewport, outputScale: { x: 1, y: 1 } }
+    const mk = (str: string, x: number, pdfY: number, width: number, size = 10, fontName = 'F1') => ({
+      str,
+      dir: 'ltr',
+      width,
+      height: size,
+      transform: [size, 0, 0, size, x, pdfY] as [number, number, number, number, number, number],
+      fontName,
+      hasEOL: false
+    })
+
+    // 合成插图框内节点文字 + 带底纹连续正文框 + 多行分式/约束大公式 + 含 α/≤/O(n log n)/p < 0.05/μs/长句= 的正文（合成素材）
+    const items = [
+      // 图表框图内文字 (pdfY = 670..710 -> displayY = 82..122, vectorDiagramRect display x=54, y=70, w=220, h=65)
+      mk('Client', 72, 704, 30, 9),
+      mk('RDMA Read', 142, 704, 56, 9),
+      mk('Local Cache', 142, 680, 56, 9),
+      mk('Figure 2: Synthetic diagram labels.', 54, 650, 180, 9.5, 'F_BOLD'),
+
+      // 填充底纹框内的真实连续正文（必须维持 paragraph）
+      mk('Theorem 1 states that the distributed protocol', 54, 608, 215, 10),
+      mk('terminates reliably under asynchronous faults.', 54, 594, 215, 10),
+
+      // 大块多行展示公式（含优化约束 subject to、分段 if/otherwise、Unicode − 与分数线）
+      mk('min ||Ax − b||^2 + λ ||x||', 82, 540, 130, 10),
+      mk('a + b', 124, 524, 24, 7.5),
+      mk('c + d', 124, 511, 24, 7.5),
+      mk('subject to Cx ≤ d, ∀i', 82, 495, 118, 9.5),
+      mk('0, otherwise', 82, 480, 56, 9.5),
+
+      // 行内希腊字母/算符/同字体紧凑公式/单位与长句含=保护（词间保留约 3pt 正常空格间隙）
+      mk('The latency is', 54, 430, 58, 10),
+      mk('5', 115, 430, 5, 10),
+      mk('μ', 123, 430, 6, 10),
+      mk('s', 129, 430, 5, 10),
+      mk('where', 137, 430, 25, 10),
+      mk('α', 165, 430, 6, 10),
+      mk('holds for', 174, 430, 38, 10),
+      mk('≤', 215, 430, 7, 10),
+      mk('in', 225, 430, 9, 10),
+      mk('O(n log n)', 237, 430, 46, 10),
+      mk('Consider the relation R[A] = 1 for every tuple', 54, 416, 192, 10),
+      mk('with', 249, 416, 18, 10),
+      mk('p', 270, 416, 5, 10),
+      mk('<', 277, 416, 6, 10),
+      mk('0.05', 285, 416, 18, 10),
+      mk('.', 303, 416, 3, 10)
+    ]
+
+    const graphicHints = extractPageGraphicHints(
+      {
+        fnArray: [74, 91, 91, 91, 75, 91, 91],
+        argsArray: [
+          [[1, 0, 0, 1, 54, 662], [0, 0, 220, 65]],
+          [20, [], [10, 10, 60, 30]],
+          [20, [], [80, 10, 190, 30]],
+          [20, [], [80, 38, 190, 56]],
+          [],
+          [22, [], [50, 586, 275, 622]], // 宽浅色填充底纹框
+          [22, [], [120, 519, 152, 519.6]] // 分数线 (pdfY=519 -> displayY=273)
+        ]
+      },
+      geometry
+    )
+
+    const layout = analyzePageLayout(
+      {
+        items,
+        styles: {
+          F1: { fontFamily: 'Times New Roman', ascent: 0.72, descent: -0.22, vertical: false },
+          F_BOLD: { fontFamily: 'Times Bold', ascent: 0.72, descent: -0.22, vertical: false }
+        },
+        lang: null
+      },
+      geometry,
+      { graphicHints }
+    )
+
+    const figureBlock = layout.blocks.find(b => b.kind === 'figure')
+    expect(figureBlock).toBeDefined()
+    expect(figureBlock!.sentences.map(s => s.text).join(' ')).toContain('RDMA Read')
+    expect(isTranslatableBlock(figureBlock!)).toBe(false)
+
+    const captionBlock = layout.blocks.find(b => b.kind === 'caption')
+    expect(captionBlock?.sentences[0].text).toBe('Figure 2: Synthetic diagram labels.')
+
+    const theoremBlock = layout.blocks.find(b => b.sentences.some(s => s.text.includes('Theorem 1 states')))
+    expect(theoremBlock?.kind).toBe('paragraph')
+    expect(isTranslatableBlock(theoremBlock!)).toBe(true)
+
+    const formulaBlock = layout.blocks.find(b => b.kind === 'formula')
+    expect(formulaBlock).toBeDefined()
+    const formulaText = layout.blocks
+      .filter(b => b.kind === 'formula')
+      .map(b => b.sentences.map(s => s.text).join(' '))
+      .join(' ')
+    expect(formulaText).toContain('subject to Cx ≤ d')
+    expect(formulaText).toContain('0, otherwise')
+    expect(formulaText).toContain('a + b')
+    expect(formulaText).toContain('c + d')
+    for (const fb of layout.blocks.filter(b => b.kind === 'formula')) {
+      expect(isTranslatableBlock(fb)).toBe(false)
+    }
+
+    const proseInlineBlock = layout.blocks.find(b => b.sentences.some(s => s.text.includes('latency is')))
+    expect(proseInlineBlock?.kind).toBe('paragraph')
+    expect(proseInlineBlock?.translationSourceText).toContain('5 μs')
+    expect(proseInlineBlock?.translationSourceText).toContain('Consider the relation R[A] = 1 for every tuple')
+    const tokens = proseInlineBlock?.inlineFormulas?.map(f => f.fallbackText) ?? []
+    expect(tokens).toContain('α')
+    expect(tokens).toContain('≤')
+    expect(tokens).toContain('O(n log n)')
+    expect(tokens).toContain('p < 0.05')
+    expect(tokens.some(t => t.includes('for every tuple'))).toBe(false)
   })
 })

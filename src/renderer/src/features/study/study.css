@@ -1,7 +1,7 @@
 .study-companion-dock {
   position: absolute;
   left: calc(var(--library-col-width, 252px) + (100% - var(--library-col-width, 252px)) / 2);
-  bottom: 58px;
+  bottom: 66px;
   transform: translateX(-50%);
   z-index: 24;
   display: flex;
@@ -13,7 +13,7 @@
 }
 
 .workspace.workspace--reading-compare .study-companion-dock {
-  bottom: 52px;
+  bottom: 70px;
 }
 
 .workspace.workspace--library-collapsed .study-companion-dock {
@@ -618,9 +618,135 @@ html[data-theme='dark'] .study-companion-btn--danger {
   gap: 12px;
   padding: 6px 10px;
   border-radius: 6px;
+  border: 1px solid transparent;
   background: #f7f9fc;
   font-size: 12px;
   color: #263143;
+}
+
+.study-shortcuts-row.is-recording {
+  border-color: #7ea3e6;
+  background: #edf3fe;
+}
+
+.study-shortcuts-desc {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.study-shortcuts-custom-tag,
+.study-shortcuts-fixed-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.study-shortcuts-custom-tag {
+  background: #e6effe;
+  color: #2c529a;
+}
+
+.study-shortcuts-fixed-tag {
+  background: #eaeef5;
+  color: #6b788b;
+}
+
+.study-shortcuts-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.study-shortcuts-keybtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+
+.study-shortcuts-keybtn:hover:enabled {
+  border-color: #b7c8e4;
+  background: #ffffff;
+}
+
+.study-shortcuts-keybtn.is-recording {
+  border-color: #3864b5;
+  background: #ffffff;
+  color: #244b91;
+}
+
+.study-shortcuts-recording-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #244b91;
+  padding: 0 4px;
+}
+
+.study-shortcuts-reset-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  border: 1px solid #d5dde9;
+  background: #ffffff;
+  color: #526279;
+  font-size: 12px;
+}
+
+.study-shortcuts-reset-btn:hover:enabled {
+  border-color: #9eb4db;
+  color: #2c529a;
+}
+
+.study-shortcuts-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.study-shortcuts-feedback--info {
+  background: #eef6f1;
+  border: 1px solid #b8dec6;
+  color: #1f6b3d;
+}
+
+.study-shortcuts-feedback--error,
+.study-shortcuts-feedback--conflict {
+  background: #fff7e6;
+  border: 1px solid #e6be6a;
+  color: #8b5406;
+}
+
+.study-shortcuts-swap-btn {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid #d99b26;
+  background: #ffffff;
+  color: #8b5406;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.study-shortcuts-swap-btn:hover:enabled {
+  background: #fff1d1;
 }
 
 .study-shortcuts-keys {
@@ -855,4 +981,84 @@ html[data-theme='dark'] .study-drawer__pane-tabs button.is-active {
 
 html[data-theme='dark'] .study-drawer__pane-title {
   color: #8f9db3;
+}
+
+html[data-theme='sepia'] .study-shortcuts-row {
+  background: #f4ecda;
+  color: #3d3324;
+}
+
+html[data-theme='sepia'] .study-shortcuts-row.is-recording {
+  background: #eee1c2;
+  border-color: #c29e57;
+}
+
+html[data-theme='sepia'] .study-shortcuts-keybtn:hover:enabled,
+html[data-theme='sepia'] .study-shortcuts-keybtn.is-recording,
+html[data-theme='sepia'] .study-shortcuts-keys kbd,
+html[data-theme='sepia'] .study-shortcuts-reset-btn {
+  background: #fbf6eb;
+  border-color: #d6c5a3;
+  color: #3d3324;
+}
+
+html[data-theme='dark'] .study-shortcuts-group h4 {
+  color: #a4b4cb;
+}
+
+html[data-theme='dark'] .study-shortcuts-row {
+  background: #1b222e;
+  color: #e4ebf5;
+}
+
+html[data-theme='dark'] .study-shortcuts-row.is-recording {
+  background: #1f2d45;
+  border-color: #5b87dc;
+}
+
+html[data-theme='dark'] .study-shortcuts-custom-tag {
+  background: #213455;
+  color: #9ec0ff;
+}
+
+html[data-theme='dark'] .study-shortcuts-fixed-tag {
+  background: #273040;
+  color: #99a8be;
+}
+
+html[data-theme='dark'] .study-shortcuts-keybtn:hover:enabled,
+html[data-theme='dark'] .study-shortcuts-keybtn.is-recording {
+  background: #141923;
+  border-color: #4f7fd6;
+  color: #b7d0ff;
+}
+
+html[data-theme='dark'] .study-shortcuts-recording-label {
+  color: #9ec0ff;
+}
+
+html[data-theme='dark'] .study-shortcuts-keys kbd,
+html[data-theme='dark'] .study-shortcuts-reset-btn {
+  background: #141923;
+  border-color: #334056;
+  color: #dce4f2;
+}
+
+html[data-theme='dark'] .study-shortcuts-feedback--info {
+  background: #162a1f;
+  border-color: #2b6543;
+  color: #7ee2a8;
+}
+
+html[data-theme='dark'] .study-shortcuts-feedback--error,
+html[data-theme='dark'] .study-shortcuts-feedback--conflict {
+  background: #2d2111;
+  border-color: #9c671a;
+  color: #fbcb6b;
+}
+
+html[data-theme='dark'] .study-shortcuts-swap-btn {
+  background: #1d160c;
+  border-color: #b97d22;
+  color: #fbcb6b;
 }

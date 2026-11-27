@@ -34,6 +34,7 @@ test('双栏学术布局结构对齐、阅读顺序重排、单句高亮与同�
 
   try {
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     // 已移除“结构”调试视图按钮，右侧默认直接呈现原页结构镜像 + 双向句级联动
@@ -290,6 +291,40 @@ test('双栏学术布局结构对齐、阅读顺序重排、单句高亮与同�
       return s
     }).toBeLessThanOrEqual(2)
 
+    // 6. 鼠标与焦点均在右栏译文区时：Ctrl+= / Ctrl+- / Ctrl+滚轮 / Ctrl+0 均可同步缩放且不触发 Electron 窗口整体缩放
+    await page.mouse.move(transBox.x + transBox.width / 2, transBox.y + transBox.height / 2)
+    await page.locator('.translation-scroll').focus()
+    const zoomOutput = page.getByTestId('zoom-level')
+    const zoomBeforeTrans = Number.parseInt(await zoomOutput.innerText(), 10)
+
+    await page.keyboard.press('Control+=')
+    await expect(zoomOutput).toHaveText(`${zoomBeforeTrans + 10}%`)
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())).toBe(1)
+
+    await page.keyboard.press('Control+-')
+    await expect(zoomOutput).toHaveText(`${zoomBeforeTrans}%`)
+
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -120)
+    await expect(zoomOutput).toHaveText(`${zoomBeforeTrans + 10}%`)
+    await page.mouse.wheel(0, 120)
+    await expect(zoomOutput).toHaveText(`${zoomBeforeTrans}%`)
+    await page.keyboard.up('Control')
+
+    await page.keyboard.press('Control+0')
+    await expect.poll(async () => Number.parseInt(await zoomOutput.innerText(), 10)).toBeLessThan(zoomBeforeTrans)
+    await waitForPageReady(page, 1)
+    const alignedAfterReset = await page.evaluate(() => {
+      const pdfPage = document.querySelector('.pdf-page[data-page-number="1"]')!.getBoundingClientRect()
+      const transPage = document.querySelector('.translation-page[data-page-number="1"]')!.getBoundingClientRect()
+      return {
+        widthDiff: Math.abs(pdfPage.width - transPage.width),
+        heightDiff: Math.abs(pdfPage.height - transPage.height)
+      }
+    })
+    expect(alignedAfterReset.widthDiff).toBeLessThanOrEqual(2)
+    expect(alignedAfterReset.heightDiff).toBeLessThanOrEqual(2)
+
     expect(failures).toEqual([])
   } finally {
     await app.close()
@@ -301,6 +336,7 @@ test('裁剪白边与放大模式下保持结构镜像尺寸与上下对齐', as
   const { app, page } = await launchApp(await createTestData(), { deviceScaleFactor: 1 })
   try {
     await importFixture(app, page, 'verification/reader-ux/reader-ux-fixture.pdf')
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
     await page.getByRole('button', { name: '裁剪白边', exact: true }).click()

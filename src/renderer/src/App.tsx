@@ -16,6 +16,7 @@ import type {
   AiChatScope,
   AnnotationColor,
   AnnotationRecord,
+  DetectedLocalAiClient,
   DocumentRecord,
   DocumentTranslationScope,
   ExplainMode,
@@ -96,6 +97,15 @@ import { AnnotationsDrawer } from './features/study/AnnotationsDrawer'
 import { CitationModal } from './features/study/CitationModal'
 import { ShortcutsModal } from './features/study/ShortcutsModal'
 import {
+  CUSTOM_SHORTCUTS_STORAGE_KEY,
+  loadStoredShortcuts,
+  matchesShortcutEvent,
+  mergeShortcuts,
+  saveStoredShortcuts,
+  type ShortcutActionId,
+  type ShortcutOverrides
+} from './features/study/shortcuts'
+import {
   extractReferenceTargets,
   findReferenceMatchInPages,
   type ReferencePeekMatch,
@@ -120,6 +130,13 @@ import {
 import { WorkspaceHeader, type ReadingTheme } from './features/workspace/WorkspaceHeader'
 import { WorkspaceTabsBar, type ReaderViewMode } from './features/workspace/WorkspaceTabsBar'
 import { UsageToastLayer } from './features/workspace/UsageToastLayer'
+import {
+  classifyPdfLanguageFromText,
+  isTranslationEngineConfigured,
+  loadStoredDocViewModes,
+  resolveDocumentViewMode,
+  type UnconfiguredEnginePromptState
+} from './features/translation/auto-translate'
 import { useDualScrollSync } from './features/translation/useDualScrollSync'
 import { LibraryPanel } from './features/library/LibraryPanel'
 import { LiteratureSearchModal } from './features/library/LiteratureSearchModal'
@@ -132,7 +149,8 @@ import {
   type PageLayoutResult
 } from './features/reader/layout-analysis'
 import { loadPdf, type PDFDocumentProxy } from './features/reader/pdf-engine'
-import { type PageRect } from './features/reader/pdf-geometry'
+import { type PageGeometry, type PageRect } from './features/reader/pdf-geometry'
+import { extractPageGraphicHints, type PdfOperatorListLike } from './features/reader/pdf-graphics'
 import { scoreOutlineHeadingMatch, type PdfOutlineItem } from './features/reader/pdf-outline'
 import {
   PdfViewer,
@@ -147,6 +165,7 @@ const OPEN_TABS_STORAGE_KEY = 'paperflow:open-tabs'
 const SPLIT_PANES_STORAGE_KEY = 'paperflow:split-panes'
 const SECONDARY_DOC_STORAGE_KEY = 'paperflow:secondary-document'
 const PREFETCH_NEXT_PAGE_STORAGE_KEY = 'paperflow:prefetch-next-page'
+const DOC_VIEW_MODES_STORAGE_KEY = 'paperflow:doc-view-modes'
 const PRIMARY_PANE_ID = 'pane-primary'
 const LIBRARY_WIDTH_STORAGE_KEY = 'paperflow:library-width'
 const DEFAULT_LIBRARY_WIDTH_PX = 252
@@ -235,7 +254,11 @@ export default function App(): React.JSX.Element {
   const [stageOverflow, setStageOverflow] = useState<{ left: boolean; right: boolean }>({ left: false, right: false })
   const libraryResizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const splitStageRef = useRef<HTMLDivElement | null>(null)
-  const [viewMode, setViewMode] = useState<ReaderViewMode>('dual')
+  const [docViewModes, setDocViewModes] = useState<Record<string, ReaderViewMode>>(() =>
+    loadStoredDocViewModes(typeof localStorage !== 'undefined' ? localStorage : null, DOC_VIEW_MODES_STORAGE_KEY)
+  )
+  const [unconfiguredPrompt, setUnconfiguredPrompt] = useState<UnconfiguredEnginePromptState | null>(null)
+  const [autoTranslateRetryTick, setAutoTranslateRetryTick] = useState(0)
   const [scrollSyncLocked, setScrollSyncLocked] = useState(true)
   const [pdfScrollEl, setPdfScrollEl] = useState<HTMLDivElement | null>(null)
   const [translationScrollEl, setTranslationScrollEl] = useState<HTMLDivElement | null>(null)
@@ -274,6 +297,45 @@ export default function App(): React.JSX.Element {
     initialTags?: string[]
   }>({ open: false })
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [shortcutOverrides, setShortcutOverrides] = useState<ShortcutOverrides>(() =>
+    loadStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, CUSTOM_SHORTCUTS_STORAGE_KEY)
+  )
+  const shortcuts = useMemo(() => mergeShortcuts(shortcutOverrides), [shortcutOverrides])
+  const handleUpdateShortcut = useCallback((actionId: ShortcutActionId, combo: string): void => {
+    setShortcutOverrides(prev => {
+      const next: ShortcutOverrides = { ...prev, [actionId]: combo }
+      saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, next, CUSTOM_SHORTCUTS_STORAGE_KEY)
+      return next
+    })
+  }, [])
+  const handleSwapShortcuts = useCallback(
+    (actionA: ShortcutActionId, actionB: ShortcutActionId): void => {
+      const currentMap = mergeShortcuts(shortcutOverrides)
+      setShortcutOverrides(prev => {
+        const next: ShortcutOverrides = {
+          ...prev,
+          [actionA]: currentMap[actionB],
+          [actionB]: currentMap[actionA]
+        }
+        saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, next, CUSTOM_SHORTCUTS_STORAGE_KEY)
+        return next
+      })
+    },
+    [shortcutOverrides]
+  )
+  const handleResetShortcut = useCallback((actionId: ShortcutActionId): void => {
+    setShortcutOverrides(prev => {
+      if (!(actionId in prev)) return prev
+      const next: ShortcutOverrides = { ...prev }
+      delete next[actionId]
+      saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, next, CUSTOM_SHORTCUTS_STORAGE_KEY)
+      return next
+    })
+  }, [])
+  const handleResetAllShortcuts = useCallback((): void => {
+    setShortcutOverrides({})
+    saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, {}, CUSTOM_SHORTCUTS_STORAGE_KEY)
+  }, [])
   const [citationOpen, setCitationOpen] = useState(false)
   const [researchProfile, setResearchProfile] = useState<ResearchProfile | null>(null)
   const [onboardingReady, setOnboardingReady] = useState(false)
@@ -421,13 +483,47 @@ export default function App(): React.JSX.Element {
   const backdropMapRef = useRef<Map<number, PageBackdropSnapshot>>(new Map())
   const queriedCachePagesRef = useRef<Set<number>>(new Set())
   const autoTitleAttemptedRef = useRef<Set<string>>(new Set())
+  const autoTranslateEvaluatedRef = useRef<Set<string>>(new Set())
+  const autoTranslateInFlightRef = useRef<Set<string>>(new Set())
+  const settingsFromUnconfiguredPromptRef = useRef<string | null>(null)
   const layoutsRef = useRef<Map<number, PageLayoutResult>>(new Map())
   const translationsByPageRef = useRef<Map<number, Map<string, TranslatedBlockRecord>>>(new Map())
   translationsByPageRef.current = translationsByPage
+  const translatingPagesByDocIdRef = useRef(translatingPagesByDocId)
+  translatingPagesByDocIdRef.current = translatingPagesByDocId
+  const batchQueuesByDocIdRef = useRef(batchQueuesByDocId)
+  batchQueuesByDocIdRef.current = batchQueuesByDocId
 
   const selectedDocumentId = library.selected?.id ?? null
   const selectedDocumentIdRef = useRef<string | null>(selectedDocumentId)
   selectedDocumentIdRef.current = selectedDocumentId
+  const viewMode: ReaderViewMode = resolveDocumentViewMode(docViewModes, selectedDocumentId)
+  const viewModeRef = useRef<ReaderViewMode>(viewMode)
+  viewModeRef.current = viewMode
+
+  const persistDocViewMode = useCallback((docId: string, mode: ReaderViewMode): void => {
+    setDocViewModes(prev => {
+      if (prev[docId] === mode) return prev
+      const next: Record<string, ReaderViewMode> = { ...prev, [docId]: mode }
+      try {
+        localStorage.setItem(DOC_VIEW_MODES_STORAGE_KEY, JSON.stringify(next))
+      } catch {
+        // 忽略存储配额限制
+      }
+      return next
+    })
+  }, [])
+
+  const setViewMode = useCallback(
+    (updater: ReaderViewMode | ((curr: ReaderViewMode) => ReaderViewMode)): void => {
+      const targetDocId = selectedDocumentIdRef.current
+      if (!targetDocId) return
+      const nextMode = typeof updater === 'function' ? updater(viewModeRef.current) : updater
+      persistDocViewMode(targetDocId, nextMode)
+    },
+    [persistDocViewMode]
+  )
+
   const translatingPage = selectedDocumentId ? (translatingPagesByDocId[selectedDocumentId] ?? null) : null
   const batchQueue = selectedDocumentId ? (batchQueuesByDocId[selectedDocumentId] ?? null) : null
 
@@ -501,6 +597,7 @@ export default function App(): React.JSX.Element {
       result: TranslatePageResult,
       options?: { suppressToast?: boolean; pageCountOverride?: number }
     ): Promise<void> => {
+      setUnconfiguredPrompt(null)
       if (result.balance) {
         setProviderBalance(result.balance)
       }
@@ -817,6 +914,9 @@ export default function App(): React.JSX.Element {
     if (resolvedPanes.length >= 2) {
       const keep =
         resolvedPanes.find(item => item.pane.id === effectiveActivePaneId) ?? resolvedPanes[0]
+      if (keep.pane.viewMode === 'source' || keep.pane.viewMode === 'dual' || keep.pane.viewMode === 'translation') {
+        persistDocViewMode(keep.document.id, keep.pane.viewMode)
+      }
       setSplitPanes([{ id: PRIMARY_PANE_ID, documentId: keep.document.id, weight: 1 }])
       setActivePaneId(PRIMARY_PANE_ID)
       library.select(keep.document.id)
@@ -834,11 +934,11 @@ export default function App(): React.JSX.Element {
     })
     const newId = createSplitPaneId()
     setSplitPanes([
-      { id: PRIMARY_PANE_ID, documentId: primaryId, weight: 1 },
+      { id: PRIMARY_PANE_ID, documentId: primaryId, weight: 1, viewMode: viewModeRef.current },
       { id: newId, documentId: candidate, weight: 1 }
     ])
     setActivePaneId(newId)
-  }, [library, resolvedPanes, effectiveActivePaneId, openTabs])
+  }, [library, resolvedPanes, effectiveActivePaneId, openTabs, persistDocViewMode])
 
   const handleCloseTab = useCallback(
     (docId: string): void => {
@@ -1086,6 +1186,7 @@ export default function App(): React.JSX.Element {
     setTranslationExportOpen(false)
     setRetranslatingBlockKeys(new Set())
     setTranslationError(null)
+    setUnconfiguredPrompt(null)
     setActiveLink(null)
     setEditingAnnotation(null)
     setExplainState(null)
@@ -1353,14 +1454,19 @@ export default function App(): React.JSX.Element {
     const pageObj = await pdf.getPage(pageNumber)
     try {
       const viewport = pageObj.getViewport({ scale: 1 })
-      const textContent = (await pageObj.getTextContent({ includeMarkedContent: true })) as Parameters<
-        typeof analyzePageLayout
-      >[0]
-      return analyzePageLayout(textContent, {
+      const geometry: PageGeometry = {
         pageNumber,
         viewport,
         outputScale: { x: 1, y: 1 }
-      })
+      }
+      const textContent = (await pageObj.getTextContent({ includeMarkedContent: true })) as Parameters<
+        typeof analyzePageLayout
+      >[0]
+      const operatorList = await pageObj.getOperatorList().catch(() => null)
+      const graphicHints = operatorList
+        ? extractPageGraphicHints(operatorList as unknown as PdfOperatorListLike, geometry)
+        : undefined
+      return analyzePageLayout(textContent, geometry, { graphicHints })
     } finally {
       if (!pageObj.destroyed) pageObj.cleanup()
     }
@@ -1806,6 +1912,272 @@ export default function App(): React.JSX.Element {
     translationsByPage,
     handlePageLayout,
     handleTranslationCompleted
+  ])
+
+  // 打开未翻译的非中文 PDF 时自动预译前两页；若引擎未配置则弹出可点击跳转设置的提醒小窗
+  useEffect(() => {
+    if (
+      !selectedDocumentId ||
+      isCompareMode ||
+      mirrorState.pageCount <= 0 ||
+      mirrorState.toolbarDisabled ||
+      !translationSettings
+    ) {
+      return
+    }
+    if (
+      autoTranslateEvaluatedRef.current.has(selectedDocumentId) ||
+      autoTranslateInFlightRef.current.has(selectedDocumentId)
+    ) {
+      return
+    }
+    if (
+      translatingPagesByDocIdRef.current[selectedDocumentId] !== undefined ||
+      batchQueuesByDocIdRef.current[selectedDocumentId] !== undefined
+    ) {
+      return
+    }
+
+    const targetDocId = selectedDocumentId
+    const totalPageCount = mirrorState.pageCount
+    const currentSettings = translationSettings
+    const doc = docByIdRef.current.get(targetDocId)
+    const docTitle = doc?.displayTitle || doc?.originalFilename || ''
+
+    autoTranslateEvaluatedRef.current.add(targetDocId)
+    autoTranslateInFlightRef.current.add(targetDocId)
+
+    void (async () => {
+      let bgPdfHandle: { promise: Promise<PDFDocumentProxy>; destroy(): Promise<void> } | null = null
+      let bgPdfDoc: PDFDocumentProxy | null = null
+      let ownedToken: { aborted: boolean } | null = null
+
+      try {
+        const existingPages = await window.paperflow.listDocumentTranslations(targetDocId).catch(() => [])
+        const hasAnyTranslated = existingPages.some(page =>
+          page.items.some(item => item.translatedText.trim().length > 0)
+        )
+        if (hasAnyTranslated) {
+          return
+        }
+        if (selectedDocumentIdRef.current !== targetDocId) {
+          autoTranslateEvaluatedRef.current.delete(targetDocId)
+          return
+        }
+
+        const page1Layout =
+          layoutsRef.current.get(1) ?? (await analyzePageRef.current?.(1).catch(() => null)) ?? null
+        if (!page1Layout || selectedDocumentIdRef.current !== targetDocId) {
+          autoTranslateEvaluatedRef.current.delete(targetDocId)
+          return
+        }
+        handlePageLayout(1, page1Layout)
+
+        const page1Blocks = buildPageTranslationInputs(page1Layout)
+        let sampleText = page1Blocks.map(block => block.sourceText).join('\n')
+        let lang = classifyPdfLanguageFromText(sampleText)
+        let page2Layout: PageLayoutResult | null = null
+
+        if (lang === 'insufficient' && totalPageCount >= 2) {
+          page2Layout =
+            layoutsRef.current.get(2) ?? (await analyzePageRef.current?.(2).catch(() => null)) ?? null
+          if (selectedDocumentIdRef.current !== targetDocId) {
+            autoTranslateEvaluatedRef.current.delete(targetDocId)
+            return
+          }
+          if (page2Layout) {
+            handlePageLayout(2, page2Layout)
+            const page2Blocks = buildPageTranslationInputs(page2Layout)
+            sampleText = `${sampleText}\n${page2Blocks.map(block => block.sourceText).join('\n')}`
+            lang = classifyPdfLanguageFromText(sampleText)
+          }
+        }
+
+        if (lang !== 'non-chinese') {
+          return
+        }
+
+        let detectedClients: DetectedLocalAiClient[] | null = null
+        if (
+          currentSettings.provider === 'cli' &&
+          (currentSettings.cli.preset === 'codex' || currentSettings.cli.preset === 'gemini') &&
+          currentSettings.cli.command.trim().toLowerCase() === currentSettings.cli.preset
+        ) {
+          detectedClients = await window.paperflow.detectLocalAiClients().catch(() => null)
+          if (selectedDocumentIdRef.current !== targetDocId) {
+            autoTranslateEvaluatedRef.current.delete(targetDocId)
+            return
+          }
+        }
+
+        if (!isTranslationEngineConfigured(currentSettings, detectedClients)) {
+          if (selectedDocumentIdRef.current === targetDocId) {
+            setUnconfiguredPrompt({ documentId: targetDocId, documentTitle: docTitle })
+          }
+          return
+        }
+
+        if (
+          translatingPagesByDocIdRef.current[targetDocId] !== undefined ||
+          batchQueuesByDocIdRef.current[targetDocId] !== undefined
+        ) {
+          return
+        }
+
+        setUnconfiguredPrompt(curr => (curr?.documentId === targetDocId ? null : curr))
+        const targetPages = totalPageCount >= 2 ? [1, 2] : [1]
+        if (batchAbortMapRef.current.has(targetDocId)) return
+        ownedToken = { aborted: false }
+        batchAbortMapRef.current.set(targetDocId, ownedToken)
+        setDocBatchQueue(targetDocId, {
+          currentPage: targetPages[0],
+          completedPages: 0,
+          totalPages: targetPages.length
+        })
+
+        let translatedPages = 0
+        let translatedBlocks = 0
+        let promptTokens = 0
+        let completionTokens = 0
+        let totalTokens = 0
+        let latencyMs = 0
+        let lastResult: TranslatePageResult | null = null
+
+        for (let idx = 0; idx < targetPages.length; idx += 1) {
+          const pageNumber = targetPages[idx]
+          if (ownedToken.aborted) break
+          setDocBatchQueue(targetDocId, {
+            currentPage: pageNumber,
+            completedPages: idx,
+            totalPages: targetPages.length
+          })
+
+          let layout: PageLayoutResult | null =
+            pageNumber === 1
+              ? page1Layout
+              : pageNumber === 2 && page2Layout
+                ? page2Layout
+                : selectedDocumentIdRef.current === targetDocId
+                  ? layoutsRef.current.get(pageNumber) ?? null
+                  : null
+
+          if (!layout && selectedDocumentIdRef.current === targetDocId && analyzePageRef.current) {
+            const analyzed = await analyzePageRef.current(pageNumber).catch(() => null)
+            if (analyzed && selectedDocumentIdRef.current === targetDocId) {
+              handlePageLayout(pageNumber, analyzed)
+            }
+            layout = analyzed
+          }
+          if (!layout) {
+            if (!bgPdfDoc) {
+              const bytes = await window.paperflow.readPdfBytes(targetDocId)
+              bgPdfHandle = loadPdf(bytes)
+              bgPdfDoc = await bgPdfHandle.promise
+            }
+            layout = await analyzeStandalonePdfPage(bgPdfDoc, pageNumber)
+          }
+          if (ownedToken.aborted || !layout) continue
+
+          const allBlocks = buildPageTranslationInputs(layout)
+          if (allBlocks.length === 0) continue
+
+          let pageMap =
+            selectedDocumentIdRef.current === targetDocId
+              ? translationsByPageRef.current.get(pageNumber)
+              : undefined
+          if (!pageMap || pageMap.size < allBlocks.length) {
+            const cachedRows = await window.paperflow
+              .getPageTranslations(targetDocId, pageNumber)
+              .catch(() => [] as TranslatedBlockRecord[])
+            if (cachedRows.length > 0) {
+              const merged = new Map(pageMap ?? [])
+              for (const row of cachedRows) merged.set(row.blockId, row)
+              pageMap = merged
+              if (selectedDocumentIdRef.current === targetDocId) {
+                setTranslationsByPage(prev => mergePageTranslationRecords(prev, pageNumber, cachedRows))
+              }
+            }
+          }
+
+          const allCached = allBlocks.every(block => {
+            const hit = pageMap?.get(block.blockId)
+            return Boolean(hit && hit.sourceHash === block.sourceHash && hit.translatedText.trim().length > 0)
+          })
+          if (allCached || ownedToken.aborted) continue
+
+          setDocTranslatingPage(targetDocId, pageNumber)
+          const result = await window.paperflow.translatePage({
+            documentId: targetDocId,
+            pageNumber,
+            blocks: allBlocks,
+            force: false
+          })
+          if (result.translatedCount > 0) {
+            translatedPages += 1
+            translatedBlocks += result.translatedCount
+            promptTokens += result.usage?.promptTokens ?? 0
+            completionTokens += result.usage?.completionTokens ?? 0
+            totalTokens += result.usage?.totalTokens ?? 0
+            latencyMs += result.latencyMs ?? 0
+            lastResult = result
+          }
+          if (selectedDocumentIdRef.current === targetDocId) {
+            setTranslationsByPage(prev => mergePageTranslationRecords(prev, pageNumber, result.items))
+          }
+        }
+
+        if (lastResult && translatedPages > 0 && !ownedToken.aborted) {
+          const aggregated: TranslatePageResult = {
+            ...lastResult,
+            translatedCount: translatedBlocks,
+            latencyMs,
+            ...(totalTokens > 0
+              ? {
+                  usage: {
+                    promptTokens,
+                    completionTokens,
+                    totalTokens
+                  }
+                }
+              : {})
+          }
+          void handleTranslationCompleted(targetDocId, aggregated, {
+            pageCountOverride: translatedPages > 1 ? translatedPages : undefined
+          })
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (!/已取消/.test(message)) {
+          handleTranslationErrorToast(message)
+          if (selectedDocumentIdRef.current === targetDocId) {
+            setTranslationError(message)
+          }
+        }
+      } finally {
+        if (bgPdfHandle) {
+          await bgPdfHandle.destroy().catch(() => {})
+        }
+        if (ownedToken && batchAbortMapRef.current.get(targetDocId) === ownedToken) {
+          batchAbortMapRef.current.delete(targetDocId)
+          setDocBatchQueue(targetDocId, null)
+          setDocTranslatingPage(targetDocId, null)
+        }
+        autoTranslateInFlightRef.current.delete(targetDocId)
+      }
+    })()
+  }, [
+    selectedDocumentId,
+    isCompareMode,
+    mirrorState.pageCount,
+    mirrorState.toolbarDisabled,
+    translationSettings,
+    autoTranslateRetryTick,
+    handlePageLayout,
+    analyzeStandalonePdfPage,
+    setDocBatchQueue,
+    setDocTranslatingPage,
+    handleTranslationCompleted,
+    handleTranslationErrorToast
   ])
 
   const handleLeftSourceInteract = useCallback(
@@ -3104,7 +3476,7 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (onboardingOpen) return
+      if (onboardingOpen || event.defaultPrevented) return
       if (event.key === 'Escape') {
         if (shortcutsOpen) {
           setShortcutsOpen(false)
@@ -3128,38 +3500,36 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      if (event.ctrlKey || event.metaKey || event.altKey) return
       if (isEditableTarget(event.target) || isEditableTarget(document.activeElement)) return
       if (settingsOpen) return
 
-      if (event.key === '?' || (event.code === 'Slash' && event.shiftKey)) {
+      if (matchesShortcutEvent(event, shortcuts.toggleShortcuts)) {
         event.preventDefault()
         setCitationOpen(false)
         setShortcutsOpen(open => !open)
         return
       }
 
-      if (event.shiftKey || shortcutsOpen || citationOpen) return
+      if (shortcutsOpen || citationOpen) return
 
-      const lower = event.key.toLowerCase()
-      if (lower === 't') {
+      if (matchesShortcutEvent(event, shortcuts.toggleTheme)) {
         event.preventDefault()
         setTheme(curr => (curr === 'light' ? 'sepia' : curr === 'sepia' ? 'dark' : 'light'))
         return
       }
-      if (lower === 'b') {
+      if (matchesShortcutEvent(event, shortcuts.toggleLibrary)) {
         event.preventDefault()
         setLibraryCollapsed(c => !c)
         return
       }
-      if (lower === 'i') {
+      if (matchesShortcutEvent(event, shortcuts.toggleAiChat)) {
         event.preventDefault()
         setAiChatOpen(open => !open)
         setAiChatDrawerExpanded(true)
         return
       }
       if (!selectedDocumentId) return
-      if (lower === 'v') {
+      if (matchesShortcutEvent(event, shortcuts.cycleViewMode)) {
         event.preventDefault()
         if (isCompareMode) {
           setSplitPanes(prev =>
@@ -3173,7 +3543,7 @@ export default function App(): React.JSX.Element {
         } else {
           setViewMode(curr => (curr === 'dual' ? 'translation' : curr === 'translation' ? 'source' : 'dual'))
         }
-      } else if (lower === 'o') {
+      } else if (matchesShortcutEvent(event, shortcuts.toggleOutline)) {
         event.preventDefault()
         if (isCompareMode) {
           const activeIdx = resolvedPanes.findIndex(item => item.pane.id === effectiveActivePaneId)
@@ -3195,13 +3565,13 @@ export default function App(): React.JSX.Element {
           }
           toolbarActionsRef.current?.toggleOutline()
         }
-      } else if (lower === 'a') {
+      } else if (matchesShortcutEvent(event, shortcuts.toggleAnnotations)) {
         event.preventDefault()
         setAnnotationsOpen(open => !open)
-      } else if (lower === 'c') {
+      } else if (matchesShortcutEvent(event, shortcuts.openCitation)) {
         event.preventDefault()
         setCitationOpen(true)
-      } else if (lower === 'h' && selectionCompanion && !savingAnnotation) {
+      } else if (matchesShortcutEvent(event, shortcuts.quickHighlight) && selectionCompanion && !savingAnnotation) {
         event.preventDefault()
         void handleCreateHighlight('yellow')
       }
@@ -3213,6 +3583,7 @@ export default function App(): React.JSX.Element {
     settingsOpen,
     shortcutsOpen,
     citationOpen,
+    shortcuts,
     peekState,
     explainState,
     selectedDocumentId,
@@ -3220,6 +3591,7 @@ export default function App(): React.JSX.Element {
     effectiveActivePaneId,
     resolvedPanes,
     viewMode,
+    setViewMode,
     handleChangePaneViewMode,
     getPaneToolbarRef,
     selectionCompanion,
@@ -3752,7 +4124,22 @@ export default function App(): React.JSX.Element {
           onBatchAddTag={handleBatchAddTag}
           onJumpToSearchHit={handleJumpToSearchHit}
           onDelete={library.deleteDocument}
-          onResetLibrary={library.resetLibrary}
+          onResetLibrary={async () => {
+            const ok = await library.resetLibrary()
+            if (ok) {
+              autoTranslateEvaluatedRef.current.clear()
+              autoTranslateInFlightRef.current.clear()
+              settingsFromUnconfiguredPromptRef.current = null
+              setUnconfiguredPrompt(null)
+              setDocViewModes({})
+              try {
+                localStorage.removeItem(DOC_VIEW_MODES_STORAGE_KEY)
+              } catch {
+                // 忽略存储清除限制
+              }
+            }
+            return ok
+          }}
           onOpenLiteratureSearch={preset =>
             setLiteratureSearchModal({
               open: true,
@@ -4009,7 +4396,9 @@ export default function App(): React.JSX.Element {
                   <PdfViewer
                     key={primaryPane.document.id}
                     document={primaryPane.document}
+                    layoutKey={primaryPaneViewMode}
                     isActivePane={effectiveActivePaneId === primaryPane.pane.id}
+                    shortcuts={shortcuts}
                     onPageCount={library.refresh}
                     onPageLayout={handlePageLayout}
                     onPageBackdrop={handlePageBackdrop}
@@ -4022,7 +4411,7 @@ export default function App(): React.JSX.Element {
                     extractCitationSourceRef={extractCitationSourceRef}
                     renderRegionPreviewRef={renderRegionPreviewRef}
                     toolbarActionsRef={toolbarActionsRef}
-                    hideFloatingPill={primaryPaneViewMode === 'translation'}
+                    hideFloatingPill={primaryPaneViewMode !== 'source'}
                     annotationsByPage={primaryAnnotationsByPage}
                     editingAnnotationId={editingAnnotation?.paneId === primaryPane.pane.id ? editingAnnotation.annotationId : null}
                     activeSentence={activeSourceSentence}
@@ -4055,10 +4444,16 @@ export default function App(): React.JSX.Element {
                     activePageNumber={activeLink?.pageNumber ?? null}
                     activeSentenceIds={activeSentenceIds}
                     onSelectTargetSentences={handleRightSentenceSelect}
+                    onZoomDelta={delta => toolbarActionsRef.current?.adjustScale(delta)}
                     bottomPill={
                       primaryPaneViewMode === 'translation' ? renderPrimaryReaderToolbar() : undefined
                     }
                   />
+                ) : null}
+                {primaryPaneViewMode === 'dual' ? (
+                  <div className="split-pane-dual-pill-dock" data-testid="pane-dual-pill-dock-0">
+                    {renderPrimaryReaderToolbar()}
+                  </div>
                 ) : null}
               </div>
               {dragHover?.targetPaneId === primaryPane.pane.id ? (
@@ -4088,6 +4483,7 @@ export default function App(): React.JSX.Element {
                   activeDropIsPane={dragHover?.sourceKind === 'pane'}
                   translationRevision={translationRevision}
                   activeTranslatingPage={translatingPagesByDocId[item.document.id] ?? null}
+                  shortcuts={shortcuts}
                   onTranslatingPageChange={setDocTranslatingPage}
                   onTranslationComplete={(docId, result) => {
                     void handleTranslationCompleted(docId, result)
@@ -4150,7 +4546,9 @@ export default function App(): React.JSX.Element {
                 <PdfViewer
                   key={library.selected.id}
                   document={library.selected}
+                  layoutKey={viewMode}
                   isActivePane
+                  shortcuts={shortcuts}
                   onPageCount={library.refresh}
                   onPageLayout={handlePageLayout}
                   onPageBackdrop={handlePageBackdrop}
@@ -4163,8 +4561,7 @@ export default function App(): React.JSX.Element {
                   extractCitationSourceRef={extractCitationSourceRef}
                   renderRegionPreviewRef={renderRegionPreviewRef}
                   toolbarActionsRef={toolbarActionsRef}
-                  hideFloatingPill={viewMode === 'translation'}
-                  floatingPillSpacerOnly={viewMode === 'dual'}
+                  hideFloatingPill={viewMode !== 'source'}
                   annotationsByPage={primaryAnnotationsByPage}
                   editingAnnotationId={editingAnnotation?.paneId === primaryPaneId ? editingAnnotation.annotationId : null}
                   activeSentence={activeSourceSentence}
@@ -4219,6 +4616,7 @@ export default function App(): React.JSX.Element {
                 activeSentenceIds={activeSentenceIds}
                 onSelectTargetSentences={handleRightSentenceSelect}
                 onChangeSplitRatio={viewMode === 'dual' ? setDualSplitRatio : undefined}
+                onZoomDelta={delta => toolbarActionsRef.current?.adjustScale(delta)}
                 getSplitDragContext={getSplitDragContext}
                 splitDropActive={dragHover?.targetPaneId === 'translation'}
                 onDragOverSplitTarget={hasDocument ? handleTranslationDragOver : undefined}
@@ -4346,7 +4744,16 @@ export default function App(): React.JSX.Element {
       </main>
       <UsageToastLayer
         toast={usageToast}
+        unconfiguredPrompt={isCompareMode || annotationsOpen || settingsOpen ? null : unconfiguredPrompt}
         onDismiss={() => setUsageToast(null)}
+        onDismissUnconfiguredPrompt={() => setUnconfiguredPrompt(null)}
+        onOpenEngineSettings={() => {
+          settingsFromUnconfiguredPromptRef.current =
+            unconfiguredPrompt?.documentId ?? selectedDocumentIdRef.current
+          setUnconfiguredPrompt(null)
+          setSettingsFocusSection('default')
+          setSettingsOpen(true)
+        }}
         onOpenUsageDetails={() => {
           setUsageToast(null)
           setSettingsFocusSection('usage')
@@ -4362,6 +4769,7 @@ export default function App(): React.JSX.Element {
         prefetchNextPage={prefetchNextPage}
         onPrefetchNextPageChange={handlePrefetchNextPageChange}
         onClose={() => {
+          settingsFromUnconfiguredPromptRef.current = null
           setSettingsOpen(false)
           setSettingsFocusSection('default')
         }}
@@ -4370,7 +4778,18 @@ export default function App(): React.JSX.Element {
         onSaved={settings => {
           setTranslationSettings(settings)
           setTranslationError(null)
+          setUnconfiguredPrompt(null)
           setTranslationRevision(r => r + 1)
+          const pendingDocId = settingsFromUnconfiguredPromptRef.current
+          settingsFromUnconfiguredPromptRef.current = null
+          if (
+            pendingDocId &&
+            pendingDocId === selectedDocumentIdRef.current &&
+            isTranslationEngineConfigured(settings)
+          ) {
+            autoTranslateEvaluatedRef.current.delete(pendingDocId)
+            setAutoTranslateRetryTick(t => t + 1)
+          }
           void refreshUsageAndBalance()
           void refreshDocumentScope(activeDocumentId)
           if (selectedDocumentId && mirrorState.pageCount > 0) {
@@ -4438,7 +4857,15 @@ export default function App(): React.JSX.Element {
           })
         }
       />
-      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsModal
+        open={shortcutsOpen}
+        shortcuts={shortcuts}
+        onUpdateShortcut={handleUpdateShortcut}
+        onSwapShortcuts={handleSwapShortcuts}
+        onResetShortcut={handleResetShortcut}
+        onResetAllShortcuts={handleResetAllShortcuts}
+        onClose={() => setShortcutsOpen(false)}
+      />
       <CitationModal
         open={citationOpen && hasDocument}
         document={activeDocument}

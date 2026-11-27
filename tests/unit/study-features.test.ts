@@ -292,6 +292,7 @@ describe('TranslationService glossary, streaming progress, and explainSelection'
     const service = new TranslationService({
       database: db,
       safeStorage: makeFakeSafeStorage(),
+      authorizeCli: async () => true,
       fetchImpl
     })
 
@@ -384,18 +385,20 @@ describe('TranslationService glossary, streaming progress, and explainSelection'
       });`,
       'utf8'
     )
-    service.saveSettings({
-      provider: 'cli',
+    const cliSettings = {
+      provider: 'cli' as const,
       targetLanguage: 'zh-CN',
       openai: { baseUrl: 'http://127.0.0.1:41999/v1', model: 'mock-study' },
       cli: {
-        preset: 'custom',
+        preset: 'custom' as const,
         command: process.execPath,
         model: '',
         extraArgs: [cliScript],
         timeoutSec: 30
       }
-    })
+    }
+    await service.authorizeCliSettings(cliSettings)
+    service.saveSettings(cliSettings)
     const cliAns = await service.explainSelection({
       documentId: doc.id,
       pageNumber: 1,

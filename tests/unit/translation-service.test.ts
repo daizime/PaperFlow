@@ -24,12 +24,21 @@ let dbPath: string
 
 const fakeSafeStorage: SafeStorageAdapter = {
   isEncryptionAvailable: () => true,
+  getSelectedStorageBackend: () => 'gnome_libsecret',
   encryptString: plain => Buffer.from(`MOCKENC:${plain}`, 'utf8'),
   decryptString: buf => {
     const str = buf.toString('utf8')
     if (!str.startsWith('MOCKENC:')) throw new Error('Invalid ciphertext')
     return str.slice('MOCKENC:'.length)
   }
+}
+
+async function authorizeCurrentSyntheticCli(service: TranslationService): Promise<void> {
+  const settings = service.getSettings()
+  await service.authorizeCliSettings({ provider: 'cli', targetLanguage: settings.targetLanguage,
+    openai: { baseUrl: settings.openai.baseUrl, model: settings.openai.model },
+    cli: { preset: settings.cli.preset, command: settings.cli.command, model: settings.cli.model,
+      extraArgs: settings.cli.extraArgs, timeoutSec: settings.cli.timeoutSec } })
 }
 
 beforeEach(async () => {
@@ -169,7 +178,8 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
       expect(saved.openai.apiKeyPreview).toBe('sk-s***7766')
       expect(JSON.stringify(saved)).not.toContain('sk-secret-99887766')
       // 数据库中密文不应明文存放 API Key
-      expect(db.getSetting('translation.openaiApiKey.v1')).toMatch(/^enc:v1:/)
+      expect(db.getSetting('translation.openaiApiKey.v1')).toBeNull()
+      expect(db.getSetting('translation.openaiCredentials.v2')).toContain('cipher')
 
       const tested = await service.testConnection()
       expect(tested.ok).toBe(true)
@@ -268,7 +278,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     expect(resolveCliExecutable(process.execPath)).toBeTruthy()
 
     const db = new LibraryDatabase(dbPath)
-    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage })
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage, authorizeCli: async () => true })
     const docId = insertSampleDocument(db)
 
     try {
@@ -285,6 +295,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
         }
       })
 
+      await authorizeCurrentSyntheticCli(service)
       const testRes = await service.testConnection()
       expect(testRes.ok).toBe(true)
       expect(testRes.testedProvider).toBe('cli')
@@ -425,7 +436,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     }
 
     const db = new LibraryDatabase(dbPath)
-    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage, env: fakeEnv })
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage, env: fakeEnv, authorizeCli: async () => true })
     const docId = insertSampleDocument(db)
     try {
       db.setSetting(
@@ -452,6 +463,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
           timeoutSec: 30
         }
       })
+      await authorizeCurrentSyntheticCli(service)
       const pageRes = await service.translatePage({
         documentId: docId,
         pageNumber: 1,
@@ -517,7 +529,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     expect(selectionTranslatePrompt).toContain('μs、GB/s')
   })
 
-  test('TranslationService 对批量响应中丢失 ⟪M#⟫ 占位符的块自动单块重试并支持优雅兜底', async () => {
+  test('TranslationService 对批量响应中丢失 ⟪M#⟫ 占位符的块自动单块重试，仅完整结果落库', async () => {
     let callCount = 0
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       callCount += 1
@@ -534,7 +546,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
         }
         return {
           id: item.id,
-          text: item.id === 'blk-drop' ? '计算 ⟪M1⟫ 只需 ⟪M2⟫。' : '稳健兜底译文。'
+          text: item.id === 'blk-drop' ? '计算 ⟪M1⟫ 只需 ⟪M2⟫。' : callCount === 1 ? '缺失公式。' : '稳健重试 ⟪M1⟫。'
         }
       })
       res.setHeader('Content-Type', 'application/json')
@@ -566,7 +578,7 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
       // 第 1 次批量响应丢失了占位符，触发了 2 次单块重试（共 3 次请求），其中 blk-drop 被成功恢复
       expect(callCount).toBe(3)
       expect(res.items.find(i => i.blockId === 'blk-drop')?.translatedText).toBe('计算 ⟪M1⟫ 只需 ⟪M2⟫。')
-      expect(res.items.find(i => i.blockId === 'blk-fallback')?.translatedText).toBe('稳健兜底译文。')
+      expect(res.items.find(i => i.blockId === 'blk-fallback')?.translatedText).toBe('稳健重试 ⟪M1⟫。')
     } finally {
       service.cancelAll()
       db.close()

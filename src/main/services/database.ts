@@ -961,6 +961,7 @@ export class LibraryDatabase {
   }
 
   importAnnotationIfMissing(input: {
+    id?: string
     documentId: string
     pageNumber: number
     color: AnnotationColor
@@ -982,14 +983,22 @@ export class LibraryDatabase {
     })
     const document = this.requireDocument(validated.documentId)
     const note = (validated.note ?? '').trim()
-    const existing = this.database
-      .prepare(`
-        SELECT id FROM annotations
+    const sourceId = input.id === undefined ? undefined : annotationIdSchema.parse(input.id)
+    if (sourceId) {
+      const existing = this.database.prepare('SELECT document_id FROM annotations WHERE id = ?').get(sourceId) as { document_id: string } | undefined
+      if (existing?.document_id === document.id) return false
+      if (existing) throw new Error('备份批注 ID 与其他文献中的批注冲突。')
+    } else {
+      // 旧包不含批注 ID，按完整定位和句子身份比较，不能仅凭同页同词去重。
+      const candidates = this.database.prepare(`
+        SELECT * FROM annotations
         WHERE document_id = ? AND page_number = ? AND color = ? AND quote_text = ? AND note = ?
-        LIMIT 1
-      `)
-      .get(document.id, validated.pageNumber, validated.color, validated.quoteText, note) as { id: string } | undefined
-    if (existing) return false
+      `).all(document.id, validated.pageNumber, validated.color, validated.quoteText, note) as AnnotationRow[]
+      const expectedRects = JSON.stringify(validated.rects)
+      const expectedSentences = JSON.stringify(validated.sentenceIds ?? [])
+      if (candidates.some(row => row.rects_json === expectedRects && row.sentence_ids_json === expectedSentences &&
+        (!input.createdAt || row.created_at === input.createdAt))) return false
+    }
 
     const now = new Date().toISOString()
     this.database
@@ -1000,7 +1009,7 @@ export class LibraryDatabase {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
-        randomUUID(),
+        sourceId ?? randomUUID(),
         document.id,
         validated.pageNumber,
         validated.color,

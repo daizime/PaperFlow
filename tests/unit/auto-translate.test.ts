@@ -121,7 +121,9 @@ describe('auto-translate: PDF 语言识别、引擎配置检查与分文献视�
       }
     ]
 
-    const cliSettings = makeSettings({ provider: 'cli' })
+    const unapprovedCli = makeSettings({ provider: 'cli' })
+    expect(isTranslationEngineConfigured(unapprovedCli, availableCodex)).toBe(false)
+    const cliSettings = { ...unapprovedCli, cli: { ...unapprovedCli.cli, authorized: true } }
     expect(isTranslationEngineConfigured(cliSettings, unavailableCodex)).toBe(false)
     expect(isTranslationEngineConfigured(cliSettings, availableCodex)).toBe(true)
 
@@ -132,6 +134,7 @@ describe('auto-translate: PDF 语言识别、引擎配置检查与分文献视�
           cli: {
             preset: 'custom',
             command: '/tmp/custom-cli.js',
+            authorized: true,
             model: '',
             extraArgs: [],
             timeoutSec: 120

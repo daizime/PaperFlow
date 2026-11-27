@@ -74,7 +74,7 @@ export function isTranslationEngineConfigured(
   }
 
   const cmd = settings.cli.command.trim()
-  if (!cmd) return false
+  if (!cmd || settings.cli.authorized !== true) return false
 
   if (
     (settings.cli.preset === 'codex' || settings.cli.preset === 'gemini') &&

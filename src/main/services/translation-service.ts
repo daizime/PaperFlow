@@ -48,18 +48,18 @@ import { formatSlideDeckMarkdown, parseSlideDeckJson } from './pptx-builder'
 import { readOpenAiStreamOrJsonWithUsage } from './openai-stream'
 import { resolveEffectiveTranslationScope } from './research-profile'
 import { detectProviderBillingKind, mergeTokenUsage, UsageService } from './usage-service'
-
-export interface SafeStorageAdapter {
-  isEncryptionAvailable(): boolean
-  encryptString(plainText: string): Buffer
-  decryptString(encrypted: Buffer): string
-}
+import { matchesFormulaPlaceholders } from '../../shared/formula-placeholders'
+import { normalizeTranslationBaseUrl, TranslationCredentialStore, type SafeStorageAdapter } from './translation-credentials'
+import { cliArgumentTemplate, TranslationCliAuthorization, type CliAuthorizationAdapter } from './translation-cli-authorization'
+export type { SafeStorageAdapter } from './translation-credentials'
+export type { CliAuthorizationRequest, CliAuthorizationAdapter } from './translation-cli-authorization'
 
 export interface TranslationServiceOptions {
   database: LibraryDatabase
   safeStorage?: SafeStorageAdapter
   fetchImpl?: typeof fetch
   env?: NodeJS.ProcessEnv
+  authorizeCli?: CliAuthorizationAdapter
 }
 
 interface StoredTranslationConfig {
@@ -80,7 +80,6 @@ interface StoredTranslationConfig {
 }
 
 const SETTINGS_KEY = 'translation.config.v1'
-const API_KEY_SETTING = 'translation.openaiApiKey.v1'
 const BATCH_MAX_CHARS = 2400
 const BATCH_MAX_ITEMS = 8
 
@@ -117,7 +116,7 @@ function languageLabel(code: string): string {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, '')
+  return normalizeTranslationBaseUrl(baseUrl)
 }
 
 function formatOpenAiHost(baseUrl: string): string {
@@ -469,7 +468,8 @@ export async function detectLocalAiClients(
   env: NodeJS.ProcessEnv = process.env,
   options: { probeVersion?: boolean } = {}
 ): Promise<DetectedLocalAiClient[]> {
-  const probeVersion = options.probeVersion !== false
+  // 发现文件不等于授权运行，默认不执行 --version 探针。
+  const probeVersion = options.probeVersion === true
 
   const detectCodex = async (): Promise<DetectedLocalAiClient> => {
     const pathHit = resolveCliExecutableInternal('codex', env, { includeCodexRuntimeFallback: false })
@@ -670,13 +670,7 @@ export function parseBatchTranslationOutput(
 }
 
 export function hasAllExpectedFormulaPlaceholders(sourceText: string, translatedText: string): boolean {
-  const tokens = sourceText.match(/⟪M\d+⟫/g)
-  if (!tokens || tokens.length === 0) return true
-  const seen = new Set(tokens)
-  for (const token of seen) {
-    if (!translatedText.includes(token)) return false
-  }
-  return true
+  return matchesFormulaPlaceholders(sourceText, translatedText)
 }
 
 export function buildAcademicPrompt(
@@ -803,7 +797,8 @@ function isAbortError(error: unknown): boolean {
 
 export class TranslationService {
   private readonly database: LibraryDatabase
-  private readonly safeStorage?: SafeStorageAdapter
+  private readonly credentials: TranslationCredentialStore
+  private readonly cliAuthorization: TranslationCliAuthorization
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
   private readonly usageService: UsageService
@@ -819,12 +814,14 @@ export class TranslationService {
 
   constructor(options: TranslationServiceOptions) {
     this.database = options.database
-    this.safeStorage = options.safeStorage
+    this.credentials = new TranslationCredentialStore(options.database, options.safeStorage)
+    this.cliAuthorization = new TranslationCliAuthorization(options.database, options.authorizeCli)
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
     this.usageService = new UsageService({
       database: this.database,
-      fetchImpl: this.fetchImpl
+      // 余额请求也不得借 HTTP 重定向把绑定地址的凭据送到其他路径/主机。
+      fetchImpl: (input, init) => this.fetchImpl(input, { ...init, redirect: 'error' })
     })
   }
 
@@ -876,36 +873,8 @@ export class TranslationService {
     }
   }
 
-  private readApiKey(): string | null {
-    const encoded = this.database.getSetting(API_KEY_SETTING)
-    if (!encoded) return null
-    try {
-      if (encoded.startsWith('enc:v1:')) {
-        if (!this.safeStorage?.isEncryptionAvailable()) return null
-        return this.safeStorage.decryptString(Buffer.from(encoded.slice('enc:v1:'.length), 'base64'))
-      }
-      if (encoded.startsWith('plain:v1:')) {
-        return Buffer.from(encoded.slice('plain:v1:'.length), 'base64').toString('utf8')
-      }
-      return null
-    } catch {
-      return null
-    }
-  }
-
-  private writeApiKey(plainKey: string): void {
-    const trimmed = plainKey.trim()
-    if (!trimmed) {
-      this.database.deleteSetting(API_KEY_SETTING)
-      return
-    }
-    if (this.safeStorage?.isEncryptionAvailable()) {
-      const cipher = this.safeStorage.encryptString(trimmed).toString('base64')
-      this.database.setSetting(API_KEY_SETTING, `enc:v1:${cipher}`)
-    } else {
-      const plain = Buffer.from(trimmed, 'utf8').toString('base64')
-      this.database.setSetting(API_KEY_SETTING, `plain:v1:${plain}`)
-    }
+  private readApiKey(baseUrl = this.readStoredConfig().openai.baseUrl): string | null {
+    return this.credentials.read(baseUrl)
   }
 
   getSettings(): TranslationSettings {
@@ -926,7 +895,8 @@ export class TranslationService {
         command: config.cli.command,
         model: config.cli.model,
         extraArgs: config.cli.extraArgs,
-        timeoutSec: config.cli.timeoutSec
+        timeoutSec: config.cli.timeoutSec,
+        authorized: this.cliAuthorization.hasConfiguredAuthorization(config.cli)
       }
     }
   }
@@ -935,11 +905,19 @@ export class TranslationService {
     const validated = saveTranslationSettingsSchema.parse(input)
     const previous = this.readStoredConfig()
     const config = buildStoredConfigFromInput(validated, previous.glossary)
-    this.database.setSetting(SETTINGS_KEY, JSON.stringify(config))
     if (validated.openai.apiKey !== undefined) {
-      this.writeApiKey(validated.openai.apiKey)
+      this.credentials.write(config.openai.baseUrl, validated.openai.apiKey)
     }
+    this.database.setSetting(SETTINGS_KEY, JSON.stringify(config))
     return this.getSettings()
+  }
+
+  async authorizeCliSettings(input: SaveTranslationSettingsInput): Promise<{ authorized: boolean; resolvedCommand: string }> {
+    const validated = saveTranslationSettingsSchema.parse(input)
+    if (validated.provider !== 'cli') return { authorized: false, resolvedCommand: '' }
+    const resolved = await this.resolveCliExecutableAsync(validated.cli.preset, validated.cli.command)
+    if (!resolved) throw new Error('未找到所选本机 CLI 程序，请在翻译设置中选择可执行文件。')
+    return { authorized: await this.cliAuthorization.approve(validated.cli, resolved), resolvedCommand: resolved }
   }
 
   getPageTranslations(documentId: string, pageNumber: number): TranslatedBlockRecord[] {
@@ -1036,9 +1014,9 @@ export class TranslationService {
     if (draft !== undefined) {
       const validated = saveTranslationSettingsSchema.parse(draft)
       config = buildStoredConfigFromInput(validated, storedConfig.glossary)
-      if (validated.openai.apiKey !== undefined) {
-        apiKey = validated.openai.apiKey.trim() || null
-      }
+      apiKey = validated.openai.apiKey !== undefined
+        ? validated.openai.apiKey.trim() || null
+        : this.readApiKey(config.openai.baseUrl)
     }
     return this.usageService.fetchProviderBalance({
       provider: config.provider,
@@ -1082,6 +1060,7 @@ export class TranslationService {
         this.fetchImpl(endpoint, {
           method: 'POST',
           headers,
+          redirect: 'error',
           signal: controller.signal,
           body: JSON.stringify({
             model: config.openai.model,
@@ -1142,7 +1121,7 @@ export class TranslationService {
   }
 
   async detectLocalAiClients(): Promise<DetectedLocalAiClient[]> {
-    return detectLocalAiClients(this.env)
+    return detectLocalAiClients(this.env, { probeVersion: false })
   }
 
   private async resolveCliExecutableAsync(_preset: CliPreset, command: string): Promise<string | null> {
@@ -1163,27 +1142,18 @@ export class TranslationService {
     prompt: string,
     signal: AbortSignal
   ): Promise<{ output: string; resolvedCommand: string }> {
-    const resolved = await this.resolveCliExecutableAsync(config.cli.preset, config.cli.command)
-    if (!resolved) {
+    const located = await this.resolveCliExecutableAsync(config.cli.preset, config.cli.command)
+    if (!located) {
       throw new Error(`未在系统路径或本机客户端目录中找到 CLI 命令「${config.cli.command}」，请检查是否已安装或点击「浏览程序…」选择可执行文件。`)
     }
+    const resolved = await this.cliAuthorization.requireApproved(config.cli, located)
+    if (signal.aborted) throw new Error('翻译任务已取消。')
 
     const workDir = mkdtempSync(join(tmpdir(), 'paperflow-cli-'))
     const codexOutFile = join(workDir, 'codex-last.txt')
     const timeoutMs = config.cli.timeoutSec * 1000
-    const { preset, model, extraArgs } = config.cli
-
-    const args: string[] = []
-    if (preset === 'codex') {
-      args.push('exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '-o', codexOutFile)
-      if (model) args.push('-m', model)
-      args.push(...extraArgs, '-')
-    } else if (preset === 'gemini') {
-      if (model) args.push('-m', model)
-      args.push(...extraArgs)
-    } else {
-      args.push(...extraArgs)
-    }
+    const { preset } = config.cli
+    const args = cliArgumentTemplate(config.cli, codexOutFile)
 
     const isWindows = process.platform === 'win32'
     const ext = extname(resolved).toLowerCase()
@@ -1527,7 +1497,7 @@ export class TranslationService {
     if (config.provider === 'openai-compatible') {
       return Boolean(this.readApiKey())
     }
-    return Boolean(config.cli.command.trim())
+    return this.cliAuthorization.hasConfiguredAuthorization(config.cli)
   }
 
   async completeAcademicTask(options: {
@@ -1703,9 +1673,9 @@ export class TranslationService {
     if (draft !== undefined) {
       const validated = saveTranslationSettingsSchema.parse(draft)
       config = buildStoredConfigFromInput(validated, storedConfig.glossary)
-      if (validated.openai.apiKey !== undefined) {
-        apiKey = validated.openai.apiKey.trim() || null
-      }
+      apiKey = validated.openai.apiKey !== undefined
+        ? validated.openai.apiKey.trim() || null
+        : this.readApiKey(config.openai.baseUrl)
     }
 
     const taskId = randomUUID()
@@ -1793,6 +1763,7 @@ export class TranslationService {
         cached &&
         cached.sourceHash === block.sourceHash &&
         cached.translatedText.trim() &&
+        hasAllExpectedFormulaPlaceholders(block.sourceText, cached.translatedText) &&
         scopeMatches
       ) {
         fromCacheCount += 1
@@ -1842,14 +1813,12 @@ export class TranslationService {
         const mapped = parseBatchTranslationOutput(output, batch)
 
         const missing: TranslationBlockInput[] = []
-        const partialFallback = new Map<string, string>()
         const completedBatch: Array<{ blockId: string; sourceHash: string; translatedText: string }> = []
         for (const block of batch) {
           const text = mapped.get(block.blockId)
           if (text && hasAllExpectedFormulaPlaceholders(block.sourceText, text)) {
             completedBatch.push({ blockId: block.blockId, sourceHash: block.sourceHash, translatedText: text })
           } else {
-            if (text) partialFallback.set(block.blockId, text)
             missing.push(block)
           }
         }
@@ -1873,18 +1842,13 @@ export class TranslationService {
           pageUsage = mergeTokenUsage(pageUsage, singleUsage)
           const singleMapped = parseBatchTranslationOutput(singleOutput, [single])
           const retriedText = singleMapped.get(single.blockId)
-          const firstFallback = partialFallback.get(single.blockId)
-          const translatedText =
-            retriedText && hasAllExpectedFormulaPlaceholders(single.sourceText, retriedText)
-              ? retriedText
-              : retriedText || firstFallback
-          if (!translatedText) {
-            throw new Error(`块 ${single.blockId} 译文解析失败，请重试或切换模型。`)
+          if (!retriedText || !hasAllExpectedFormulaPlaceholders(single.sourceText, retriedText)) {
+            throw new Error(`块 ${single.blockId} 译文解析失败或公式标记不完整，未保存该批译文。请重试或切换模型。`)
           }
           completedBatch.push({
             blockId: single.blockId,
             sourceHash: single.sourceHash,
-            translatedText
+            translatedText: retriedText
           })
         }
 

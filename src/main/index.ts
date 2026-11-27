@@ -40,7 +40,31 @@ app.whenReady().then(async () => {
   mkdirSync(userData, { recursive: true })
   database = new LibraryDatabase(join(userData, 'paperflow.sqlite'))
   const documents = new DocumentService(database, join(userData, 'library'), validatePdfInSandbox)
-  translationService = new TranslationService({ database, safeStorage })
+  translationService = new TranslationService({
+    database,
+    safeStorage,
+    authorizeCli: async request => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) return false
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        title: '授权本机 AI 程序',
+        message: '确认允许 PaperFlow 以你的系统账号运行此程序',
+        detail: [
+          `程序：${request.resolvedExecutable}`,
+          `参数：${request.args.map(argument => JSON.stringify(argument)).join(' ') || '无'}`,
+          `最长运行时间：${request.timeoutSec} 秒`,
+          '',
+          '授权后，这个程序及以上参数可用于连接测试、翻译和其他 AI 功能。'
+        ].join('\n'),
+        buttons: ['取消', '授权此程序和参数'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      return response === 1 && !window.isDestroyed()
+    }
+  })
   const backupService = new BackupService(database, documents)
   const testLitBase = process.env.PAPERFLOW_TEST_LITERATURE_BASE?.trim()
   const literatureSearch = new LiteratureSearchService({

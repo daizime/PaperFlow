@@ -217,6 +217,7 @@ export function WorkspaceTabsBar({
                   type="button"
                   className={viewMode === mode.id ? 'is-selected' : undefined}
                   aria-pressed={viewMode === mode.id}
+                  title={mode.id === 'dual' ? '进入双栏。引擎就绪且暂无译文时，自动预译前两页。' : undefined}
                   onClick={() => onChangeViewMode(mode.id)}
                 >
                   {mode.label}

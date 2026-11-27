@@ -97,6 +97,8 @@ export interface TranslationSettings {
     model: string
     extraArgs: string[]
     timeoutSec: number
+    /** 主进程已确认当前程序和参数，执行前仍会核验程序身份。 */
+    authorized?: boolean
   }
 }
 
@@ -107,7 +109,7 @@ export interface SaveTranslationSettingsInput {
   openai: {
     baseUrl: string
     model: string
-    /** 传 undefined 保留现有密钥；传空字符串清除；传非空字符串覆盖加密存储。 */
+    /** 省略时只可复用绑定至同一 API 地址的密钥；空字符串清除；非空字符串加密保存。 */
     apiKey?: string
   }
   cli: {

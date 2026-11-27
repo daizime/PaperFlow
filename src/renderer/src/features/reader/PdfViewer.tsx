@@ -24,6 +24,8 @@ import {
 import { extractAutoOutlineFromPdf, extractPdfOutline, type PdfOutlineItem } from './pdf-outline'
 import { PdfSearchService, type SearchMatch } from './pdf-search'
 import { useReaderPersistence } from './useReaderPersistence'
+import { renderTranslationPage } from './translation-page-renderer'
+import { navigateVisibleReaderPage, normalizeTranslationPages } from '../translation/translation-viewport'
 import './reader.css'
 import './reader-ux.css'
 
@@ -64,6 +66,8 @@ export type LeftSourceInteractEvent =
 export interface PdfViewerProps {
   document: DocumentRecord; onPageCount(): Promise<void>
   layoutKey?: string
+  translationPageNumbers?: readonly number[]
+  onKeyboardNavigate?(pageNumber: number): void
   onPageData?(pageNumber: number, data: PdfPageData | null): void
   onPageLayout?(pageNumber: number, result: PageLayoutResult | null): void
   onPageBackdrop?(pageNumber: number, backdrop: PageBackdropSnapshot | null): void
@@ -101,6 +105,7 @@ interface NavigationAnchor {
 }
 
 const clampScale = (scale: number): number => Math.min(3, Math.max(0.5, Math.round(scale * 100) / 100))
+const EMPTY_TRANSLATION_PAGES: readonly number[] = []
 
 function isEditableElement(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
@@ -116,6 +121,8 @@ export function PdfViewer({
   document: record,
   onPageCount,
   layoutKey,
+  translationPageNumbers = EMPTY_TRANSLATION_PAGES,
+  onKeyboardNavigate,
   onPageData,
   onPageLayout,
   onPageBackdrop,
@@ -199,6 +206,20 @@ export function PdfViewer({
   const lastAutoFitWidthRef = useRef(0)
   const sizeRef = useRef(size)
   const pageSizesRef = useRef<Record<number, { width: number; height: number }>>({})
+  const translationBackdropReadyRef = useRef<Map<number, string>>(new Map())
+  const translationRenderQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const requestedTranslationPages = useMemo(
+    () => normalizeTranslationPages(translationPageNumbers, pdf?.numPages ?? 0),
+    [translationPageNumbers, pdf]
+  )
+  const requestedTranslationPagesRef = useRef<ReadonlySet<number>>(new Set())
+  const onKeyboardNavigateRef = useRef(onKeyboardNavigate)
+  const devicePixelRatioRef = useRef(devicePixelRatio)
+  useLayoutEffect(() => {
+    requestedTranslationPagesRef.current = new Set(requestedTranslationPages)
+    onKeyboardNavigateRef.current = onKeyboardNavigate
+    devicePixelRatioRef.current = devicePixelRatio
+  }, [requestedTranslationPages, onKeyboardNavigate, devicePixelRatio])
 
   const invalidateFit = useCallback((): void => { fitRequest.current++ }, [])
   const cancelAnchor = useCallback((): void => {
@@ -270,6 +291,7 @@ export function PdfViewer({
     activePdf.current = null
     pageInsetsRef.current = {}
     pageSizesRef.current = {}
+    translationBackdropReadyRef.current.clear()
     autoFitWidthRef.current = true
     lastAutoFitWidthRef.current = 0
     tokens.clear()
@@ -885,6 +907,9 @@ export function PdfViewer({
 
     const dispatchPdfShortcut = (event: KeyboardEvent): void => {
       if (!activePdf.current || loadingRef.current) return
+      const navigateVisible = (page: number): void => navigateVisibleReaderPage(
+        page, activePdf.current?.numPages ?? 0, navigate, onKeyboardNavigateRef.current
+      )
       const activeShortcuts = shortcutsRef.current
       const editable = isEditableElement(document.activeElement) || isEditableElement(event.target)
       const hasModifier = event.ctrlKey || event.metaKey || event.altKey
@@ -908,22 +933,22 @@ export function PdfViewer({
         void fitWidth()
       } else if (matchesShortcutEvent(event, activeShortcuts.prevPage)) {
         event.preventDefault()
-        navigate(current.current - 1)
+        navigateVisible(current.current - 1)
       } else if (matchesShortcutEvent(event, activeShortcuts.nextPage)) {
         event.preventDefault()
-        navigate(current.current + 1)
+        navigateVisible(current.current + 1)
       } else if (matchesShortcutEvent(event, activeShortcuts.firstPage)) {
         event.preventDefault()
-        navigate(1)
+        navigateVisible(1)
       } else if (matchesShortcutEvent(event, activeShortcuts.lastPage)) {
         event.preventDefault()
-        navigate(activePdf.current.numPages)
+        navigateVisible(activePdf.current.numPages)
       } else if (!hasModifier && !event.shiftKey && event.key === 'PageUp') {
         event.preventDefault()
-        navigate(current.current - 1)
+        navigateVisible(current.current - 1)
       } else if (!hasModifier && !event.shiftKey && event.key === 'PageDown') {
         event.preventDefault()
-        navigate(current.current + 1)
+        navigateVisible(current.current + 1)
       }
     }
 
@@ -998,7 +1023,7 @@ export function PdfViewer({
 
   const handlePageData = useCallback((number: number, data: PdfPageData | null): void => {
     const nextToken = (backdropTokensRef.current.get(number) ?? 0) + 1
-    backdropTokensRef.current.set(number, nextToken)
+    if (data || !requestedTranslationPagesRef.current.has(number)) backdropTokensRef.current.set(number, nextToken)
     if (data) {
       const surface = data.element.querySelector<HTMLElement>('.pdf-page-surface')
       if (surface) {
@@ -1019,16 +1044,57 @@ export function PdfViewer({
               bitmap.close()
               return
             }
+            translationBackdropReadyRef.current.set(number, `${data.geometry.viewport.scale}:${devicePixelRatioRef.current}`)
             onPageBackdropRef.current?.(number, { bitmap, blockColors })
           })
           .catch(() => {})
       }
     } else {
       renderedPagesRef.current.delete(number)
-      onPageBackdropRef.current?.(number, null)
+      if (!requestedTranslationPagesRef.current.has(number)) {
+        translationBackdropReadyRef.current.delete(number)
+        onPageBackdropRef.current?.(number, null)
+      }
     }
     onPageDataRef.current?.(number, data)
   }, [record.id])
+
+  useEffect(() => {
+    if (!pdf || loading || error) return
+    const wanted = new Set(requestedTranslationPages)
+    for (const number of translationBackdropReadyRef.current.keys()) {
+      if (!wanted.has(number) && !renderedPagesRef.current.has(number)) {
+        translationBackdropReadyRef.current.delete(number)
+        onPageBackdropRef.current?.(number, null)
+      }
+    }
+    const controller = new AbortController()
+    const signature = `${scale}:${devicePixelRatio}`
+    const documentId = record.id
+    // 按需任务串行执行，快速滚动取消旧轮次；只保留源栏或译文可视范围内的底图。
+    const work = translationRenderQueueRef.current.then(async () => {
+      for (const number of requestedTranslationPages) {
+        if (controller.signal.aborted || activePdf.current !== pdf) return
+        if (translationBackdropReadyRef.current.get(number) === signature) continue
+        const result = await renderTranslationPage(pdf, number, scale, devicePixelRatio, controller.signal)
+        if (!result) continue
+        if (controller.signal.aborted || activePdf.current !== pdf || activeDocument.current !== documentId ||
+            !requestedTranslationPagesRef.current.has(number) || scaleRef.current !== scale) {
+          result.backdrop.bitmap.close()
+          continue
+        }
+        translationBackdropReadyRef.current.set(number, signature)
+        onPageLayoutRef.current?.(number, result.layout)
+        onPageBackdropRef.current?.(number, result.backdrop)
+        sizeCallback(number, result.size)
+        // 后台只补缺；源栏按首次像素测得的裁剪比例同时决定其本地页框与镜像，不能被其他倍率覆盖。
+        if (pageInsetsRef.current[number] === undefined) insetsCallback(number, result.insets)
+        textCallback(number, result.layout.hasText)
+      }
+    })
+    translationRenderQueueRef.current = work.catch(() => {})
+    return () => controller.abort()
+  }, [pdf, loading, error, record.id, requestedTranslationPages, scale, devicePixelRatio, sizeCallback, insetsCallback, textCallback])
 
   const measureHeaderOffset = useCallback((): void => {
     const body = bodyRef.current

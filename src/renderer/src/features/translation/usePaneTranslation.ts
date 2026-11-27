@@ -25,6 +25,7 @@ import {
 import { hitTestPageSentence, matchSelectionRegionsToSentences } from './sentence-alignment'
 import { countTranslatedBlocks, type TargetSentenceSelection } from './TranslationPanel'
 import { useDualScrollSync } from './useDualScrollSync'
+import { normalizeTranslationPages, sameTranslationPages } from './translation-viewport'
 
 export type ActivePaneSentenceLink = ActiveSentenceLink
 
@@ -62,6 +63,7 @@ export function usePaneTranslation({
   const [pdfScrollEl, setPdfScrollEl] = useState<HTMLDivElement | null>(null)
   const [translationScrollEl, setTranslationScrollEl] = useState<HTMLDivElement | null>(null)
   const [activeLink, setActiveLink] = useState<ActivePaneSentenceLink | null>(null)
+  const [visiblePageNumbers, setVisiblePageNumbers] = useState<readonly number[]>([])
 
   const documentIdRef = useRef(documentId)
   documentIdRef.current = documentId
@@ -88,6 +90,7 @@ export function usePaneTranslation({
     setRetranslatingBlockKeys(new Set())
     setTranslationError(null)
     setActiveLink(null)
+    setVisiblePageNumbers([])
 
     return () => {
       // 切换或关闭分栏时保留主进程正在执行的整页翻译任务，让其继续写完 SQLite 缓存
@@ -101,6 +104,11 @@ export function usePaneTranslation({
       setTranslationsByPage(prev => mergePageTranslationRecords(prev, event.pageNumber, event.items))
     })
   }, [])
+
+  const handleVisiblePagesChange = useCallback((pages: readonly number[]): void => {
+    const normalized = normalizeTranslationPages(pages, mirror.pageCount)
+    setVisiblePageNumbers(previous => sameTranslationPages(previous, normalized) ? previous : normalized)
+  }, [mirror.pageCount])
 
   const loadPageCache = useCallback(async (targetDocId: string, pageNumber: number): Promise<void> => {
     try {
@@ -120,7 +128,7 @@ export function usePaneTranslation({
     if (viewMode !== 'source' && mirror.pageCount > 0) {
       const minPage = Math.max(1, mirror.currentPage - 1)
       const maxPage = Math.min(mirror.pageCount, mirror.currentPage + 1)
-      for (let p = minPage; p <= maxPage; p += 1) {
+      for (const p of new Set([...visiblePageNumbers, ...Array.from({ length: maxPage - minPage + 1 }, (_, index) => minPage + index)])) {
         queriedCachePagesRef.current.add(p)
         void loadPageCache(documentId, p)
       }
@@ -136,13 +144,13 @@ export function usePaneTranslation({
     if (viewMode === 'source' || !documentId || mirror.pageCount <= 0) return
     const minPage = Math.max(1, mirror.currentPage - 1)
     const maxPage = Math.min(mirror.pageCount, mirror.currentPage + 1)
-    for (let p = minPage; p <= maxPage; p += 1) {
+    for (const p of new Set([...visiblePageNumbers, ...Array.from({ length: maxPage - minPage + 1 }, (_, index) => minPage + index)])) {
       if (!queriedCachePagesRef.current.has(p)) {
         queriedCachePagesRef.current.add(p)
         void loadPageCache(documentId, p)
       }
     }
-  }, [viewMode, documentId, mirror.currentPage, mirror.pageCount, loadPageCache])
+  }, [viewMode, documentId, mirror.currentPage, mirror.pageCount, visiblePageNumbers, loadPageCache])
 
   const layouts = useMemo(() => refineDocumentHeadersFooters(rawLayouts), [rawLayouts])
   layoutsRef.current = layouts
@@ -450,6 +458,8 @@ export function usePaneTranslation({
   }, [activeLink, scrollSyncLocked, viewMode, pdfScrollEl, translationScrollEl])
 
   return {
+    visiblePageNumbers,
+    handleVisiblePagesChange,
     layouts,
     backdrops,
     translationsByPage,

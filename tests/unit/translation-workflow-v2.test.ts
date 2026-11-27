@@ -107,7 +107,7 @@ describe('轨道一：批量翻译范围解析、参考文献识别、单段手�
       service.saveSettings({
         provider: 'openai-compatible',
         targetLanguage: 'zh-CN',
-        openai: { baseUrl: 'https://api.example.com/v1', model: 'mock-m1', apiKey: 'sk-test-1' },
+        openai: { baseUrl: 'https://api.example.com/v1', model: 'mock-m1' },
         cli: { preset: 'codex', command: 'codex', model: '', extraArgs: [], timeoutSec: 60 }
       })
 

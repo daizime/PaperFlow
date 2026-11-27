@@ -251,6 +251,19 @@ export function SplitPdfPane({
 
   const paneTranslationRef = useRef(paneTranslation)
   paneTranslationRef.current = paneTranslation
+  const navigateVisiblePage = useCallback((pageNumber: number): void => {
+    navigateToPageRef.current?.(pageNumber)
+    if (paneViewModeRef.current === 'translation') {
+      paneTranslationRef.current.translationScrollEl
+        ?.querySelector<HTMLElement>(`.translation-page[data-page-number="${pageNumber}"]`)
+        ?.scrollIntoView({ block: 'start', behavior: 'auto' })
+    }
+  }, [])
+  const handleTranslationCurrentPage = useCallback((pageNumber: number): void => {
+    if (paneViewModeRef.current === 'translation' && mirrorRef.current.currentPage !== pageNumber) {
+      navigateToPageRef.current?.(pageNumber)
+    }
+  }, [])
   const documentIdRef = useRef(document.id)
   documentIdRef.current = document.id
   const outlineRequestIdRef = useRef(0)
@@ -476,14 +489,7 @@ export function SplitPdfPane({
         if (!fn) return null
         return fn(pageNumber, kind, captionBounds, obstacleBounds)
       },
-      navigateToPage: pageNumber => {
-        navigateToPageRef.current?.(pageNumber)
-        if (paneViewModeRef.current === 'translation') {
-          paneTranslationRef.current.translationScrollEl
-            ?.querySelector<HTMLElement>(`.translation-page[data-page-number="${pageNumber}"]`)
-            ?.scrollIntoView({ block: 'start' })
-        }
-      },
+      navigateToPage: navigateVisiblePage,
       highlightAnnotation: annotation => {
         paneTranslationRef.current.highlightAnnotation(annotation)
       },
@@ -504,7 +510,7 @@ export function SplitPdfPane({
     return () => {
       onRegisterStudyHandle(pane.id, null)
     }
-  }, [pane.id, extractPageTextRef, onRegisterStudyHandle])
+  }, [pane.id, extractPageTextRef, onRegisterStudyHandle, navigateVisiblePage])
 
   const slotLabel = formatPaneSlotLabel(index, totalPanes)
   const testId = index === 1 ? 'split-pane-secondary' : `split-pane-${index}`
@@ -524,15 +530,7 @@ export function SplitPdfPane({
       scale={mirror.scale}
       disabled={mirror.toolbarDisabled}
       cropMargins={mirror.cropMargins}
-      onNavigate={page => {
-        navigateToPageRef.current?.(page)
-        if (paneViewMode === 'translation') {
-          const el = paneTranslation.translationScrollEl?.querySelector<HTMLElement>(
-            `.translation-page[data-page-number="${page}"]`
-          )
-          el?.scrollIntoView({ block: 'start', behavior: 'auto' })
-        }
-      }}
+      onNavigate={navigateVisiblePage}
       onScale={next => toolbarActionsRef.current?.setScale(next)}
       onFitWidth={() => toolbarActionsRef.current?.fitWidth()}
       onToggleCropMargins={() => toolbarActionsRef.current?.toggleCropMargins()}
@@ -737,6 +735,8 @@ export function SplitPdfPane({
             key={`${pane.id}-${document.id}`}
             document={document}
             layoutKey={paneViewMode}
+            translationPageNumbers={paneViewMode === 'source' ? undefined : paneTranslation.visiblePageNumbers}
+            onKeyboardNavigate={paneViewMode === 'translation' ? navigateVisiblePage : undefined}
             isActivePane={isFocused}
             shortcuts={shortcuts}
             onPageCount={onPageCount}
@@ -763,6 +763,9 @@ export function SplitPdfPane({
         {paneViewMode !== 'source' ? (
           <TranslationPanel
             hasDocument
+            documentId={document.id}
+            onVisiblePagesChange={paneTranslation.handleVisiblePagesChange}
+            onCurrentPageChange={paneViewMode === 'translation' ? handleTranslationCurrentPage : undefined}
             mirror={mirror}
             layouts={paneTranslation.layouts}
             backdrops={paneTranslation.backdrops}

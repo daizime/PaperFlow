@@ -98,9 +98,11 @@ import { CitationModal } from './features/study/CitationModal'
 import { ShortcutsModal } from './features/study/ShortcutsModal'
 import {
   CUSTOM_SHORTCUTS_STORAGE_KEY,
+  findShortcutConflict,
   loadStoredShortcuts,
   matchesShortcutEvent,
   mergeShortcuts,
+  resetShortcut,
   saveStoredShortcuts,
   type ShortcutActionId,
   type ShortcutOverrides
@@ -121,6 +123,7 @@ import {
   buildPageTranslationInputs,
   buildSingleBlockTranslationInput,
   isSamePageLayout,
+  isUsableTranslation,
   mergePageTranslationRecords,
   reduceLeftSourceInteract,
   reduceRightSentenceSelect,
@@ -138,6 +141,7 @@ import {
   type UnconfiguredEnginePromptState
 } from './features/translation/auto-translate'
 import { useDualScrollSync } from './features/translation/useDualScrollSync'
+import { matchesFormulaPlaceholders } from '../../shared/formula-placeholders'
 import { LibraryPanel } from './features/library/LibraryPanel'
 import { LiteratureSearchModal } from './features/library/LiteratureSearchModal'
 import { useLibrary } from './features/library/useLibrary'
@@ -262,6 +266,7 @@ export default function App(): React.JSX.Element {
   const [scrollSyncLocked, setScrollSyncLocked] = useState(true)
   const [pdfScrollEl, setPdfScrollEl] = useState<HTMLDivElement | null>(null)
   const [translationScrollEl, setTranslationScrollEl] = useState<HTMLDivElement | null>(null)
+  const [translationVisiblePages, setTranslationVisiblePages] = useState<{ documentId: string; pages: readonly number[] } | null>(null)
   const [mirrorState, setMirrorState] = useState<ReaderMirrorState>(INITIAL_MIRROR_STATE)
   const [rawLayouts, setRawLayouts] = useState<Map<number, PageLayoutResult>>(() => new Map())
   const [backdrops, setBackdrops] = useState<Map<number, PageBackdropSnapshot>>(() => new Map())
@@ -303,6 +308,7 @@ export default function App(): React.JSX.Element {
   const shortcuts = useMemo(() => mergeShortcuts(shortcutOverrides), [shortcutOverrides])
   const handleUpdateShortcut = useCallback((actionId: ShortcutActionId, combo: string): void => {
     setShortcutOverrides(prev => {
+      if (findShortcutConflict(mergeShortcuts(prev), actionId, combo)) return prev
       const next: ShortcutOverrides = { ...prev, [actionId]: combo }
       saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, next, CUSTOM_SHORTCUTS_STORAGE_KEY)
       return next
@@ -310,8 +316,8 @@ export default function App(): React.JSX.Element {
   }, [])
   const handleSwapShortcuts = useCallback(
     (actionA: ShortcutActionId, actionB: ShortcutActionId): void => {
-      const currentMap = mergeShortcuts(shortcutOverrides)
       setShortcutOverrides(prev => {
+        const currentMap = mergeShortcuts(prev)
         const next: ShortcutOverrides = {
           ...prev,
           [actionA]: currentMap[actionB],
@@ -321,13 +327,12 @@ export default function App(): React.JSX.Element {
         return next
       })
     },
-    [shortcutOverrides]
+    []
   )
   const handleResetShortcut = useCallback((actionId: ShortcutActionId): void => {
     setShortcutOverrides(prev => {
       if (!(actionId in prev)) return prev
-      const next: ShortcutOverrides = { ...prev }
-      delete next[actionId]
+      const next = resetShortcut(prev, actionId)
       saveStoredShortcuts(typeof localStorage !== 'undefined' ? localStorage : null, next, CUSTOM_SHORTCUTS_STORAGE_KEY)
       return next
     })
@@ -483,6 +488,7 @@ export default function App(): React.JSX.Element {
   const backdropMapRef = useRef<Map<number, PageBackdropSnapshot>>(new Map())
   const queriedCachePagesRef = useRef<Set<number>>(new Set())
   const autoTitleAttemptedRef = useRef<Set<string>>(new Set())
+  const autoTranslateRequestedDocumentRef = useRef<string | null>(null)
   const autoTranslateEvaluatedRef = useRef<Set<string>>(new Set())
   const autoTranslateInFlightRef = useRef<Set<string>>(new Set())
   const settingsFromUnconfiguredPromptRef = useRef<string | null>(null)
@@ -515,10 +521,17 @@ export default function App(): React.JSX.Element {
   }, [])
 
   const setViewMode = useCallback(
-    (updater: ReaderViewMode | ((curr: ReaderViewMode) => ReaderViewMode)): void => {
+    (updater: ReaderViewMode | ((curr: ReaderViewMode) => ReaderViewMode), requestPretranslation = false): void => {
       const targetDocId = selectedDocumentIdRef.current
       if (!targetDocId) return
       const nextMode = typeof updater === 'function' ? updater(viewModeRef.current) : updater
+      if (nextMode === 'dual' && requestPretranslation) {
+        autoTranslateRequestedDocumentRef.current = targetDocId
+        setAutoTranslateRetryTick(tick => tick + 1)
+      } else if (nextMode !== 'dual') {
+        autoTranslateRequestedDocumentRef.current = null
+        setUnconfiguredPrompt(null)
+      }
       persistDocViewMode(targetDocId, nextMode)
     },
     [persistDocViewMode]
@@ -712,6 +725,8 @@ export default function App(): React.JSX.Element {
   const primaryPane = resolvedPanes[0] ?? null
   const primaryPaneId = primaryPane?.pane.id ?? PRIMARY_PANE_ID
   const isCompareMode = resolvedPanes.length >= 2
+  const isCompareModeRef = useRef(isCompareMode)
+  isCompareModeRef.current = isCompareMode
   const effectiveActivePaneId = resolvedPanes.some(item => item.pane.id === activePaneId)
     ? activePaneId
     : primaryPaneId
@@ -1176,6 +1191,7 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (autoTranslateRequestedDocumentRef.current !== selectedDocumentId) autoTranslateRequestedDocumentRef.current = null
     queriedCachePagesRef.current.clear()
     explainRequestIdRef.current += 1
     peekRequestIdRef.current += 1
@@ -1378,6 +1394,27 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  const handleTranslationVisiblePages = useCallback((pages: readonly number[]): void => {
+    if (!selectedDocumentId || selectedDocumentIdRef.current !== selectedDocumentId) return
+    setTranslationVisiblePages(previous =>
+      previous?.documentId === selectedDocumentId && previous.pages.length === pages.length &&
+      previous.pages.every((page, index) => page === pages[index])
+        ? previous : { documentId: selectedDocumentId, pages }
+    )
+  }, [selectedDocumentId])
+
+  const visibleTranslationPages = translationVisiblePages?.documentId === selectedDocumentId
+    ? translationVisiblePages.pages : undefined
+
+  useEffect(() => {
+    if (!selectedDocumentId || !visibleTranslationPages || effectivePrimaryViewMode === 'source') return
+    for (const pageNumber of visibleTranslationPages) {
+      if (queriedCachePagesRef.current.has(pageNumber)) continue
+      queriedCachePagesRef.current.add(pageNumber)
+      void loadPageCache(selectedDocumentId, pageNumber)
+    }
+  }, [selectedDocumentId, visibleTranslationPages, effectivePrimaryViewMode, loadPageCache])
+
   // 翻页时清理前一页遗留的翻译错误横幅，并预读邻近页 SQLite 缓存
   useEffect(() => {
     setTranslationError(null)
@@ -1492,6 +1529,10 @@ export default function App(): React.JSX.Element {
     async (pageNumber: number, blockKey: string, sourceHash: string, translatedText: string): Promise<void> => {
       const targetDocumentId = selectedDocumentIdRef.current
       if (!targetDocumentId) return
+      const source = buildSingleBlockTranslationInput(layoutsRef.current.get(pageNumber), blockKey)
+      if (source?.sourceHash === sourceHash && !matchesFormulaPlaceholders(source.sourceText, translatedText)) {
+        throw new Error('请保留译文中的所有公式占位符。')
+      }
       const updated = await window.paperflow.updateBlockTranslation({
         documentId: targetDocumentId,
         pageNumber,
@@ -1659,10 +1700,9 @@ export default function App(): React.JSX.Element {
             }
           }
 
-          const allCached = allBlocks.every(block => {
-            const cached = pageMap?.get(block.blockId)
-            return Boolean(cached && cached.sourceHash === block.sourceHash && cached.translatedText.trim().length > 0)
-          })
+          const allCached = allBlocks.every(block =>
+            isUsableTranslation(pageMap?.get(block.blockId), block.sourceHash, block.sourceText)
+          )
           if (!allCached) {
             setDocTranslatingPage(targetDocumentId, pageNumber)
             const result = await window.paperflow.translatePage({
@@ -1781,7 +1821,7 @@ export default function App(): React.JSX.Element {
             for (const block of buildPageTranslationInputs(layout)) {
               const matched = byBlockId.get(block.blockId)
               const translatedText =
-                matched && matched.sourceHash === block.sourceHash && matched.translatedText.trim()
+                isUsableTranslation(matched, block.sourceHash, block.sourceText)
                   ? matched.translatedText.trim()
                   : null
               blocks.push({
@@ -1876,10 +1916,9 @@ export default function App(): React.JSX.Element {
           .getPageTranslations(selectedDocumentId, nextPage)
           .catch(() => [] as TranslatedBlockRecord[])
         const cachedById = new Map(cachedRows.map(r => [r.blockId, r]))
-        const allCached = blocks.every(block => {
-          const hit = cachedById.get(block.blockId)
-          return Boolean(hit && hit.sourceHash === block.sourceHash && hit.translatedText.trim())
-        })
+        const allCached = blocks.every(block =>
+          isUsableTranslation(cachedById.get(block.blockId), block.sourceHash, block.sourceText)
+        )
         if (allCached || cancelled || selectedDocumentIdRef.current !== selectedDocumentId) return
 
         const result = await window.paperflow
@@ -1914,10 +1953,12 @@ export default function App(): React.JSX.Element {
     handleTranslationCompleted
   ])
 
-  // 打开未翻译的非中文 PDF 时自动预译前两页；若引擎未配置则弹出可点击跳转设置的提醒小窗
+  // 用户主动打开原译双栏后，为尚无译文的非中文文献预译前两页。
   useEffect(() => {
     if (
       !selectedDocumentId ||
+      autoTranslateRequestedDocumentRef.current !== selectedDocumentId ||
+      viewMode !== 'dual' ||
       isCompareMode ||
       mirrorState.pageCount <= 0 ||
       mirrorState.toolbarDisabled ||
@@ -1943,6 +1984,8 @@ export default function App(): React.JSX.Element {
     const currentSettings = translationSettings
     const doc = docByIdRef.current.get(targetDocId)
     const docTitle = doc?.displayTitle || doc?.originalFilename || ''
+    const stillRequested = (): boolean => selectedDocumentIdRef.current === targetDocId &&
+      autoTranslateRequestedDocumentRef.current === targetDocId && viewModeRef.current === 'dual' && !isCompareModeRef.current
 
     autoTranslateEvaluatedRef.current.add(targetDocId)
     autoTranslateInFlightRef.current.add(targetDocId)
@@ -1953,21 +1996,21 @@ export default function App(): React.JSX.Element {
       let ownedToken: { aborted: boolean } | null = null
 
       try {
-        const existingPages = await window.paperflow.listDocumentTranslations(targetDocId).catch(() => [])
+        const existingPages = await window.paperflow.listDocumentTranslations(targetDocId)
         const hasAnyTranslated = existingPages.some(page =>
           page.items.some(item => item.translatedText.trim().length > 0)
         )
         if (hasAnyTranslated) {
           return
         }
-        if (selectedDocumentIdRef.current !== targetDocId) {
+        if (!stillRequested()) {
           autoTranslateEvaluatedRef.current.delete(targetDocId)
           return
         }
 
         const page1Layout =
           layoutsRef.current.get(1) ?? (await analyzePageRef.current?.(1).catch(() => null)) ?? null
-        if (!page1Layout || selectedDocumentIdRef.current !== targetDocId) {
+        if (!page1Layout || !stillRequested()) {
           autoTranslateEvaluatedRef.current.delete(targetDocId)
           return
         }
@@ -1981,7 +2024,7 @@ export default function App(): React.JSX.Element {
         if (lang === 'insufficient' && totalPageCount >= 2) {
           page2Layout =
             layoutsRef.current.get(2) ?? (await analyzePageRef.current?.(2).catch(() => null)) ?? null
-          if (selectedDocumentIdRef.current !== targetDocId) {
+          if (!stillRequested()) {
             autoTranslateEvaluatedRef.current.delete(targetDocId)
             return
           }
@@ -2004,20 +2047,21 @@ export default function App(): React.JSX.Element {
           currentSettings.cli.command.trim().toLowerCase() === currentSettings.cli.preset
         ) {
           detectedClients = await window.paperflow.detectLocalAiClients().catch(() => null)
-          if (selectedDocumentIdRef.current !== targetDocId) {
+          if (!stillRequested()) {
             autoTranslateEvaluatedRef.current.delete(targetDocId)
             return
           }
         }
 
         if (!isTranslationEngineConfigured(currentSettings, detectedClients)) {
-          if (selectedDocumentIdRef.current === targetDocId) {
+          if (stillRequested()) {
             setUnconfiguredPrompt({ documentId: targetDocId, documentTitle: docTitle })
           }
           return
         }
 
         if (
+          !stillRequested() ||
           translatingPagesByDocIdRef.current[targetDocId] !== undefined ||
           batchQueuesByDocIdRef.current[targetDocId] !== undefined
         ) {
@@ -2045,7 +2089,7 @@ export default function App(): React.JSX.Element {
 
         for (let idx = 0; idx < targetPages.length; idx += 1) {
           const pageNumber = targetPages[idx]
-          if (ownedToken.aborted) break
+          if (ownedToken.aborted || !stillRequested()) break
           setDocBatchQueue(targetDocId, {
             currentPage: pageNumber,
             completedPages: idx,
@@ -2076,7 +2120,7 @@ export default function App(): React.JSX.Element {
             }
             layout = await analyzeStandalonePdfPage(bgPdfDoc, pageNumber)
           }
-          if (ownedToken.aborted || !layout) continue
+          if (ownedToken.aborted || !stillRequested() || !layout) continue
 
           const allBlocks = buildPageTranslationInputs(layout)
           if (allBlocks.length === 0) continue
@@ -2099,11 +2143,10 @@ export default function App(): React.JSX.Element {
             }
           }
 
-          const allCached = allBlocks.every(block => {
-            const hit = pageMap?.get(block.blockId)
-            return Boolean(hit && hit.sourceHash === block.sourceHash && hit.translatedText.trim().length > 0)
-          })
-          if (allCached || ownedToken.aborted) continue
+          const allCached = allBlocks.every(block =>
+            isUsableTranslation(pageMap?.get(block.blockId), block.sourceHash, block.sourceText)
+          )
+          if (allCached || ownedToken.aborted || !stillRequested()) continue
 
           setDocTranslatingPage(targetDocId, pageNumber)
           const result = await window.paperflow.translatePage({
@@ -2168,6 +2211,7 @@ export default function App(): React.JSX.Element {
   }, [
     selectedDocumentId,
     isCompareMode,
+    viewMode,
     mirrorState.pageCount,
     mirrorState.toolbarDisabled,
     translationSettings,
@@ -2286,6 +2330,21 @@ export default function App(): React.JSX.Element {
   const resolvedPanesRef = useRef(resolvedPanes)
   resolvedPanesRef.current = resolvedPanes
 
+  const navigatePrimaryReader = useCallback((pageNumber: number): void => {
+    navigateToPageRef.current?.(pageNumber)
+    if (effectivePrimaryViewModeRef.current === 'translation') {
+      translationScrollElRef.current
+        ?.querySelector<HTMLElement>(`.translation-page[data-page-number="${pageNumber}"]`)
+        ?.scrollIntoView({ block: 'start' })
+    }
+  }, [])
+
+  const handleTranslationCurrentPage = useCallback((pageNumber: number): void => {
+    if (effectivePrimaryViewModeRef.current === 'translation' && mirrorStateRef.current.currentPage !== pageNumber) {
+      navigateToPageRef.current?.(pageNumber)
+    }
+  }, [])
+
   const resolvePaneHandle = useCallback((paneId: string): PaneStudyHandle | null => {
     const primaryId = primaryPaneIdRef.current
     if (paneId === primaryId || (!paneId && selectedDocumentIdRef.current)) {
@@ -2327,14 +2386,7 @@ export default function App(): React.JSX.Element {
           if (!fn) return null
           return fn(pageNumber, kind, captionBounds, obstacleBounds)
         },
-        navigateToPage: pageNumber => {
-          navigateToPageRef.current?.(pageNumber)
-          if (effectivePrimaryViewModeRef.current === 'translation') {
-            translationScrollElRef.current
-              ?.querySelector<HTMLElement>(`.translation-page[data-page-number="${pageNumber}"]`)
-              ?.scrollIntoView({ block: 'start' })
-          }
-        },
+        navigateToPage: navigatePrimaryReader,
         highlightAnnotation: annotation => {
           const layout = layoutsRef.current.get(annotation.pageNumber)
           let resolvedSentenceIds = [...annotation.sentenceIds]
@@ -2410,7 +2462,7 @@ export default function App(): React.JSX.Element {
       }
     }
     return paneStudyHandlesRef.current.get(paneId) ?? null
-  }, [clearOtherSecondarySelections])
+  }, [clearOtherSecondarySelections, navigatePrimaryReader])
 
   const primarySelection = useMemo((): PaneSelectionSnapshot | null => {
     if (!activeLink || !selectedDocumentId) return null
@@ -3541,7 +3593,7 @@ export default function App(): React.JSX.Element {
             })
           )
         } else {
-          setViewMode(curr => (curr === 'dual' ? 'translation' : curr === 'translation' ? 'source' : 'dual'))
+          setViewMode(curr => (curr === 'dual' ? 'translation' : curr === 'translation' ? 'source' : 'dual'), true)
         }
       } else if (matchesShortcutEvent(event, shortcuts.toggleOutline)) {
         event.preventDefault()
@@ -4052,7 +4104,7 @@ export default function App(): React.JSX.Element {
             if (viewMode === 'translation') setViewMode('dual')
             toolbarActionsRef.current?.toggleSearch()
           }}
-          onChangeViewMode={setViewMode}
+          onChangeViewMode={mode => setViewMode(mode, true)}
           onCancelTranslation={() => handleCancelTranslation()}
           onTranslatePage={(pageNumber, force) => {
             void handleTranslatePage(pageNumber, force)
@@ -4129,6 +4181,7 @@ export default function App(): React.JSX.Element {
             if (ok) {
               autoTranslateEvaluatedRef.current.clear()
               autoTranslateInFlightRef.current.clear()
+              autoTranslateRequestedDocumentRef.current = null
               settingsFromUnconfiguredPromptRef.current = null
               setUnconfiguredPrompt(null)
               setDocViewModes({})
@@ -4397,6 +4450,8 @@ export default function App(): React.JSX.Element {
                     key={primaryPane.document.id}
                     document={primaryPane.document}
                     layoutKey={primaryPaneViewMode}
+                    translationPageNumbers={primaryPaneViewMode === 'source' ? undefined : visibleTranslationPages}
+                    onKeyboardNavigate={primaryPaneViewMode === 'translation' ? navigatePrimaryReader : undefined}
                     isActivePane={effectiveActivePaneId === primaryPane.pane.id}
                     shortcuts={shortcuts}
                     onPageCount={library.refresh}
@@ -4423,6 +4478,9 @@ export default function App(): React.JSX.Element {
                 {primaryPaneViewMode !== 'source' ? (
                   <TranslationPanel
                     hasDocument
+                    documentId={primaryPane.document.id}
+                    onVisiblePagesChange={handleTranslationVisiblePages}
+                    onCurrentPageChange={primaryPaneViewMode === 'translation' ? handleTranslationCurrentPage : undefined}
                     mirror={mirrorState}
                     layouts={layouts}
                     backdrops={backdrops}
@@ -4547,6 +4605,8 @@ export default function App(): React.JSX.Element {
                   key={library.selected.id}
                   document={library.selected}
                   layoutKey={viewMode}
+                  translationPageNumbers={viewMode === 'source' ? undefined : visibleTranslationPages}
+                  onKeyboardNavigate={viewMode === 'translation' ? navigatePrimaryReader : undefined}
                   isActivePane
                   shortcuts={shortcuts}
                   onPageCount={library.refresh}
@@ -4598,6 +4658,9 @@ export default function App(): React.JSX.Element {
             {!hasDocument || viewMode !== 'source' ? (
               <TranslationPanel
                 hasDocument={hasDocument}
+                documentId={selectedDocumentId}
+                onVisiblePagesChange={handleTranslationVisiblePages}
+                onCurrentPageChange={viewMode === 'translation' ? handleTranslationCurrentPage : undefined}
                 mirror={mirrorState}
                 layouts={layouts}
                 backdrops={backdrops}

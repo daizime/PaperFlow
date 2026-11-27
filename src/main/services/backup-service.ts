@@ -31,7 +31,7 @@ import {
   mergeGlossaryIntoSettings,
   readResearchProfile
 } from './research-profile'
-import { createZipBuffer, readZipBuffer, type ZipInputEntry } from './zip-archive'
+import { assertZipInputLimits, createZipBuffer, readZipBuffer, type ReadZipOptions, type ZipInputEntry } from './zip-archive'
 
 const backupDocumentSchema = z.object({
   id: z.string().min(1),
@@ -56,6 +56,7 @@ const backupDocumentSchema = z.object({
 })
 
 const backupAnnotationSchema = z.object({
+  id: z.uuid().optional(),
   documentSha256: z.string().regex(/^[a-f0-9]{64}$/),
   pageNumber: z.number().int().min(1),
   color: annotationColorSchema,
@@ -231,36 +232,38 @@ function restoreFoldersFromBackup(
 ): Map<string, string> {
   const idMap = new Map<string, string>()
   if (incomingFolders.length === 0) return idMap
-
+  if (new Set(incomingFolders.map(folder => folder.id)).size !== incomingFolders.length) {
+    throw new Error('备份清单包含重复的分类文件夹 ID。')
+  }
+  // 旧包已有 UUID，映射仅保存在目标库中；旧包重导也能识别本轮曾创建的分类。
+  const mappingKey = 'backup.folder-id-map.v1'
+  let persistedMap: Record<string, string> = {}
+  try {
+    const checked = z.record(z.uuid(), z.uuid()).safeParse(JSON.parse(database.getSetting(mappingKey) ?? '{}'))
+    if (checked.success) persistedMap = checked.data
+  } catch { /* 旧库没有映射或设置损坏时，使用下方语义匹配。 */ }
   const pending = [...incomingFolders]
   const existingFolders = database.listFolders()
+  const claimedTargets = new Set<string>()
+  const glossarySignature = (folder: LibraryFolder): string => JSON.stringify(folder.glossary
+    .map(entry => [entry.source.trim().toLowerCase(), entry.target.trim()])
+    .sort((left, right) => left[0].localeCompare(right[0])))
+  const sameContext = (left: LibraryFolder, right: LibraryFolder): boolean =>
+    left.facultyId === right.facultyId && left.contextSummary === right.contextSummary &&
+    left.inheritGlobalGlossary === right.inheritGlobalGlossary && glossarySignature(left) === glossarySignature(right)
 
   const applyFolder = (src: LibraryFolder, parentId: string | null): void => {
-    const matched = existingFolders.find(
-      f => (f.parentId ?? null) === parentId && f.name.trim().toLowerCase() === src.name.trim().toLowerCase()
-    )
+    const mappedId = persistedMap[src.id]
+    // 一个目标分类在本轮只可对应一个源分类，不能按名称合并两个合法同名兄弟。
+    const available = existingFolders.filter(folder => !claimedTargets.has(folder.id))
+    const matched = available.find(folder => folder.id === mappedId) ??
+      available.find(folder => folder.id === src.id) ??
+      available.find(folder => (folder.parentId ?? null) === parentId &&
+        folder.name.trim().toLowerCase() === src.name.trim().toLowerCase() && sameContext(folder, src))
     if (matched) {
-      const seen = new Set(matched.glossary.map(g => g.source.trim().toLowerCase()))
-      const mergedGlossary = [...matched.glossary]
-      let glossaryChanged = false
-      for (const entry of src.glossary) {
-        const key = entry.source.trim().toLowerCase()
-        if (!key || seen.has(key) || mergedGlossary.length >= 200) continue
-        seen.add(key)
-        mergedGlossary.push(entry)
-        glossaryChanged = true
-      }
-      if (glossaryChanged || (!matched.contextSummary && src.contextSummary)) {
-        const updated = database.updateFolder({
-          id: matched.id,
-          facultyId: matched.facultyId || src.facultyId,
-          contextSummary: matched.contextSummary || src.contextSummary,
-          glossary: mergedGlossary
-        })
-        const idx = existingFolders.findIndex(f => f.id === matched.id)
-        if (idx >= 0) existingFolders[idx] = updated
-      }
       idMap.set(src.id, matched.id)
+      claimedTargets.add(matched.id)
+      persistedMap[src.id] = matched.id
       return
     }
     const created = database.createFolder({
@@ -273,6 +276,8 @@ function restoreFoldersFromBackup(
     })
     existingFolders.push(created)
     idMap.set(src.id, created.id)
+    claimedTargets.add(created.id)
+    persistedMap[src.id] = created.id
   }
 
   let progressed = true
@@ -293,6 +298,7 @@ function restoreFoldersFromBackup(
   for (const orphan of pending) {
     applyFolder(orphan, null)
   }
+  database.setSetting(mappingKey, JSON.stringify(persistedMap))
   return idMap
 }
 
@@ -300,7 +306,8 @@ function restoreFoldersFromBackup(
 export class BackupService {
   constructor(
     private readonly database: LibraryDatabase,
-    private readonly documents: DocumentService
+    private readonly documents: DocumentService,
+    private readonly zipOptions?: ReadZipOptions
   ) {}
 
   async exportBackupArchive(): Promise<ExportBackupArchiveOutput> {
@@ -324,13 +331,13 @@ export class BackupService {
     const usedNoteNamesByDir = new Map<string, Set<string>>()
     const usedCiteKeys = new Set<string>()
     const entries: ZipInputEntry[] = []
+    const pdfEntries: Array<{ name: string; documentId: string; byteLength: number; compress: false }> = []
 
     const bibEntries: string[] = []
     const risEntries: string[] = []
     const manifestDocs: BackupManifest['documents'] = []
 
     for (const doc of storedDocs) {
-      const pdfBytes = await this.documents.readPdfBytes(doc.id)
       const folderSegments = doc.folderId ? folderSegmentsById.get(doc.folderId) : undefined
       const dirKey = folderSegments && folderSegments.length > 0 ? folderSegments.join('/') : ''
       const pdfFile = sanitizeArchiveBasename(
@@ -339,7 +346,7 @@ export class BackupService {
         '.pdf'
       )
       const pdfPath = dirKey ? `pdfs/${dirKey}/${pdfFile}` : `pdfs/${pdfFile}`
-      entries.push({ name: pdfPath, data: pdfBytes, compress: false })
+      pdfEntries.push({ name: pdfPath, documentId: doc.id, byteLength: doc.byteSize, compress: false })
 
       const readerState = readerStates.get(doc.id)
       manifestDocs.push({
@@ -400,6 +407,7 @@ export class BackupService {
       const owner = docById.get(ann.documentId)
       if (!owner) continue
       manifestAnnotations.push({
+        id: ann.id,
         documentSha256: owner.sha256,
         pageNumber: ann.pageNumber,
         color: ann.color,
@@ -483,8 +491,16 @@ export class BackupService {
       compress: true
     })
 
+    // 先按数据库中的 PDF 大小和已生成的元数据预检，超限库无需读入全部 PDF。
+    assertZipInputLimits([
+      ...pdfEntries,
+      ...entries.map(entry => ({ name: entry.name, byteLength: entry.data.byteLength, compress: entry.compress }))
+    ], this.zipOptions)
+    for (const entry of pdfEntries) {
+      entries.push({ name: entry.name, data: await this.documents.readPdfBytes(entry.documentId), compress: false })
+    }
     return {
-      zipBuffer: createZipBuffer(entries),
+      zipBuffer: createZipBuffer(entries, this.zipOptions),
       documentCount: manifestDocs.length,
       annotationCount: manifestAnnotations.length,
       translationCount: manifestTranslations.length,
@@ -493,7 +509,7 @@ export class BackupService {
   }
 
   async importBackupArchive(zipBytes: Uint8Array): Promise<ImportBackupArchiveOutput> {
-    const entries = readZipBuffer(zipBytes)
+    const entries = readZipBuffer(zipBytes, this.zipOptions)
     const manifestRaw = entries.get('paperflow-backup.json')
     if (!manifestRaw) {
       throw new Error('所选压缩包不是有效的 PaperFlow 备份包（缺少 paperflow-backup.json）。')
@@ -572,6 +588,7 @@ export class BackupService {
       if (!targetDocId) continue
       try {
         const inserted = this.database.importAnnotationIfMissing({
+          id: ann.id,
           documentId: targetDocId,
           pageNumber: ann.pageNumber,
           color: ann.color,

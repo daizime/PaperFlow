@@ -254,6 +254,9 @@ export function TranslationSettingsModal({
 
   if (!open) return null
 
+  const draftAddressChanged = !!savedSettings && savedSettings.openai.baseUrl.replace(/\/+$/, '') !== baseUrl.trim().replace(/\/+$/, '')
+  const hasKeyForDraft = hasStoredKey && !draftAddressChanged
+
   const buildPayload = (): SaveTranslationSettingsInput => {
     const trimmedKey = apiKeyDraft.trim()
     const apiKeyField = clearKeyRequested ? '' : trimmedKey.length > 0 ? trimmedKey : undefined
@@ -608,7 +611,11 @@ export function TranslationSettingsModal({
                       type="url"
                       aria-label="API Base URL"
                       value={baseUrl}
-                      onChange={e => setBaseUrl(e.target.value)}
+                      onChange={e => {
+                        setBaseUrl(e.target.value)
+                        setApiKeyDraft('')
+                        setClearKeyRequested(false)
+                      }}
                       placeholder="https://api.deepseek.com/v1"
                     />
                   </label>
@@ -627,7 +634,7 @@ export function TranslationSettingsModal({
                   <div className="translation-modal__field">
                     <div className="translation-modal__label-row">
                       <span className="translation-modal__label">API Key（本地加密保存，可选）</span>
-                      {hasStoredKey && !clearKeyRequested ? (
+                      {hasKeyForDraft && !clearKeyRequested ? (
                         <button
                           type="button"
                           className="translation-modal__link"
@@ -651,8 +658,8 @@ export function TranslationSettingsModal({
                       placeholder={
                         clearKeyRequested
                           ? '保存时将清空密钥（本机 Ollama 可留空）'
-                          : hasStoredKey
-                            ? `已安全保存 (${apiKeyPreview ?? '***'})，留空保持不变`
+                          : hasKeyForDraft
+                            ? `已安全保存 (${apiKeyPreview ?? '***'})，留空可继续使用`
                             : '填写密钥；连接本机 Ollama 可留空'
                       }
                     />
@@ -882,7 +889,7 @@ export function TranslationSettingsModal({
 
               {(() => {
                 const livePrefs = buildUsagePrefsPayload()
-                const draftHasApiKey = !clearKeyRequested && (apiKeyDraft.trim().length > 0 || hasStoredKey)
+                const draftHasApiKey = !clearKeyRequested && (apiKeyDraft.trim().length > 0 || hasKeyForDraft)
                 const activeBillingKind = inferBillingKindFromDraft({
                   provider,
                   baseUrl,

@@ -71,8 +71,7 @@ import {
   renderTranslationHtmlToPdfBuffer
 } from '../services/translation-export'
 import type { TranslationService } from '../services/translation-service'
-
-const MAX_BACKUP_ZIP_BYTES = 512 * 1024 * 1024
+import { ZIP_ARCHIVE_LIMITS } from '../services/zip-archive'
 
 export function registerIpc(
   getWindow: () => BrowserWindow | null,
@@ -179,8 +178,11 @@ export function registerIpc(
       noArgsSchema.parse(args)
       return translations.getSettings()
     })
-    handle(CHANNELS.saveTranslationSettings, (_window, args) => {
+    handle(CHANNELS.saveTranslationSettings, async (_window, args) => {
       const [input] = saveTranslationSettingsArgsSchema.parse(args)
+      if (input.provider === 'cli' && !(await translations.authorizeCliSettings(input)).authorized) {
+        throw new Error('已取消本机 AI 程序授权。')
+      }
       return translations.saveSettings(input)
     })
     handle(CHANNELS.getDocumentTranslationScope, (_window, args) => {
@@ -216,6 +218,9 @@ export function registerIpc(
     })
     handle(CHANNELS.testTranslationConnection, async (_window, args) => {
       const [draft] = testTranslationConnectionArgsSchema.parse(args)
+      if (draft?.provider === 'cli' && !(await translations.authorizeCliSettings(draft)).authorized) {
+        throw new Error('已取消本机 AI 程序授权。')
+      }
       return translations.testConnection(draft)
     })
     handle(CHANNELS.getProviderBalance, async (_window, args) => {
@@ -519,7 +524,7 @@ export function registerIpc(
       }
       const zipPath = selection.filePaths[0]
       const info = await stat(zipPath)
-      if (!info.isFile() || info.size === 0 || info.size > MAX_BACKUP_ZIP_BYTES) {
+      if (!info.isFile() || info.size === 0 || info.size > ZIP_ARCHIVE_LIMITS.maxArchiveBytes) {
         throw new Error('备份文件无效或体积超过 512 MiB 上限。')
       }
       const bytes = await readFile(zipPath)

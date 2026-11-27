@@ -7,6 +7,7 @@ import {
   loadStoredShortcuts,
   matchesShortcutEvent,
   mergeShortcuts,
+  resetShortcut,
   saveStoredShortcuts,
   validateShortcutCombo
 } from '../../src/renderer/src/features/study/shortcuts'
@@ -96,5 +97,15 @@ describe('shortcuts: 自定义快捷键解析、冲突检测、匹配与持久�
       JSON.stringify({ toggleTheme: 'Ctrl+c', cycleViewMode: 'g', unknownAction: 'x' })
     )
     expect(loadStoredShortcuts(mockStorage)).toEqual({ cycleViewMode: 'g' })
+  })
+
+  test('恢复单项默认键时转移被占用的绑定，并修复旧配置中的重复键', () => {
+    const restored = mergeShortcuts(resetShortcut({ toggleTheme: 'v', cycleViewMode: 't' }, 'toggleTheme'))
+    expect(restored).toEqual(DEFAULT_SHORTCUTS)
+    const transferred = mergeShortcuts(resetShortcut({ toggleTheme: 'g', cycleViewMode: 't' }, 'toggleTheme'))
+    expect(transferred.toggleTheme).toBe('t')
+    expect(transferred.cycleViewMode).toBe('g')
+    expect(new Set(Object.values(transferred)).size).toBe(Object.keys(transferred).length)
+    expect(mergeShortcuts({ cycleViewMode: 't' })).toEqual(DEFAULT_SHORTCUTS)
   })
 })

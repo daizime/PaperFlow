@@ -370,13 +370,37 @@ export function findShortcutConflict(
 
 export function mergeShortcuts(overrides: ShortcutOverrides): ShortcutMap {
   const merged = { ...DEFAULT_SHORTCUTS }
+  const assigned = new Set<string>()
   for (const item of ALL_SHORTCUT_DEFINITIONS) {
     const custom = overrides[item.id]
-    if (typeof custom === 'string' && parseShortcutCombo(custom) && validateShortcutCombo(custom).ok) {
+    if (typeof custom === 'string' && custom !== item.defaultCombo && !assigned.has(custom) && validateShortcutCombo(custom).ok) {
       merged[item.id] = custom
+      assigned.add(custom)
     }
   }
+  // 旧配置可能占用了仍在使用的默认键。恢复冲突项时也检查它释放出的键。
+  let repaired: boolean
+  do {
+    repaired = false
+    for (const item of ALL_SHORTCUT_DEFINITIONS) {
+      if (merged[item.id] !== item.defaultCombo) continue
+      const conflict = findShortcutConflict(merged, item.id, item.defaultCombo)
+      if (conflict) {
+        merged[conflict] = DEFAULT_SHORTCUTS[conflict]
+        repaired = true
+      }
+    }
+  } while (repaired)
   return merged
+}
+
+export function resetShortcut(overrides: ShortcutOverrides, actionId: ShortcutActionId): ShortcutOverrides {
+  const current = mergeShortcuts(overrides)
+  const next = { ...overrides }
+  const occupant = findShortcutConflict(current, actionId, DEFAULT_SHORTCUTS[actionId])
+  if (occupant) next[occupant] = current[actionId]
+  delete next[actionId]
+  return next
 }
 
 export function loadStoredShortcuts(
@@ -415,9 +439,10 @@ export function saveStoredShortcuts(
   if (!storage) return
   try {
     const cleaned: ShortcutOverrides = {}
+    const merged = mergeShortcuts(overrides)
     for (const item of ALL_SHORTCUT_DEFINITIONS) {
-      const val = overrides[item.id]
-      if (typeof val === 'string' && val !== DEFAULT_SHORTCUTS[item.id]) {
+      const val = merged[item.id]
+      if (val !== DEFAULT_SHORTCUTS[item.id]) {
         cleaned[item.id] = val
       }
     }

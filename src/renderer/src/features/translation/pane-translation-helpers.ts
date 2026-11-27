@@ -1,4 +1,5 @@
 import type { TranslatedBlockRecord, TranslationBlockInput } from '../../../../shared/contracts'
+import { matchesFormulaPlaceholders } from '../../../../shared/formula-placeholders'
 import {
   computeStableTranslationBlockKey,
   hashTranslationBlockSource,
@@ -76,6 +77,13 @@ export function buildPageTranslationInputs(layout: PageLayoutResult | undefined)
     })
   }
   return blocks
+}
+
+export function isUsableTranslation(
+  record: TranslatedBlockRecord | undefined, sourceHash: string, sourceText: string
+): record is TranslatedBlockRecord {
+  return Boolean(record && record.sourceHash === sourceHash && record.translatedText.trim() &&
+    matchesFormulaPlaceholders(sourceText, record.translatedText))
 }
 
 export function buildSingleBlockTranslationInput(

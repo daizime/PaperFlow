@@ -1,6 +1,14 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { createTestData, importFixture, launchApp } from './helpers'
 import layoutManifest from '../fixtures/verification/layout-analysis/manifest.json'
+
+async function expectTranslationPageLoaded(panel: Locator, pageNumber: number): Promise<void> {
+  const target = panel.locator(`.translation-page[data-page-number="${pageNumber}"]`)
+  await expect(target).toHaveAttribute('data-analyzed', 'true', { timeout: 30000 })
+  await expect(target.locator('canvas.translation-page-bg')).toHaveCount(1)
+  expect(await target.locator('canvas.translation-page-bg').evaluate(canvas => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(0)
+  await expect(target.locator('.translation-overlay-layer')).toHaveCount(1)
+}
 
 async function waitForPageReady(page: Page, pageNumber: number): Promise<void> {
   await expect(page.locator(`.pdf-page[data-page-number="${pageNumber}"]`)).toHaveAttribute('data-rendered', 'true', {
@@ -371,4 +379,54 @@ test('裁剪白边与放大模式下保持结构镜像尺寸与上下对齐', as
   } finally {
     await app.close()
   }
+})
+
+test('长文献独立译文可视页加载与仅译文快捷键在主栏和分屏保持一致', async () => {
+  // 复用项目原创 600 页合成 PDF，无翻译引擎配置、无外部请求。
+  const { app, page } = await launchApp(await createTestData(), { deviceScaleFactor: 1 })
+  const failures: string[] = []
+  page.on('pageerror', error => failures.push(error.message))
+  try {
+    await importFixture(app, page, 'verification/reader/long-600.pdf')
+    const modes = page.getByRole('group', { name: '视图模式', exact: true })
+    await modes.getByRole('button', { name: '双栏', exact: true }).click()
+    await waitForPageReady(page, 1)
+    await page.getByRole('button', { name: '滚动同步锁定', exact: true }).click()
+    const right = page.locator('.translation-panel')
+    const sourceTop = await page.locator('.pdf-scroll').evaluate(root => root.scrollTop)
+    await right.locator('.translation-page[data-page-number="8"]').evaluate(element => element.scrollIntoView({ block: 'start' }))
+    await expectTranslationPageLoaded(right, 8)
+    await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('1')
+    expect(await page.locator('.pdf-scroll').evaluate(root => root.scrollTop)).toBeCloseTo(sourceTop, 0)
+    expect(await right.locator('canvas.translation-page-bg').count()).toBeLessThan(15)
+
+    await modes.getByRole('button', { name: '译文', exact: true }).click()
+    await right.locator('.translation-scroll').focus()
+    await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('8')
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('9')
+    await expectTranslationPageLoaded(right, 9)
+    await expect.poll(() => right.locator('.translation-page[data-page-number="9"]').evaluate(element => {
+      const root = element.closest('.translation-scroll')!
+      return Math.abs(element.getBoundingClientRect().top - root.getBoundingClientRect().top)
+    })).toBeLessThan(3)
+    await page.keyboard.press('Home')
+    await expect(page.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('1')
+
+    // 形成同篇双开，右栏独立切到仅译文；快捷键只驱动聚焦分栏。
+    await page.getByTestId('compare-mode-toggle').click()
+    const secondary = page.getByTestId('split-pane-secondary')
+    await expect(secondary).toBeVisible()
+    await page.getByTestId('pane-mode-1-translation').click()
+    await secondary.locator('.translation-scroll').focus()
+    await secondary.locator('.translation-page[data-page-number="8"]').evaluate(element => element.scrollIntoView({ block: 'start' }))
+    await expectTranslationPageLoaded(secondary, 8)
+    await expect(secondary.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('8')
+    await secondary.locator('.translation-scroll').click({ position: { x: 8, y: 8 } })
+    await page.keyboard.press('PageDown')
+    await expect(secondary.getByRole('spinbutton', { name: '当前页码' })).toHaveValue('9')
+    await expectTranslationPageLoaded(secondary, 9)
+    await expect(page.locator('[data-testid="split-pane-primary"]').getByRole('spinbutton', { name: '当前页码' })).toHaveValue('1')
+    expect(failures).toEqual([])
+  } finally { await app.close() }
 })

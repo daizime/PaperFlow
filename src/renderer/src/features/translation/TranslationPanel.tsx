@@ -24,6 +24,8 @@ import {
 import { cleanSelectedQuoteText, type PagePoint, type PageRect } from '../reader/pdf-geometry'
 import type { PageBackdropSnapshot, ReaderMirrorState } from '../reader/PdfViewer'
 import { mapColorToDarkPaperFilter } from './dark-paper-color'
+import { isUsableTranslation } from './pane-translation-helpers'
+import { useTranslationViewport } from './useTranslationViewport'
 import {
   alignBlockSentences,
   computeColumnLeftEdges,
@@ -52,6 +54,9 @@ export interface BatchQueueProgress {
 
 export interface TranslationPanelProps {
   hasDocument: boolean
+  documentId?: string | null
+  onVisiblePagesChange?(pages: readonly number[]): void
+  onCurrentPageChange?(page: number): void
   mirror: ReaderMirrorState
   layouts: ReadonlyMap<number, PageLayoutResult>
   backdrops: ReadonlyMap<number, PageBackdropSnapshot>
@@ -107,9 +112,10 @@ export function countTranslatedBlocks(
     if (!isTranslatableBlock(block)) continue
     total += 1
     const key = computeStableTranslationBlockKey(block)
-    const sourceHash = hashTranslationBlockSource(getBlockTranslationSourceText(block))
+    const sourceText = getBlockTranslationSourceText(block)
+    const sourceHash = hashTranslationBlockSource(sourceText)
     const hit = cache?.get(key)
-    if (hit && hit.sourceHash === sourceHash && hit.translatedText.trim()) {
+    if (isUsableTranslation(hit, sourceHash, sourceText)) {
       translated += 1
     }
   }
@@ -390,9 +396,10 @@ const OverlayPageContent = memo(function OverlayPageContent({
     layout.blocks.some(block => {
       if (block.sentences.length === 0 || !isTranslatableBlock(block)) return false
       const key = computeStableTranslationBlockKey(block)
-      const sourceHash = hashTranslationBlockSource(getBlockTranslationSourceText(block))
+      const sourceText = getBlockTranslationSourceText(block)
+      const sourceHash = hashTranslationBlockSource(sourceText)
       const cached = translations?.get(key)
-      return Boolean(cached && cached.sourceHash === sourceHash && cached.translatedText.trim())
+      return isUsableTranslation(cached, sourceHash, sourceText)
     })
 
   // 先利用同栏右侧安全留白与下侧无碰撞留白避免无谓缩微字号，再严格零溢出微调字号/行高
@@ -764,7 +771,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
         const sourceHash = hashTranslationBlockSource(sourceText)
         const cached = translations?.get(blockKey)
         const translatedText =
-          cached && cached.sourceHash === sourceHash && cached.translatedText.trim()
+          isUsableTranslation(cached, sourceHash, sourceText)
             ? cached.translatedText
             : null
 
@@ -1171,6 +1178,9 @@ const OverlayPageContent = memo(function OverlayPageContent({
 
 export function TranslationPanel({
   hasDocument,
+  documentId,
+  onVisiblePagesChange,
+  onCurrentPageChange,
   mirror,
   layouts,
   backdrops,
@@ -1207,6 +1217,14 @@ export function TranslationPanel({
   layoutsRef.current = layouts
   onSelectTargetRef.current = onSelectTargetSentences
   onZoomDeltaRef.current = onZoomDelta
+  const visiblePageNumbers = useTranslationViewport({
+    root: scrollContainerEl,
+    documentId,
+    pageCount: hasDocument ? mirror.pageCount : 0,
+    initialPage: mirror.currentPage,
+    onVisiblePagesChange,
+    onCurrentPageChange
+  })
 
   const handleScrollRef = useCallback(
     (element: HTMLDivElement | null): void => {
@@ -1404,7 +1422,7 @@ export function TranslationPanel({
                 width: fullWidth,
                 height: fullHeight
               }
-              const isNearCurrent = Math.abs(pageNumber - mirror.currentPage) <= 3
+              const isNearCurrent = visiblePageNumbers.has(pageNumber)
               const pageLayout = layouts.get(pageNumber)
               const backdrop = backdrops.get(pageNumber)
               const pageCache = translationsByPage.get(pageNumber)

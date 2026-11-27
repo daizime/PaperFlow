@@ -48,7 +48,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     }
     const translations = blocks.map(item => ({
       id: item.id,
-      text: translateFixtureText(item.text)
+      text: [translateFixtureText(item.text.replace(/⟪M\d+⟫/g, '')), ...(item.text.match(/⟪M\d+⟫/g) ?? [])].join(' ')
     }))
     res.setHeader('Content-Type', 'application/json')
     res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }))
@@ -67,7 +67,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
       "const raw = readFileSync(0, 'utf8')",
       "const start = raw.lastIndexOf('[')",
       'const blocks = JSON.parse(raw.slice(start))',
-      'const translations = blocks.map(item => ({ id: item.id, text: item.text.includes("Deterministic Layout Pipeline") ? "CLI复译：面向本地科研阅读器的确定性版面流水线" : "CLI复译：" + item.text.slice(0, 16) }))',
+      'const translations = blocks.map(item => ({ id: item.id, text: [(item.text.includes("Deterministic Layout Pipeline") ? "CLI复译：面向本地科研阅读器的确定性版面流水线" : "CLI复译：" + item.text.replace(/⟪M\\d+⟫/g, "").slice(0, 16)), ...(item.text.match(/⟪M\\d+⟫/g) ?? [])].join(" ") }))',
       'console.log(JSON.stringify({ translations }))'
     ].join('\n'),
     'utf8'
@@ -81,15 +81,16 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
   try {
     const { app, page } = running
 
-    // 1. 导入双栏学术 PDF，验证新打开默认进入「原文」模式并弹出未配置小浮窗，再切至「双栏」验证 1:1 对半展示、文献库可收起与单双栏模式切换
+    // 1. 导入双栏学术 PDF，验证原文模式安静打开，主动切至双栏后提示配置。
     await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
     await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', { timeout: 30000 })
     await expect(page.locator('.translation-panel')).toHaveCount(0)
     await expect(
       page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '原文', exact: true })
     ).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.getByTestId('translation-unconfigured-prompt')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('translation-unconfigured-prompt')).toHaveCount(0)
     await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
+    await expect(page.getByTestId('translation-unconfigured-prompt')).toBeVisible({ timeout: 10000 })
     await waitForPageReady(page, 1)
 
     const initialWidths = await page.evaluate(() => {
@@ -581,6 +582,16 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await p2.getByLabel('CLI 附加参数', { exact: true }).fill(cliStubPath)
     const cliTestBtn = p2.getByTestId('translation-test-btn')
     await expect(cliTestBtn).toContainText('测试 CLI（自定义 CLI）')
+    // 原生确认结果由测试模拟。拒绝后依旧保留现有引擎，接受后实际运行合成 CLI。
+    await running.app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false })
+    })
+    await cliTestBtn.click()
+    await expect(p2.locator('.translation-modal__status--err')).toContainText('已取消本机 AI 程序授权')
+    await expect(p2.getByTestId('active-engine-banner')).toContainText('OpenAI 兼容 API')
+    await running.app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false })
+    })
     await cliTestBtn.click()
     await expect(p2.locator('.translation-modal__status--ok')).toContainText('连接成功')
     await expect(p2.locator('.translation-modal__status--ok')).toContainText('本机 AI CLI')
@@ -822,7 +833,7 @@ test('支持余额接口时翻译后自动刷新顶栏与 5 秒完成浮窗、�
   }
 })
 
-test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可点击小窗跳设置、非中文 PDF 自动预译前两页而中文 PDF 不触发（合成素材）', async () => {
+test('主动开启双栏后预译前两页，普通打开及恢复视图不发送正文（合成素材）', async () => {
   const requests: Array<{ firstText: string }> = []
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = []
@@ -839,7 +850,7 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     }
     const translations = blocks.map(item => ({
       id: item.id,
-      text: `预译：${item.text.slice(0, 22)}`
+      text: [`预译：${item.text.replace(/⟪M\d+⟫/g, '').slice(0, 22)}`, ...(item.text.match(/⟪M\d+⟫/g) ?? [])].join(' ')
     }))
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }))
@@ -918,7 +929,7 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     await expect(page.getByTestId('translation-unconfigured-prompt')).toHaveCount(0)
     expect(requests.length).toBe(0)
 
-    // 2. 未配置引擎时打开英文 3 页 PDF（en1）：默认显示原文，弹出可点击的未配置小窗口；点击后跳到「翻译与 AI 引擎设置」
+    // 2. 原文模式无配置提示；主动切到双栏后才提示，保存引擎后在双栏预译。
     await importLocalPath(app, page, en1Path)
     await expect(page.locator('.pdf-page[data-page-number="1"] .textLayer')).toContainText('EN1 Page 1 Marker', {
       timeout: 20000
@@ -929,6 +940,10 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     ).toHaveAttribute('aria-pressed', 'true')
 
     const promptToast = page.getByTestId('translation-unconfigured-prompt')
+    await page.waitForTimeout(800)
+    await expect(promptToast).toHaveCount(0)
+    expect(requests).toHaveLength(0)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await expect(promptToast).toBeVisible({ timeout: 10000 })
     await promptToast.click()
 
@@ -940,13 +955,11 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     await page.getByRole('button', { name: '保存设置', exact: true }).click()
     await expect(settingsDialog).toHaveCount(0)
 
-    // 保存后仍停留在「原文」模式，同时后台自动预译前 2 页（第 3 页不预译）
+    // 保存后仍停留在主动开启的双栏，后台预译前两页。
     await expect.poll(() => requests.filter(r => r.firstText.includes('EN1 Page 1 Marker')).length, { timeout: 15000 }).toBe(1)
     await expect.poll(() => requests.filter(r => r.firstText.includes('EN1 Page 2 Marker')).length, { timeout: 15000 }).toBe(1)
     await expect(requests.filter(r => r.firstText.includes('EN1 Page 3 Marker')).length).toBe(0)
 
-    // 切换至「双栏」验证前两页译文已就绪，第 3 页未翻译
-    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
     await expect(
       page.locator('.translation-page[data-page-number="1"] .translation-overlay-block.is-translated').first()
@@ -962,13 +975,16 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     await waitForPageReady(page, 3)
     await expect(page.locator('.translation-page[data-page-number="3"] .translation-overlay-block.is-translated')).toHaveCount(0)
 
-    // 3. 已配置状态下打开全新英文 PDF（en2）：默认显示原文，且自动后台预译第 1-2 页（第 3 页不译）
+    // 3. 即使引擎已配置，原文浏览也无请求，主动开启双栏才预译。
     await importLocalPath(app, page, en2Path)
     await expect(page.locator('.pdf-page[data-page-number="1"] .textLayer')).toContainText('EN2 Page 1 Marker', {
       timeout: 20000
     })
     await expect(page.locator('.translation-panel')).toHaveCount(0)
     await expect(promptToast).toHaveCount(0)
+    await page.waitForTimeout(800)
+    expect(requests.filter(r => r.firstText.includes('EN2'))).toHaveLength(0)
+    await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await expect.poll(() => requests.filter(r => r.firstText.includes('EN2 Page 1 Marker')).length, { timeout: 15000 }).toBe(1)
     await expect.poll(() => requests.filter(r => r.firstText.includes('EN2 Page 2 Marker')).length, { timeout: 15000 }).toBe(1)
     expect(requests.filter(r => r.firstText.includes('EN2 Page 3 Marker')).length).toBe(0)
@@ -986,6 +1002,7 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
       page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '译文', exact: true })
     ).toHaveAttribute('aria-pressed', 'true')
 
+    const requestCountBeforeRestart = requests.length
     await running.app.close()
     running = await launchApp(dataDir, { deviceScaleFactor: 1 })
     const p2 = running.page
@@ -997,6 +1014,7 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
     await expect(p2.locator('.translation-page[data-page-number="1"] .translation-overlay-block.is-translated').first()).toBeVisible({
       timeout: 15000
     })
+    expect(requests).toHaveLength(requestCountBeforeRestart)
 
     await p2.getByTestId(`pdf-tab-${zhDoc.id}`).locator('button.workspace-tab__select').click()
     await expect(p2.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', {
@@ -1006,6 +1024,9 @@ test('默认原文显示（恢复关闭前双栏/译文）、未配置引擎可�
       p2.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '原文', exact: true })
     ).toHaveAttribute('aria-pressed', 'true')
     await expect(p2.locator('.translation-panel')).toHaveCount(0)
+    await p2.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
+    await expect(p2.locator('.translation-panel')).toBeVisible()
+    await p2.waitForTimeout(800)
     expect(requests.filter(r => r.firstText.includes('分布式') || r.firstText.includes('协同缓冲池')).length).toBe(0)
 
     expect(failures).toEqual([])

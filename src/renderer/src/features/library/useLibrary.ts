@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { formatPdfByteSize, hasControlCharacters, MAX_PDF_BYTES, type DocumentRecord, type ImportResult, type UpdateDocumentMetaInput } from '../../../../shared/contracts'
+import {
+  formatPdfByteSize,
+  hasControlCharacters,
+  MAX_PDF_BYTES,
+  type CreateFolderInput,
+  type DocumentRecord,
+  type ImportFolderResult,
+  type ImportResult,
+  type LibraryFolder,
+  type UpdateDocumentMetaInput,
+  type UpdateFolderInput
+} from '../../../../shared/contracts'
 
 const LAST_DOCUMENT_KEY = 'paperflow:last-document'
 
@@ -67,6 +78,7 @@ async function importSingleDroppedFile(file: File): Promise<{ result?: ImportRes
 
 export function useLibrary(): {
   documents: DocumentRecord[]
+  folders: LibraryFolder[]
   readerProgress: Record<string, number>
   selected: DocumentRecord | null
   importing: boolean
@@ -76,18 +88,25 @@ export function useLibrary(): {
   loadError: string | null
   notice: string | null
   select(id: string): void
-  importPdf(): Promise<void>
-  importDroppedFiles(files: FileList | File[]): Promise<void>
+  importPdf(targetFolderId?: string | null): Promise<void>
+  importFolder(parentFolderId?: string | null): Promise<ImportFolderResult | null>
+  importDroppedFiles(files: FileList | File[], targetFolderId?: string | null): Promise<void>
   renameDocument(documentId: string, displayTitle: string): Promise<boolean>
   updateDocumentMeta(input: UpdateDocumentMetaInput): Promise<boolean>
+  createFolder(input: CreateFolderInput): Promise<LibraryFolder | null>
+  updateFolder(input: UpdateFolderInput): Promise<LibraryFolder | null>
+  deleteFolder(folderId: string): Promise<boolean>
   updateLocalProgress(documentId: string, pageNumber: number): void
   deleteDocument(documentId: string): Promise<boolean>
+  resetLibrary(): Promise<boolean>
   dismissErrors(): void
+  dismissNotice(): void
   reportError(message: string): void
   reportNotice(message: string): void
   refresh(): Promise<void>
 } {
   const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  const [folders, setFolders] = useState<LibraryFolder[]>([])
   const [readerProgress, setReaderProgress] = useState<Record<string, number>>({})
   const [selectedId, setSelectedId] = useState<string | null>(() => localStorage.getItem(LAST_DOCUMENT_KEY))
   const [error, setError] = useState<string | null>(null)
@@ -118,6 +137,10 @@ export function useLibrary(): {
     setErrorDetails([])
   }, [])
 
+  const dismissNotice = useCallback(() => {
+    setNotice(null)
+  }, [])
+
   const reportError = useCallback((message: string) => {
     setErrorDetails([])
     setNotice(null)
@@ -139,14 +162,16 @@ export function useLibrary(): {
       loadErrorRef.current = null
     }
     try {
-      const [nextDocuments, nextProgress] = await Promise.all([
+      const [nextDocuments, nextFolders, nextProgress] = await Promise.all([
         window.paperflow.listDocuments(),
+        window.paperflow.listFolders().catch(() => [] as LibraryFolder[]),
         window.paperflow.listReaderProgress().catch(() => ({} as Record<string, number>))
       ])
       if (request !== refreshRequestRef.current) return
       const validIds = new Set(nextDocuments.map(item => item.id))
       documentsRef.current = nextDocuments
       setDocuments(nextDocuments)
+      setFolders(nextFolders)
       setReaderProgress(prev => {
         const merged: Record<string, number> = {}
         for (const [id, page] of Object.entries(nextProgress)) {
@@ -177,7 +202,7 @@ export function useLibrary(): {
     return cancelPendingRefresh
   }, [refresh, cancelPendingRefresh])
 
-  const importPdf = useCallback(async () => {
+  const importPdf = useCallback(async (targetFolderId?: string | null) => {
     // ref 在同一事件循环内生效，全部导入入口共享同一把锁。
     if (importingRef.current) return
     importingRef.current = true
@@ -186,17 +211,62 @@ export function useLibrary(): {
     setErrorDetails([])
     setNotice(null)
     try {
-      const result = await window.paperflow.importPdf()
-      if (result) {
-        // 已成功入库的返回记录先可见，列表刷新失败也不会丢失刚导入项。
-        setDocuments(current => {
-          const next = [result.document, ...current.filter(item => item.id !== result.document.id)]
-          documentsRef.current = next
-          return next
-        })
-        select(result.document.id)
-        setNotice(result.status === 'existing' ? '这份 PDF 已在文献库中' : '已导入 PDF')
-        await refresh()
+      const batch = await window.paperflow.importPdf()
+      if (!batch.canceled) {
+        let importedCount = 0
+        let existingCount = 0
+        let firstValidDoc: DocumentRecord | null = null
+
+        for (const result of batch.results) {
+          if (result.status === 'imported') importedCount += 1
+          else existingCount += 1
+          let finalDoc = result.document
+          if (result.status === 'imported' && targetFolderId) {
+            try {
+              finalDoc = await window.paperflow.updateDocumentMeta({
+                documentId: result.document.id,
+                folderId: targetFolderId
+              })
+            } catch {
+              // 保留已导入文献（若目标分类已被删则保留未分类）
+            }
+          }
+          if (!firstValidDoc) firstValidDoc = finalDoc
+          // 已成功入库的返回记录先可见，列表刷新失败也不会丢失刚导入项。
+          setDocuments(current => {
+            const next = [finalDoc, ...current.filter(item => item.id !== finalDoc.id)]
+            documentsRef.current = next
+            return next
+          })
+        }
+
+        if (firstValidDoc) {
+          select(firstValidDoc.id)
+          await refresh()
+        }
+
+        const totalSelected = batch.results.length + batch.failures.length
+        if (totalSelected === 1) {
+          if (importedCount === 1) setNotice('已导入 PDF')
+          else if (existingCount === 1) setNotice('这份 PDF 已在文献库中')
+        } else if (importedCount + existingCount > 0) {
+          const parts: string[] = []
+          if (importedCount > 0) parts.push(`新增 ${importedCount} 篇`)
+          if (existingCount > 0) parts.push(`已存在 ${existingCount} 篇`)
+          if (batch.failures.length > 0) parts.push(`失败 ${batch.failures.length} 篇`)
+          setNotice(`批量导入完成：${parts.join('，')}`)
+        }
+
+        if (batch.failures.length === 1 && batch.results.length === 0) {
+          setError(batch.failures[0].reason)
+        } else if (batch.failures.length > 0) {
+          setErrorDetails(batch.failures)
+          setError(
+            batch.failures.length === 1
+              ? batch.failures[0].reason
+              : `有 ${batch.failures.length} 个文件未能导入：`
+          )
+        }
       }
     } catch (err: unknown) {
       setError(cleanIpcError(err, '导入失败，请重试。'))
@@ -206,7 +276,38 @@ export function useLibrary(): {
     }
   }, [refresh, select])
 
-  const importDroppedFiles = useCallback(async (files: FileList | File[]) => {
+  const importFolder = useCallback(async (parentFolderId?: string | null): Promise<ImportFolderResult | null> => {
+    if (importingRef.current) return null
+    importingRef.current = true
+    setImporting(true)
+    setError(null)
+    setErrorDetails([])
+    setNotice(null)
+    try {
+      const result = await window.paperflow.importFolder(
+        parentFolderId ? { parentFolderId } : undefined
+      )
+      if (!result.canceled) {
+        if (!selectedIdRef.current && result.documentIds[0]) {
+          select(result.documentIds[0])
+        }
+        await refresh()
+        const skippedNote = result.skippedCount > 0 ? `，跳过 ${result.skippedCount} 项` : ''
+        setNotice(
+          `已导入文件夹：新增 ${result.importedCount} 篇、复用 ${result.duplicateCount} 篇，归档 ${result.assignedCount} 处，新建 ${result.createdFolderCount} 个分类${skippedNote}`
+        )
+      }
+      return result
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '导入本地文件夹失败，请重试。'))
+      return null
+    } finally {
+      importingRef.current = false
+      setImporting(false)
+    }
+  }, [refresh, select])
+
+  const importDroppedFiles = useCallback(async (files: FileList | File[], targetFolderId?: string | null) => {
     const fileList = Array.from(files)
     if (importingRef.current || fileList.length === 0) return
     importingRef.current = true
@@ -231,9 +332,20 @@ export function useLibrary(): {
         if (!result) continue
         if (result.status === 'imported') importedCount += 1
         else existingCount += 1
-        lastImportedDocument = result.document
+        let finalDoc = result.document
+        if (result.status === 'imported' && targetFolderId) {
+          try {
+            finalDoc = await window.paperflow.updateDocumentMeta({
+              documentId: result.document.id,
+              folderId: targetFolderId
+            })
+          } catch {
+            // 忽略无效分类，保留导入文献
+          }
+        }
+        lastImportedDocument = finalDoc
         setDocuments(current => {
-          const next = [result.document, ...current.filter(item => item.id !== result.document.id)]
+          const next = [finalDoc, ...current.filter(item => item.id !== finalDoc.id)]
           documentsRef.current = next
           return next
         })
@@ -300,6 +412,45 @@ export function useLibrary(): {
     }
   }, [])
 
+  const createFolder = useCallback(async (input: CreateFolderInput): Promise<LibraryFolder | null> => {
+    setError(null)
+    setErrorDetails([])
+    try {
+      const created = await window.paperflow.createFolder(input)
+      await refresh()
+      return created
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '创建分类文件夹失败，请重试。'))
+      return null
+    }
+  }, [refresh])
+
+  const updateFolder = useCallback(async (input: UpdateFolderInput): Promise<LibraryFolder | null> => {
+    setError(null)
+    setErrorDetails([])
+    try {
+      const updated = await window.paperflow.updateFolder(input)
+      await refresh()
+      return updated
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '更新分类文件夹失败，请重试。'))
+      return null
+    }
+  }, [refresh])
+
+  const deleteFolder = useCallback(async (folderId: string): Promise<boolean> => {
+    setError(null)
+    setErrorDetails([])
+    try {
+      await window.paperflow.deleteFolder(folderId)
+      await refresh()
+      return true
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '删除分类文件夹失败，请重试。'))
+      return false
+    }
+  }, [refresh])
+
   const updateLocalProgress = useCallback((documentId: string, pageNumber: number) => {
     if (!documentId || pageNumber < 1) return
     setReaderProgress(prev => (prev[documentId] === pageNumber ? prev : { ...prev, [documentId]: pageNumber }))
@@ -336,8 +487,32 @@ export function useLibrary(): {
     }
   }, [refresh])
 
+  const resetLibrary = useCallback(async (): Promise<boolean> => {
+    setError(null)
+    setErrorDetails([])
+    setNotice(null)
+    try {
+      const res = await window.paperflow.resetLibrary()
+      documentsRef.current = []
+      setDocuments([])
+      setFolders([])
+      setReaderProgress({})
+      selectedIdRef.current = null
+      setSelectedId(null)
+      localStorage.removeItem(LAST_DOCUMENT_KEY)
+      setNotice(
+        `已重置文献库（清空 ${res.deletedDocuments} 篇文献与 ${res.deletedFolders} 个分类，已保留翻译配置）`
+      )
+      return true
+    } catch (err: unknown) {
+      setError(cleanIpcError(err, '重置文献库失败，请重试。'))
+      return false
+    }
+  }, [])
+
   return {
     documents,
+    folders,
     readerProgress,
     selected: documents.find(item => item.id === selectedId) ?? documents[0] ?? null,
     importing,
@@ -348,12 +523,18 @@ export function useLibrary(): {
     notice,
     select,
     importPdf,
+    importFolder,
     importDroppedFiles,
     renameDocument,
     updateDocumentMeta,
+    createFolder,
+    updateFolder,
+    deleteFolder,
     updateLocalProgress,
     deleteDocument,
+    resetLibrary,
     dismissErrors,
+    dismissNotice,
     reportError,
     reportNotice,
     refresh

@@ -317,8 +317,8 @@ describe('真实 SQLite 拒绝、关闭再开与未支持的恢复边界', () =>
     const inspection = new Sqlite(databasePath, { readonly: true })
     try {
       expect(inspection.pragma('integrity_check', { simple: true })).toBe('ok')
-      expect(inspection.pragma('user_version', { simple: true })).toBe(4)
-      observed.normalReopen = { integrityCheck: 'ok', userVersion: 4, page: 2, scale: 1.75 }
+      expect(inspection.pragma('user_version', { simple: true })).toBe(7)
+      observed.normalReopen = { integrityCheck: 'ok', userVersion: 7, page: 2, scale: 1.75 }
     } finally { inspection.close() }
   })
 

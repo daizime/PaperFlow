@@ -11,6 +11,7 @@ import { ReaderToolbar } from './ReaderToolbar'
 import { loadPdf, pdfErrorMessage, type PDFDocumentProxy } from './pdf-engine'
 import {
   clientPointToPdf,
+  hitTestPageAnnotation,
   pdfRectToViewport,
   selectionToPdfRects,
   type PageGeometry,
@@ -80,9 +81,13 @@ export interface PdfViewerProps {
   >
   toolbarActionsRef?: MutableRefObject<ReaderToolbarActions | null>
   hideFloatingPill?: boolean
+  floatingPillSpacerOnly?: boolean
   annotationsByPage?: ReadonlyMap<number, readonly AnnotationRecord[]>
+  editingAnnotationId?: string | null
   activeSentence?: { pageNumber: number; rects: readonly PageRect[] } | null
+  isActivePane?: boolean
   onSourceSentenceInteract?(event: LeftSourceInteractEvent): void
+  onAnnotationClick?(annotation: AnnotationRecord): void
   onOutlineNavigate?(item: PdfOutlineItem): void
 }
 
@@ -115,9 +120,13 @@ export function PdfViewer({
   renderRegionPreviewRef,
   toolbarActionsRef,
   hideFloatingPill = false,
+  floatingPillSpacerOnly = false,
   annotationsByPage,
+  editingAnnotationId = null,
   activeSentence,
+  isActivePane = true,
   onSourceSentenceInteract,
+  onAnnotationClick,
   onOutlineNavigate
 }: PdfViewerProps): React.JSX.Element {
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null)
@@ -148,6 +157,19 @@ export function PdfViewer({
 
   const [cropMargins, setCropMargins] = useState(false)
   const [cropCommit, setCropCommit] = useState(0)
+  const [devicePixelRatio, setDevicePixelRatio] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1))
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
+    const update = (): void => {
+      setDevicePixelRatio(window.devicePixelRatio || 1)
+    }
+    query.addEventListener('change', update)
+    return () => {
+      query.removeEventListener('change', update)
+    }
+  }, [devicePixelRatio])
 
   const current = useRef(1)
   const scaleRef = useRef(1)
@@ -184,7 +206,10 @@ export function PdfViewer({
   const onScrollRootChangeRef = useRef(onScrollRootChange)
   const onMirrorStateChangeRef = useRef(onMirrorStateChange)
   const onSourceSentenceInteractRef = useRef(onSourceSentenceInteract)
+  const onAnnotationClickRef = useRef(onAnnotationClick)
+  const annotationsByPageRef = useRef(annotationsByPage)
   const onOutlineNavigateRef = useRef(onOutlineNavigate)
+  const searchOpenRef = useRef(searchOpen)
   const backdropTokensRef = useRef<Map<number, number>>(new Map())
   const renderedPagesRef = useRef<Map<number, { geometry: PageGeometry; surface: HTMLElement }>>(new Map())
 
@@ -197,17 +222,22 @@ export function PdfViewer({
     onScrollRootChangeRef.current = onScrollRootChange
     onMirrorStateChangeRef.current = onMirrorStateChange
     onSourceSentenceInteractRef.current = onSourceSentenceInteract
+    onAnnotationClickRef.current = onAnnotationClick
+    annotationsByPageRef.current = annotationsByPage
     onOutlineNavigateRef.current = onOutlineNavigate
     scaleRef.current = scale
     loadingRef.current = loading
     cropMarginsRef.current = cropMargins
-  }, [scrollRoot, onPageCount, onPageData, onPageLayout, onPageBackdrop, onScrollRootChange, onMirrorStateChange, onSourceSentenceInteract, onOutlineNavigate, scale, loading, cropMargins])
+    searchOpenRef.current = searchOpen
+  }, [scrollRoot, onPageCount, onPageData, onPageLayout, onPageBackdrop, onScrollRootChange, onMirrorStateChange, onSourceSentenceInteract, onAnnotationClick, annotationsByPage, onOutlineNavigate, scale, loading, cropMargins, searchOpen])
 
   useLayoutEffect(() => {
     if (!cancelNavigationRef) return
     cancelNavigationRef.current = cancelNavigation
     return () => {
-      cancelNavigationRef.current = null
+      if (cancelNavigationRef.current === cancelNavigation) {
+        cancelNavigationRef.current = null
+      }
     }
   }, [cancelNavigationRef, cancelNavigation])
 
@@ -265,10 +295,20 @@ export function PdfViewer({
       })
     }
 
+    const onMouseUp = (): void => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        rafId = null
+      }
+      emitSelection()
+    }
+
     document.addEventListener('selectionchange', onSelectionChange)
+    scrollRoot.addEventListener('mouseup', onMouseUp)
     return () => {
       if (rafId !== null) window.cancelAnimationFrame(rafId)
       document.removeEventListener('selectionchange', onSelectionChange)
+      scrollRoot.removeEventListener('mouseup', onMouseUp)
     }
   }, [scrollRoot])
 
@@ -453,17 +493,19 @@ export function PdfViewer({
     beginAnchor(target)
   }, [pdf, beginAnchor, cancelNavigation])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!navigateToPageRef) return
     navigateToPageRef.current = navigate
     return () => {
-      navigateToPageRef.current = null
+      if (navigateToPageRef.current === navigate) {
+        navigateToPageRef.current = null
+      }
     }
   }, [navigateToPageRef, navigate])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!analyzePageRef) return
-    analyzePageRef.current = async (targetPage: number): Promise<PageLayoutResult | null> => {
+    const analyze = async (targetPage: number): Promise<PageLayoutResult | null> => {
       const active = activePdf.current
       if (!active || loadingRef.current || targetPage < 1 || targetPage > active.numPages) return null
       try {
@@ -485,15 +527,18 @@ export function PdfViewer({
         return null
       }
     }
+    analyzePageRef.current = analyze
     return () => {
-      analyzePageRef.current = null
+      if (analyzePageRef.current === analyze) {
+        analyzePageRef.current = null
+      }
     }
   }, [analyzePageRef, pdf, loading])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!extractPageTextRef) return
     const cache = new Map<number, string>()
-    extractPageTextRef.current = async (targetPage: number): Promise<string | null> => {
+    const extractText = async (targetPage: number): Promise<string | null> => {
       const cached = cache.get(targetPage)
       if (cached !== undefined) return cached
       const active = activePdf.current
@@ -518,14 +563,17 @@ export function PdfViewer({
         return null
       }
     }
+    extractPageTextRef.current = extractText
     return () => {
-      extractPageTextRef.current = null
+      if (extractPageTextRef.current === extractText) {
+        extractPageTextRef.current = null
+      }
     }
   }, [extractPageTextRef, pdf, loading, record.id])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!extractCitationSourceRef) return
-    extractCitationSourceRef.current = async (): Promise<FirstPageCitationSource | null> => {
+    const extractCitation = async (): Promise<FirstPageCitationSource | null> => {
       const active = activePdf.current
       if (!active || loadingRef.current || active.numPages < 1) return null
       try {
@@ -574,14 +622,17 @@ export function PdfViewer({
         return null
       }
     }
+    extractCitationSourceRef.current = extractCitation
     return () => {
-      extractCitationSourceRef.current = null
+      if (extractCitationSourceRef.current === extractCitation) {
+        extractCitationSourceRef.current = null
+      }
     }
   }, [extractCitationSourceRef, pdf, loading, record.id])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!renderRegionPreviewRef) return
-    renderRegionPreviewRef.current = async (
+    const renderPreview = async (
       targetPage: number,
       kind: 'figure' | 'table',
       captionBounds?: PageRect,
@@ -592,10 +643,10 @@ export function PdfViewer({
       try {
         const pageObj = await active.getPage(targetPage)
         try {
-          const renderScale = 1.8
+          const renderScale = 2.4
           const viewport = pageObj.getViewport({ scale: renderScale })
-          const widthPx = Math.max(1, Math.floor(viewport.width))
-          const heightPx = Math.max(1, Math.floor(viewport.height))
+          const widthPx = Math.max(1, Math.round(viewport.width))
+          const heightPx = Math.max(1, Math.round(viewport.height))
           const fullCanvas = document.createElement('canvas')
           fullCanvas.width = widthPx
           fullCanvas.height = heightPx
@@ -616,7 +667,7 @@ export function PdfViewer({
           const box = computeTightFigureCropBox(imageData.data, widthPx, heightPx, kind, capVp, obsVp)
           if (!box) return null
 
-          const maxOutW = 960
+          const maxOutW = 1440
           const ratio = box.sw > maxOutW ? maxOutW / box.sw : 1
           const outW = Math.max(1, Math.round(box.sw * ratio))
           const outH = Math.max(1, Math.round(box.sh * ratio))
@@ -636,8 +687,11 @@ export function PdfViewer({
         return null
       }
     }
+    renderRegionPreviewRef.current = renderPreview
     return () => {
-      renderRegionPreviewRef.current = null
+      if (renderRegionPreviewRef.current === renderPreview) {
+        renderRegionPreviewRef.current = null
+      }
     }
   }, [renderRegionPreviewRef, pdf, loading, record.id])
 
@@ -813,7 +867,7 @@ export function PdfViewer({
     }
 
     const handleWindowKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || !activePdf.current || loadingRef.current) return
+      if (!isActivePane || event.defaultPrevented || !activePdf.current || loadingRef.current) return
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
         openAndFocusSearch()
@@ -826,7 +880,7 @@ export function PdfViewer({
       panel?.removeEventListener('keydown', handlePanelKeyDown)
       window.removeEventListener('keydown', handleWindowKeyDown)
     }
-  }, [applyScale, fitWidth, navigate, openAndFocusSearch])
+  }, [applyScale, fitWidth, isActivePane, navigate, openAndFocusSearch])
 
   const onScroll = useCallback((): void => {
     const root = rootRef.current
@@ -946,11 +1000,12 @@ export function PdfViewer({
     [pdf, loading, error, pageNumber, scale, cropMargins, size, pageSizes, pageInsets, textStatus, headerOffsetPx, outlineOpen, searchOpen]
   )
 
-  if (toolbarActionsRef) {
-    toolbarActionsRef.current = {
+  useLayoutEffect(() => {
+    if (!toolbarActionsRef) return
+    const actions: ReaderToolbarActions = {
       toggleOutline: () => setOutlineOpen(open => !open),
       toggleSearch: () => {
-        if (searchOpen) closeSearch()
+        if (searchOpenRef.current) closeSearch()
         else openAndFocusSearch()
       },
       setScale: applyScale,
@@ -961,14 +1016,13 @@ export function PdfViewer({
         setCropCommit(value => value + 1)
       }
     }
-  }
-
-  useEffect(() => {
-    if (!toolbarActionsRef) return
+    toolbarActionsRef.current = actions
     return () => {
-      toolbarActionsRef.current = null
+      if (toolbarActionsRef.current === actions) {
+        toolbarActionsRef.current = null
+      }
     }
-  }, [toolbarActionsRef])
+  }, [toolbarActionsRef, applyScale, fitWidth, cancelNavigation, closeSearch, openAndFocusSearch])
 
   useEffect(() => {
     onMirrorStateChangeRef.current?.(mirrorState)
@@ -1058,6 +1112,11 @@ export function PdfViewer({
               x: event.clientX,
               y: event.clientY
             })
+            const hitAnnotation = hitTestPageAnnotation(annotationsByPageRef.current?.get(targetPage), pdfPoint)
+            if (hitAnnotation && onAnnotationClickRef.current) {
+              onAnnotationClickRef.current(hitAnnotation)
+              return
+            }
             interact({ type: 'point', pageNumber: targetPage, pdfPoint })
           } catch {
             interact({ type: 'clear' })
@@ -1074,6 +1133,7 @@ export function PdfViewer({
             pdf={pdf}
             pageNumber={number}
             scale={scale}
+            devicePixelRatio={devicePixelRatio}
             scrollRoot={scrollRoot}
             estimatedSize={size}
             cropMargins={cropMargins}
@@ -1081,6 +1141,8 @@ export function PdfViewer({
             activeMatchId={activeMatch?.pageNumber === number ? activeMatch.id : null}
             activeSentenceRects={activeSentence?.pageNumber === number ? activeSentence.rects : undefined}
             annotations={annotationsByPage?.get(number)}
+            editingAnnotationId={editingAnnotationId}
+            isFallbackActive={Math.abs(number - pageNumber) <= 1}
             onTextStatus={textCallback}
             onPageData={handlePageData}
             onPageSize={sizeCallback}
@@ -1090,22 +1152,24 @@ export function PdfViewer({
         })}</div>}
         </div>
         {!hideFloatingPill ? (
-          <div className="reader-pill-dock">
-            <ReaderToolbar
-              pageNumber={pageNumber}
-              pageCount={pdf?.numPages ?? 0}
-              scale={scale}
-              disabled={!pdf || loading}
-              cropMargins={cropMargins}
-              onNavigate={navigate}
-              onScale={applyScale}
-              onFitWidth={() => { void fitWidth() }}
-              onToggleCropMargins={() => {
-                cancelNavigation()
-                setCropMargins(crop => !crop)
-                setCropCommit(value => value + 1)
-              }}
-            />
+          <div className="reader-pill-dock" aria-hidden={floatingPillSpacerOnly ? true : undefined}>
+            {!floatingPillSpacerOnly ? (
+              <ReaderToolbar
+                pageNumber={pageNumber}
+                pageCount={pdf?.numPages ?? 0}
+                scale={scale}
+                disabled={!pdf || loading}
+                cropMargins={cropMargins}
+                onNavigate={navigate}
+                onScale={applyScale}
+                onFitWidth={() => { void fitWidth() }}
+                onToggleCropMargins={() => {
+                  cancelNavigation()
+                  setCropMargins(crop => !crop)
+                  setCropCommit(value => value + 1)
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

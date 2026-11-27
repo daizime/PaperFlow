@@ -3,7 +3,7 @@ import type { AnnotationRecord } from '../../../../shared/contracts'
 import { ZERO_CROP_INSETS, measureCanvasCropInsets, type CropInsets } from './margin-crop'
 import { buildHighlightPolygons } from './highlight-polygon'
 import { TextLayer, type PDFDocumentProxy, type PDFPageProxy, type RenderTask } from './pdf-engine'
-import { pdfRectToViewport, type PageGeometry, type PageRect, type PageTextContent } from './pdf-geometry'
+import { computeCanvasRenderRatio, pdfRectToViewport, type PageGeometry, type PageRect, type PageTextContent } from './pdf-geometry'
 import { buildPageTextIndex, findTextRangesForMatch, type SearchMatch, type TextSpan } from './pdf-search'
 import { attachSelectionHighlight } from './selection-highlight'
 import { alignSingleCharacterAdvances } from './text-layer-layout'
@@ -23,6 +23,7 @@ export interface PdfPageProps {
   pdf: PDFDocumentProxy
   pageNumber: number
   scale: number
+  devicePixelRatio?: number
   scrollRoot: HTMLDivElement | null
   estimatedSize: { width: number; height: number }
   cropMargins?: boolean
@@ -30,6 +31,9 @@ export interface PdfPageProps {
   activeMatchId?: string | null
   activeSentenceRects?: readonly PageRect[]
   annotations?: readonly AnnotationRecord[]
+  editingAnnotationId?: string | null
+  /** 仅纯译文模式下原文栏宽度被收拢为 0px 时，按页码邻近兜底保持渲染与版面分析触发。 */
+  isFallbackActive?: boolean
   onTextStatus(pageNumber: number, hasText: boolean): void
   /** 临时页面资源的借用接口；离开渲染范围/缩放/卸载时以 null 撤销。 */
   onPageData?(pageNumber: number, data: PdfPageData | null): void
@@ -39,8 +43,6 @@ export interface PdfPageProps {
 }
 
 type PageStatus = 'idle' | 'loading' | 'ready' | 'error'
-const MAX_CANVAS_PIXELS = 8 * 1024 * 1024
-const MAX_CANVAS_DIMENSION = 8192
 
 interface RenderedHighlightContext {
   surface: HTMLDivElement
@@ -86,6 +88,7 @@ export function PdfPage({
   pdf,
   pageNumber,
   scale,
+  devicePixelRatio,
   scrollRoot,
   estimatedSize,
   cropMargins = false,
@@ -93,6 +96,8 @@ export function PdfPage({
   activeMatchId = null,
   activeSentenceRects,
   annotations,
+  editingAnnotationId,
+  isFallbackActive = false,
   onTextStatus,
   onPageData,
   onPageSize,
@@ -105,6 +110,8 @@ export function PdfPage({
   const callbacks = useRef({ onTextStatus, onPageData, onPageSize, onPageInsets, onActiveMatchRendered })
   const measuredRef = useRef<{ pdf: PDFDocumentProxy; pageNumber: number } | null>(null)
   const renderedRef = useRef<RenderedHighlightContext | null>(null)
+  const fallbackActiveRef = useRef(isFallbackActive)
+  fallbackActiveRef.current = isFallbackActive
   const [nearViewport, setNearViewport] = useState(false)
   const [size, setSize] = useState(estimatedSize)
   const [insets, setInsets] = useState<CropInsets>(ZERO_CROP_INSETS)
@@ -123,13 +130,48 @@ export function PdfPage({
   useEffect(() => {
     const element = elementRef.current
     if (!element || !scrollRoot) return
+    if (scrollRoot.clientWidth <= 2 || scrollRoot.clientHeight <= 2) {
+      setNearViewport(isFallbackActive)
+    }
     const observer = new IntersectionObserver(entries => {
-      const entry = entries[0]
-      if (entry) setNearViewport(entry.isIntersecting)
+      const entry = entries[entries.length - 1]
+      if (!entry) return
+      if (!entry.isIntersecting && (scrollRoot.clientWidth <= 2 || scrollRoot.clientHeight <= 2)) {
+        if (fallbackActiveRef.current) {
+          setNearViewport(true)
+        }
+        return
+      }
+      setNearViewport(entry.isIntersecting)
     }, { root: scrollRoot, rootMargin: '800px 0px' })
     observer.observe(element)
-    return () => observer.disconnect()
-  }, [scrollRoot])
+
+    let wasCollapsed = scrollRoot.clientWidth <= 2 || scrollRoot.clientHeight <= 2
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            const collapsed = scrollRoot.clientWidth <= 2 || scrollRoot.clientHeight <= 2
+            if (collapsed) {
+              if (fallbackActiveRef.current) {
+                setNearViewport(true)
+              }
+            } else if (wasCollapsed) {
+              const rootRect = scrollRoot.getBoundingClientRect()
+              const elRect = element.getBoundingClientRect()
+              if (elRect.bottom >= rootRect.top - 800 && elRect.top <= rootRect.bottom + 800) {
+                setNearViewport(true)
+              }
+            }
+            wasCollapsed = collapsed
+          })
+        : null
+    resizeObserver?.observe(scrollRoot)
+
+    return () => {
+      observer.disconnect()
+      resizeObserver?.disconnect()
+    }
+  }, [scrollRoot, isFallbackActive])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -174,11 +216,10 @@ export function PdfPage({
         canvas.setAttribute('aria-hidden', 'true')
         canvas.style.width = viewport.width + 'px'
         canvas.style.height = viewport.height + 'px'
-        const ratio = Math.min(window.devicePixelRatio || 1, 3,
-          Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)),
-          MAX_CANVAS_DIMENSION / viewport.width, MAX_CANVAS_DIMENSION / viewport.height)
-        canvas.width = Math.max(1, Math.floor(viewport.width * ratio))
-        canvas.height = Math.max(1, Math.floor(viewport.height * ratio))
+        const dpr = devicePixelRatio ?? (window.devicePixelRatio || 1)
+        const ratio = computeCanvasRenderRatio(viewport.width, viewport.height, scale, dpr)
+        canvas.width = Math.max(1, Math.round(viewport.width * ratio))
+        canvas.height = Math.max(1, Math.round(viewport.height * ratio))
         const outputScale = { x: canvas.width / viewport.width, y: canvas.height / viewport.height }
         const textElement = document.createElement('div')
         textElement.className = 'textLayer'
@@ -267,7 +308,7 @@ export function PdfPage({
       // 成功任务已离开 finally，离屏时仍需释放其物理像素。
       void work.finally(() => { if (canvas) { canvas.width = 0; canvas.height = 0 } }).catch(() => {})
     }
-  }, [pdf, pageNumber, scale, nearViewport, scrollRoot])
+  }, [pdf, pageNumber, scale, devicePixelRatio, nearViewport, scrollRoot])
 
   useLayoutEffect(() => {
     const rendered = renderedRef.current
@@ -297,7 +338,8 @@ export function PdfPage({
         const polygons = buildHighlightPolygons(viewRects, { padX: 1.5, padY: 0.8, radius: 3 })
         for (const poly of polygons) {
           const path = document.createElementNS(svgNs, 'path')
-          path.setAttribute('class', `pdf-annotation-highlight pdf-annotation-highlight--${ann.color}`)
+          const editingClass = editingAnnotationId === ann.id ? ' is-editing' : ''
+          path.setAttribute('class', `pdf-annotation-highlight pdf-annotation-highlight--${ann.color}${editingClass}`)
           path.setAttribute('data-annotation-id', ann.id)
           path.setAttribute('d', poly.path)
           annSvg.appendChild(path)
@@ -373,7 +415,7 @@ export function PdfPage({
     if (activeElement && activeMatchId) {
       callbacks.current.onActiveMatchRendered?.(activeMatchId, activeElement)
     }
-  }, [status, renderVersion, searchMatches, activeMatchId, activeSentenceRects, annotations])
+  }, [status, renderVersion, searchMatches, activeMatchId, activeSentenceRects, annotations, editingAnnotationId])
 
   const activeInsets = cropMargins ? insets : ZERO_CROP_INSETS
   const fullWidth = size.width * scale

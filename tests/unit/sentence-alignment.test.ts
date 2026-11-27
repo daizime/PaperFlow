@@ -12,7 +12,11 @@ import {
   splitTranslatedSentences
 } from '../../src/renderer/src/features/translation/sentence-alignment'
 import { computeStableTranslationBlockKey, type AnalyzedBlock, type AnalyzedSentence, type PageLayoutResult } from '../../src/renderer/src/features/reader/layout-analysis'
-import type { PageRect } from '../../src/renderer/src/features/reader/pdf-geometry'
+import {
+  cleanSelectedQuoteText,
+  mergeViewportLineRects,
+  type PageRect
+} from '../../src/renderer/src/features/reader/pdf-geometry'
 
 function makeSentence(
   id: string,
@@ -221,19 +225,31 @@ describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testi
         ?.sentenceIds
     ).toEqual(['s1', 's2'])
 
-    // D. Short single-word drag ("Section" / "Se") inside s2 matches only s2
-    expect(
-      matchSelectionRegionsToSentences(
-        layoutsMap,
-        [{ pageNumber: 1, rect: { x: 167, y: 638, width: 28, height: 10 } }],
-        'Section'
-      )?.sentenceIds
-    ).toEqual(['s2'])
+    // D. Short single-word drag ("Section" / "Se") inside s2 matches only s2,
+    //    keeps exact dragged rect in sourceRects while returning full enclosing sentence rects in sentenceRects
+    const wordMatch = matchSelectionRegionsToSentences(
+      layoutsMap,
+      [{ pageNumber: 1, rect: { x: 167, y: 638, width: 28, height: 10 } }],
+      'Section'
+    )
+    expect(wordMatch?.sentenceIds).toEqual(['s2'])
+    expect(wordMatch?.sourceRects).toEqual([{ x: 167, y: 638, width: 28, height: 10 }])
+    expect(wordMatch?.sentenceRects).toEqual(s2.rects)
+
     expect(
       matchSelectionRegionsToSentences(
         layoutsMap,
         [{ pageNumber: 1, rect: { x: 167, y: 638, width: 7, height: 10 } }],
         'Se'
+      )?.sentenceIds
+    ).toEqual(['s2'])
+
+    // F. Slightly offset narrow single-word rect (10pt below s2) resolves via widened 12pt fallback
+    expect(
+      matchSelectionRegionsToSentences(
+        layoutsMap,
+        [{ pageNumber: 1, rect: { x: 60, y: 590, width: 14, height: 8 } }],
+        '44'
       )?.sentenceIds
     ).toEqual(['s2'])
 
@@ -516,5 +532,157 @@ describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testi
       { kind: 'text', text: ' 以及 ' },
       { kind: 'text', text: ' 结束。' }
     ])
+  })
+
+  test('partial drag selection preserves exact region rects without expanding to full sentence bounds and cleans quote text', () => {
+    const fullSentence = makeSentence(
+      's1',
+      'This avoids cache line invalidations for latch acquisition and is crucial for making reads scalable on multi-core CPUs.',
+      [
+        { x: 54, y: 650, width: 220, height: 10 },
+        { x: 54, y: 638, width: 220, height: 10 }
+      ],
+      1
+    )
+    const block: AnalyzedBlock = {
+      id: 'p1-b001',
+      pageNumber: 1,
+      order: 1,
+      kind: 'paragraph',
+      columnIndex: 1,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 54, y: 638, width: 220, height: 22 },
+      displayBounds: { x: 54, y: 132, width: 220, height: 22 },
+      sentences: [fullSentence]
+    }
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [block],
+      sentences: [fullSentence],
+      filteredItems: []
+    }
+    const partialRects = [
+      { x: 108, y: 650, width: 166, height: 10 },
+      { x: 54, y: 638, width: 132, height: 10 }
+    ]
+    const matched = matchSelectionRegionsToSentences(
+      new Map([[1, layout]]),
+      partialRects.map(rect => ({ pageNumber: 1, rect })),
+      'line invalidations for latch acquisition\nand is crucial'
+    )
+    expect(matched?.sentenceIds).toEqual(['s1'])
+    expect(matched?.sourceRects).toEqual(partialRects)
+
+    expect(
+      mergeViewportLineRects([
+        { x: 20, y: 100, width: 32, height: 12 },
+        { x: 55, y: 100, width: 48, height: 12 },
+        { x: 320, y: 100, width: 40, height: 12 },
+        { x: 20, y: 116, width: 80, height: 12 }
+      ])
+    ).toEqual([
+      { x: 20, y: 100, width: 83, height: 12 },
+      { x: 320, y: 100, width: 40, height: 12 },
+      { x: 20, y: 116, width: 80, height: 12 }
+    ])
+
+    expect(cleanSelectedQuoteText('invalida-\ntions \u0007\uFB01x  line')).toBe('invalidations fix line')
+    expect(cleanSelectedQuoteText('   \n\t  ')).toBeNull()
+  })
+
+  test('matches single narrow words, common tokens near same-line seams, and proportional seam drifts accurately', () => {
+    const s1 = makeSentence(
+      's1',
+      'We evaluate in the early setup with fast caching.',
+      [
+        { x: 54, y: 650, width: 220, height: 10 },
+        { x: 54, y: 638, width: 112, height: 10 }
+      ],
+      1
+    )
+    const s2 = makeSentence(
+      's2',
+      'In contrast, dual-column mode preserves equation layout.',
+      [
+        { x: 168, y: 638, width: 106, height: 10 },
+        { x: 54, y: 626, width: 220, height: 10 }
+      ],
+      2
+    )
+    const block: AnalyzedBlock = {
+      id: 'p1-b001',
+      pageNumber: 1,
+      order: 1,
+      kind: 'paragraph',
+      columnIndex: 1,
+      fontSize: 10,
+      isBold: false,
+      bounds: { x: 54, y: 626, width: 220, height: 34 },
+      displayBounds: { x: 54, y: 132, width: 220, height: 34 },
+      sentences: [s1, s2]
+    }
+    const dualS1: AnalyzedSentence = {
+      ...s1,
+      displayRects: [
+        { x: 54, y: 132, width: 220, height: 10 },
+        { x: 54, y: 144, width: 112, height: 10 }
+      ],
+      displayBounds: { x: 54, y: 132, width: 220, height: 22 }
+    }
+    const dualS2: AnalyzedSentence = {
+      ...s2,
+      displayRects: [
+        { x: 168, y: 144, width: 106, height: 10 },
+        { x: 54, y: 156, width: 220, height: 10 }
+      ],
+      displayBounds: { x: 54, y: 144, width: 220, height: 22 }
+    }
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: [{ ...block, sentences: [dualS1, dualS2] }],
+      sentences: [dualS1, dualS2],
+      filteredItems: []
+    }
+    const layoutsMap = new Map([[1, layout]])
+
+    // 1. Narrow single word ("in" at start of s2, grazing s1 seam) must prune s1 even though "in" appears earlier in s1
+    const narrowIn = matchSelectionRegionsToSentences(
+      layoutsMap,
+      [{ pageNumber: 1, rect: { x: 164, y: 638, width: 7, height: 10 } }],
+      'In'
+    )
+    expect(narrowIn?.sentenceIds).toEqual(['s2'])
+
+    // 2. Proportional-split seam drift: DOM rect for "contrast" sits slightly inside s1's estimated box, text snaps to s2
+    const seamDrift = matchSelectionRegionsToSentences(
+      layoutsMap,
+      [{ pageNumber: 1, rect: { x: 150, y: 638, width: 15, height: 10 } }],
+      'contrast'
+    )
+    expect(seamDrift?.sentenceIds).toEqual(['s2'])
+
+    // 3. Slightly vertically offset narrow selection falls back to center-point hit test
+    const fallbackWord = matchSelectionRegionsToSentences(
+      layoutsMap,
+      [{ pageNumber: 1, rect: { x: 195, y: 636, width: 6, height: 2 } }],
+      'dual'
+    )
+    expect(fallbackWord?.sentenceIds).toEqual(['s2'])
+
+    // 4. Small single-line marquee in resolveMirrorDragSelection starting in margin whitespace that mostly covers s2 while grazing s1 selects only s2
+    const smallMarquee = resolveMirrorDragSelection(layout, { x: 282, y: 145 }, { x: 164, y: 153 })
+    expect(smallMarquee?.sentenceIds).toEqual(['s2'])
+    expect(smallMarquee?.usedMarquee).toBe(true)
   })
 })

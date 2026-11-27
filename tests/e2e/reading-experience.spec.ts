@@ -75,6 +75,7 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
 
     // 1. 主题切换：明亮 -> 护眼（验证 PDF multiply 暖纸层） -> 深色
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
+    await page.getByTestId('theme-menu-trigger').click()
     const themeGroup = page.getByRole('group', { name: '阅读主题', exact: true })
     await themeGroup.getByRole('button', { name: '护眼', exact: true }).click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('sepia')
@@ -101,12 +102,14 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
     await docCard.getByLabel('添加文献标签', { exact: true }).press('Enter')
     await expect(docCard.locator('.document-tag-pill')).toContainText('#VLDB')
 
+    await page.getByTestId('library-filter-toggle').click()
     const filterGroup = page.getByRole('group', { name: '文献筛选', exact: true })
     await filterGroup.getByRole('button', { name: '#VLDB', exact: true }).click()
     await expect(page.locator('.document-entry')).toHaveCount(1)
     await filterGroup.getByRole('button', { name: '★ 收藏', exact: true }).click()
     await expect(page.locator('.document-entry')).toHaveCount(1)
     await filterGroup.getByRole('button', { name: '全部', exact: true }).click()
+    await page.getByTestId('library-filter-toggle').click()
 
     // 3. 图表引用速览（点击含 Fig. 1 的句子 -> 速览 Fig. 1 -> 验证图注并截图演示）
     const figSentenceSpan = page
@@ -129,7 +132,8 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
       await page.screenshot({ path: process.env.PAPERFLOW_DEMO_SHOT })
     }
 
-    await themeGroup.getByRole('button', { name: '深色', exact: true }).click()
+    await page.getByTestId('theme-menu-trigger').click()
+    await page.getByRole('group', { name: '阅读主题', exact: true }).getByRole('button', { name: '深色', exact: true }).click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
     const darkPalette = await page.evaluate(() => ({
       colorScheme: getComputedStyle(document.documentElement).colorScheme,
@@ -159,7 +163,7 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
     await page2Span.scrollIntoViewIfNeeded()
     const page2Box = (await page2Span.boundingBox())!
     await page.mouse.click(page2Box.x + page2Box.width / 2, page2Box.y + page2Box.height / 2)
-    await page.getByRole('button', { name: '添加批注笔记', exact: true }).click()
+    await page.getByRole('button', { name: '黄色高亮', exact: true }).click()
     await page.getByLabel('批注笔记输入框', { exact: true }).fill('跨库检索专属笔记Alpha')
     await page.getByRole('button', { name: '保存批注', exact: true }).click()
     await expect(page.getByRole('button', { name: '批注与笔记', exact: true })).toContainText('批注 (1)')
@@ -174,6 +178,41 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
     await expect(
       page.locator('.translation-page[data-page-number="2"] .translation-overlay-block.is-translated').first()
     ).toContainText('第二页检索译文Omega', { timeout: 15000 })
+
+    // 深色模式下翻译页面底纸与译文块/跨栏遮罩/文字颜色应与暗黑底图统一，禁止残留白底黑字
+    const darkTranslationPalette = await page.evaluate(() => {
+      const parseRgb = (raw: string): [number, number, number] => {
+        const m = raw.match(/\d+/g)
+        return m ? [Number(m[0]), Number(m[1]), Number(m[2])] : [-1, -1, -1]
+      }
+      const transPage = document.querySelector<HTMLElement>('.translation-page[data-page-number="2"]')
+      const blocks = Array.from(
+        document.querySelectorAll<HTMLElement>('.translation-page[data-page-number="2"] .translation-overlay-block.is-translated')
+      )
+      const mask = document.querySelector<HTMLElement>('.translation-page[data-page-number="2"] .translation-overlay-mask')
+      return {
+        pageBg: transPage ? getComputedStyle(transPage).backgroundColor : '',
+        maskBg: mask ? getComputedStyle(mask).backgroundColor : null,
+        blockCount: blocks.length,
+        blocks: blocks.map(block => {
+          const textEl = block.querySelector<HTMLElement>('.translation-overlay-block__text')
+          return {
+            kind: block.dataset.blockKind ?? '',
+            bg: parseRgb(getComputedStyle(block).backgroundColor),
+            fg: parseRgb(getComputedStyle(textEl ?? block).color)
+          }
+        })
+      }
+    })
+    expect(darkTranslationPalette.pageBg).toBe('rgb(35, 35, 35)')
+    if (darkTranslationPalette.maskBg !== null) {
+      expect(darkTranslationPalette.maskBg).toBe('rgb(35, 35, 35)')
+    }
+    expect(darkTranslationPalette.blockCount).toBeGreaterThan(0)
+    for (const blk of darkTranslationPalette.blocks) {
+      expect(Math.max(...blk.bg)).toBeLessThan(70)
+      expect(Math.min(...blk.fg)).toBeGreaterThan(170)
+    }
 
     // 切换到「译文」模式：译文区铺满且底部悬浮胶囊可用
     await viewGroup.getByRole('button', { name: '译文', exact: true }).click()

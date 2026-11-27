@@ -17,6 +17,7 @@ export type CitationFormatTab = 'bibtex' | 'ieee' | 'gbt7714' | 'ris'
 export interface CitationModalProps {
   open: boolean
   document: DocumentRecord | null
+  paneLabel?: string | null
   extractCitationSource?: () => Promise<FirstPageCitationSource | null>
   onClose(): void
 }
@@ -52,6 +53,7 @@ function loadStoredCitation(documentId: string): CitationMetadata | null {
 export function CitationModal({
   open,
   document,
+  paneLabel,
   extractCitationSource,
   onClose
 }: CitationModalProps): React.JSX.Element | null {
@@ -66,6 +68,8 @@ export function CitationModal({
   const [authorsDraft, setAuthorsDraft] = useState('')
   const [activeTab, setActiveTab] = useState<CitationFormatTab>('bibtex')
   const [extracting, setExtracting] = useState(false)
+  const [enriching, setEnriching] = useState(false)
+  const [enrichStatus, setEnrichStatus] = useState<{ tone: 'ok' | 'info' | 'err'; text: string } | null>(null)
   const [copiedNotice, setCopiedNotice] = useState(false)
 
   const runExtractFromFirstPage = useCallback(async () => {
@@ -89,6 +93,7 @@ export function CitationModal({
   useEffect(() => {
     if (!open || !document) return
     setCopiedNotice(false)
+    setEnrichStatus(null)
     const cached = loadStoredCitation(document.id)
     if (cached) {
       setMeta(cached)
@@ -126,6 +131,48 @@ export function CitationModal({
 
   if (!open || !document) return null
 
+  const handleEnrichOnline = async (): Promise<void> => {
+    if (enriching) return
+    const queryDoi = meta.doi.trim()
+    const queryTitle = meta.title.trim()
+    if (!queryDoi && !queryTitle) {
+      setEnrichStatus({ tone: 'err', text: '请先填写标题或 DOI 后再联网精准校对。' })
+      return
+    }
+    setEnriching(true)
+    setEnrichStatus(null)
+    try {
+      const res = await window.paperflow.enrichCitationMetadata({
+        ...(queryDoi ? { doi: queryDoi } : {}),
+        ...(queryTitle ? { title: queryTitle } : {})
+      })
+      if (res.matched && res.citation) {
+        const enriched = res.citation
+        const nextAuthors = enriched.authors.length > 0 ? enriched.authors : meta.authors
+        if (enriched.authors.length > 0) {
+          setAuthorsDraft(enriched.authors.join(', '))
+        }
+        updateMeta({
+          title: enriched.title || meta.title,
+          authors: nextAuthors,
+          year: enriched.year || meta.year,
+          venue: enriched.venue || meta.venue,
+          doi: enriched.doi || meta.doi
+        })
+        setEnrichStatus({ tone: 'ok', text: res.message })
+      } else {
+        setEnrichStatus({ tone: 'info', text: res.message })
+      }
+    } catch (err: unknown) {
+      setEnrichStatus({
+        tone: 'err',
+        text: err instanceof Error ? err.message : '联网精准校对失败，请稍后重试。'
+      })
+    } finally {
+      setEnriching(false)
+    }
+  }
+
   const handleCopy = async (): Promise<void> => {
     try {
       if (window.paperflow?.copyText) {
@@ -149,7 +196,7 @@ export function CitationModal({
     >
       <div className="translation-modal study-modal study-citation-modal" role="dialog" aria-modal="true" aria-label="一键复制引用">
         <div className="translation-modal__header">
-          <h3>一键复制文献引用</h3>
+          <h3>一键复制文献引用{paneLabel ? ` · ${paneLabel}` : ''}</h3>
           <button type="button" className="translation-modal__close" aria-label="关闭引用窗口" onClick={onClose}>
             ×
           </button>
@@ -159,15 +206,41 @@ export function CitationModal({
           <div className="translation-modal__field">
             <div className="translation-modal__label-row">
               <label className="translation-modal__label" htmlFor="citation-title-input">标题</label>
-              <button
-                type="button"
-                className="study-citation-reextract"
-                disabled={extracting}
-                onClick={() => void runExtractFromFirstPage()}
-              >
-                {extracting ? '提取中…' : '从第 1 页重新提取'}
-              </button>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="study-citation-reextract"
+                  data-testid="citation-enrich-btn"
+                  disabled={enriching || extracting}
+                  onClick={() => void handleEnrichOnline()}
+                >
+                  {enriching ? '校对中…' : '联网精准校对'}
+                </button>
+                <button
+                  type="button"
+                  className="study-citation-reextract"
+                  disabled={extracting || enriching}
+                  onClick={() => void runExtractFromFirstPage()}
+                >
+                  {extracting ? '提取中…' : '从第 1 页重新提取'}
+                </button>
+              </div>
             </div>
+            {enrichStatus ? (
+              <div
+                role="status"
+                data-testid="citation-enrich-status"
+                className={
+                  enrichStatus.tone === 'ok'
+                    ? 'translation-modal__status translation-modal__status--ok'
+                    : enrichStatus.tone === 'err'
+                      ? 'translation-modal__status translation-modal__status--err'
+                      : 'translation-modal__hint'
+                }
+              >
+                {enrichStatus.text}
+              </div>
+            ) : null}
             <input
               id="citation-title-input"
               type="text"

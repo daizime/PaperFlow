@@ -13,6 +13,47 @@ html[data-theme="sepia"] .workspace-topbar {
   color: #5b4d38;
 }
 
+html[data-theme="sepia"] .app-header button {
+  color: #5b4d38;
+}
+
+html[data-theme="sepia"] .app-header button:hover:enabled {
+  background: rgba(140, 90, 24, 0.1);
+}
+
+html[data-theme="sepia"] .app-header button.is-active,
+html[data-theme="sepia"] .app-header button.is-collapsed {
+  background: #efe0bf;
+  color: #6b4210;
+}
+
+html[data-theme="sepia"] .app-header__divider {
+  background: #d8cba8;
+}
+
+html[data-theme="sepia"] .app-header__focus-pill,
+html[data-theme="sepia"] .study-companion-pane-badge {
+  background: #efe0bf;
+  color: #6b4210;
+}
+
+html[data-theme="sepia"] .app-header__engine-btn {
+  background: #f5ebd4 !important;
+  border-color: #d6c198 !important;
+  color: #6b4210 !important;
+}
+
+html[data-theme="sepia"] .app-header__engine-btn:hover:enabled {
+  background: #efe0bf !important;
+  border-color: #c2a773 !important;
+}
+
+html[data-theme="sepia"] .app-header__engine-btn.is-low-balance {
+  background: #fbf0d8 !important;
+  border-color: #d69833 !important;
+  color: #7c4706 !important;
+}
+
 html[data-theme="sepia"] .local-badge {
   background: #ebe2ce;
   color: #6b5b44;
@@ -56,6 +97,47 @@ html[data-theme="sepia"] .study-peek-card__caption-strip {
   background: #f7f1e3;
   border-color: #d8cba8;
   color: #4a3f2d;
+}
+
+html[data-theme="sepia"] .reader-outline,
+html[data-theme="sepia"] .reader-search-bar {
+  background: #f6efe0;
+  border-color: #dcd0b6;
+  color: #3d3324;
+}
+
+html[data-theme="sepia"] .reader-outline__header {
+  border-bottom-color: #e2d7be;
+  color: #4a3f2d;
+}
+
+html[data-theme="sepia"] .reader-outline__badge {
+  background: #efe0bf;
+  border-color: #cfb47b;
+  color: #6b4210;
+}
+
+html[data-theme="sepia"] .reader-outline__item {
+  color: #3d3324;
+  background: transparent;
+}
+
+html[data-theme="sepia"] .reader-outline__item:hover:enabled {
+  background: #efe3c6;
+  border-color: #d7c39a;
+}
+
+html[data-theme="sepia"] .reader-outline__item.is-active {
+  background: #ead7ad;
+  border-color: #cfa96b;
+  color: #5b380f;
+}
+
+html[data-theme="sepia"] .reader-outline__page,
+html[data-theme="sepia"] .reader-outline__group,
+html[data-theme="sepia"] .reader-outline__empty,
+html[data-theme="sepia"] .reader-outline__status {
+  color: #7c6c51;
 }
 
 /* 护眼暖纸模式：用正片叠底（multiply）给白纸与译文页面真实着暖米色，同时保持文字与图表清晰锐利 */
@@ -195,6 +277,55 @@ html[data-theme="dark"] button:not(.study-color-dot) {
 html[data-theme="dark"] button:not(.study-color-dot):hover:enabled {
   background: #2d3748;
   border-color: #536fa3;
+}
+
+html[data-theme="dark"] .app-header button:not(.study-color-dot) {
+  background: transparent;
+  border-color: transparent;
+  color: #cdd7e6;
+}
+
+html[data-theme="dark"] .app-header button:not(.study-color-dot):hover:enabled {
+  background: rgba(92, 141, 240, 0.14);
+  border-color: transparent;
+}
+
+html[data-theme="dark"] .app-header button.is-active,
+html[data-theme="dark"] .app-header button.is-collapsed {
+  background: #213455;
+  border-color: transparent;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] .app-header__divider {
+  background: #2e3748;
+}
+
+html[data-theme="dark"] .app-header__focus-pill,
+html[data-theme="dark"] .study-companion-pane-badge {
+  background: #213455;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] .app-header__engine-btn {
+  background: #1b283f !important;
+  border-color: #364e78 !important;
+  color: #b7d0ff !important;
+}
+
+html[data-theme="dark"] .app-header__engine-btn:hover:enabled {
+  background: #213455 !important;
+  border-color: #4f77c4 !important;
+}
+
+html[data-theme="dark"] .app-header__engine-btn.is-low-balance {
+  background: #332411 !important;
+  border-color: #b7771e !important;
+  color: #fcd378 !important;
+}
+
+html[data-theme="dark"] .app-header__engine-btn.is-low-balance .app-header__engine-dot {
+  background: #f59e0b;
 }
 
 html[data-theme="dark"] button.is-active,
@@ -378,22 +509,276 @@ html[data-theme="dark"] .reader-outline__badge {
   color: #b7d0ff;
 }
 
+html[data-theme="dark"] .reader-outline__header {
+  border-bottom-color: #2c3442;
+  color: #e4eaf5;
+}
+
+html[data-theme="dark"] .reader-outline__close {
+  background: transparent;
+  border-color: transparent;
+  color: #9ba8be;
+}
+
+html[data-theme="dark"] .reader-outline__close:hover:enabled {
+  background: #283244;
+  border-color: transparent;
+  color: #eef3fb;
+}
+
+html[data-theme="dark"] .reader-outline__item {
+  background: transparent;
+  border-color: transparent;
+  color: #cdd7e6;
+}
+
+html[data-theme="dark"] .reader-outline__item:hover:enabled {
+  background: #253042;
+  border-color: #3a4c6b;
+  color: #eef3fb;
+}
+
+html[data-theme="dark"] .reader-outline__item.is-active {
+  background: #223456;
+  border-color: #4f77c4;
+  color: #c8dcff;
+}
+
+html[data-theme="dark"] .reader-outline__page,
+html[data-theme="dark"] .reader-outline__group,
+html[data-theme="dark"] .reader-outline__empty,
+html[data-theme="dark"] .reader-outline__status {
+  color: #8f9db3;
+}
+
+html[data-theme="dark"] .split-panes-stage .reader-panel .reader-outline {
+  box-shadow: 8px 0 26px rgba(0, 0, 0, 0.55);
+}
+
 /* PDF 原页与译文底图在深色模式下做柔和反转色，避免白纸刺眼同时保留图表色相 */
+html[data-theme="dark"] .pdf-page,
+html[data-theme="dark"] .translation-page {
+  background: #232323;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.48);
+}
+
 html[data-theme="dark"] .pdf-page canvas,
 html[data-theme="dark"] .translation-page-bg {
   filter: invert(0.88) hue-rotate(180deg) contrast(0.95);
 }
 
-html[data-theme="dark"] .translation-overlay-mask {
-  background-color: #1c212b !important;
+html[data-theme="dark"] .translation-overlay-mask,
+html[data-theme="dark"] .translation-overlay-block.is-translated {
+  background-color: var(--overlay-bg-dark, #232323);
 }
 
 html[data-theme="dark"] .translation-overlay-block.is-translated {
-  color: #e3e9f4;
+  color: #e2e8f2;
 }
 
-/* 主题与视图分段切换胶囊 */
-.theme-switcher,
+html[data-theme="dark"] .translation-overlay-block--heading .translation-overlay-block__text {
+  color: #f0f4fa;
+}
+
+html[data-theme="dark"] .translation-overlay-block--caption .translation-overlay-block__text {
+  color: #b8c4d6;
+}
+
+html[data-theme="dark"] .translation-overlay-block.is-translated:hover {
+  outline-color: rgba(114, 166, 255, 0.48);
+}
+
+html[data-theme="dark"] .translation-overlay-block.is-pending {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(34, 42, 56, 0.9);
+  color: #9ec0ff;
+}
+
+html[data-theme="dark"] .translation-inline-formula {
+  filter: invert(0.88) hue-rotate(180deg) contrast(0.95);
+  mix-blend-mode: lighten;
+}
+
+html[data-theme="dark"] .pdf-sentence-highlight,
+html[data-theme="dark"] .translation-sentence-polygon {
+  fill: rgba(96, 165, 250, 0.10);
+  stroke: rgba(125, 178, 255, 0.70);
+  stroke-width: 1.15;
+}
+
+html[data-theme="dark"] .translation-overlay-sentence:hover,
+html[data-theme="dark"] .translation-mirror-sentence:hover {
+  background: rgba(96, 165, 250, 0.16);
+}
+
+html[data-theme="dark"] .workspace.workspace--reading-dual .translation-panel {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.36);
+}
+
+html[data-theme="dark"] .translation-resizer::after {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+html[data-theme="dark"] .translation-resizer:hover,
+html[data-theme="dark"] .translation-resizer.is-dragging {
+  background: rgba(96, 165, 250, 0.16);
+}
+
+html[data-theme="dark"] .translation-resizer:hover::after,
+html[data-theme="dark"] .translation-resizer.is-dragging::after {
+  background: #6ea4ff;
+}
+
+/* 主题下拉菜单与视图分段切换胶囊 */
+.theme-menu-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.app-header .app-header__theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid #d7deea;
+  background: #f5f7fb;
+  color: #354258;
+}
+
+.app-header .app-header__theme-btn:hover:enabled {
+  background: #e9f0fc;
+  border-color: #a9bee9;
+}
+
+.app-header .app-header__theme-btn.is-active {
+  background: #eaf0fc;
+  border-color: #7ea0de;
+  color: #2c529a;
+}
+
+.app-header__theme-caret {
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+.app-header .theme-menu-popover {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 70;
+  min-width: 108px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid #cfd9e7;
+  background: #ffffff;
+  box-shadow: 0 12px 26px rgba(24, 34, 51, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-header .theme-menu-popover button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #354258;
+  font-size: 12px;
+  justify-content: flex-start;
+}
+
+.app-header .theme-menu-popover button:hover:enabled {
+  background: #eff4fd;
+  border-color: transparent;
+}
+
+.app-header .theme-menu-popover button.is-selected {
+  background: #eaf0fc;
+  border-color: #c3d5f2;
+  color: #244b91;
+  font-weight: 600;
+}
+
+html[data-theme="sepia"] .app-header .app-header__theme-btn {
+  background: #f2e8d2;
+  border-color: #d6c8ab;
+  color: #5b4d38;
+}
+
+html[data-theme="sepia"] .app-header .app-header__theme-btn:hover:enabled,
+html[data-theme="sepia"] .app-header .app-header__theme-btn.is-active {
+  background: #ead9b5;
+  border-color: #c2a773;
+  color: #5b380f;
+}
+
+html[data-theme="sepia"] .app-header .theme-menu-popover {
+  background: #faf4e6;
+  border-color: #d4c39e;
+  box-shadow: 0 12px 26px rgba(82, 58, 24, 0.2);
+}
+
+html[data-theme="sepia"] .app-header .theme-menu-popover button {
+  color: #4a3f2d;
+}
+
+html[data-theme="sepia"] .app-header .theme-menu-popover button:hover:enabled {
+  background: #efe3c6;
+}
+
+html[data-theme="sepia"] .app-header .theme-menu-popover button.is-selected {
+  background: #ead7ad;
+  border-color: #cfa96b;
+  color: #5b380f;
+}
+
+html[data-theme="dark"] .app-header .app-header__theme-btn {
+  background: #202632;
+  border-color: #313b4c;
+  color: #dce3ef;
+}
+
+html[data-theme="dark"] .app-header .app-header__theme-btn:hover:enabled,
+html[data-theme="dark"] .app-header .app-header__theme-btn.is-active {
+  background: #25344f;
+  border-color: #4f77c4;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] .app-header .theme-menu-popover {
+  background: #1c222e;
+  border-color: #354359;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"] .app-header .theme-menu-popover button:not(.study-color-dot) {
+  background: transparent;
+  border-color: transparent;
+  color: #cdd7e6;
+}
+
+html[data-theme="dark"] .app-header .theme-menu-popover button:not(.study-color-dot):hover:enabled {
+  background: #273244;
+  border-color: transparent;
+  color: #eef3fb;
+}
+
+html[data-theme="dark"] .app-header .theme-menu-popover button:not(.study-color-dot).is-selected {
+  background: #223456;
+  border-color: #4f77c4;
+  color: #c8dcff;
+}
+
+/* 视图分段切换胶囊 */
 .view-mode-switcher {
   display: inline-flex;
   align-items: center;
@@ -405,19 +790,16 @@ html[data-theme="dark"] .translation-overlay-block.is-translated {
   flex-shrink: 0;
 }
 
-html[data-theme="sepia"] .theme-switcher,
 html[data-theme="sepia"] .view-mode-switcher {
   background: #ece3cf;
   border-color: #d6c8ab;
 }
 
-html[data-theme="dark"] .theme-switcher,
 html[data-theme="dark"] .view-mode-switcher {
   background: #141921;
   border-color: #313b4c;
 }
 
-.theme-switcher button,
 .view-mode-switcher button {
   height: 24px;
   padding: 0 8px;
@@ -428,7 +810,6 @@ html[data-theme="dark"] .view-mode-switcher {
   color: inherit;
 }
 
-.theme-switcher button.is-selected,
 .view-mode-switcher button.is-selected {
   background: #ffffff;
   border-color: #c8d4e8;
@@ -436,7 +817,6 @@ html[data-theme="dark"] .view-mode-switcher {
   font-weight: 600;
 }
 
-html[data-theme="dark"] .theme-switcher button.is-selected,
 html[data-theme="dark"] .view-mode-switcher button.is-selected {
   background: #2a3548;
   border-color: #4f77c4;

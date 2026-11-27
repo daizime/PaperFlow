@@ -31,6 +31,7 @@ export interface SelectionSentenceMatch {
   sentenceIds: string[]
   blockKeys: string[]
   sourceRects: PageRect[]
+  sentenceRects: PageRect[]
 }
 
 const PROTECTED_ABBR_RE =
@@ -244,7 +245,11 @@ function pointToRectDistance(point: PagePoint, rect: PageRect): number {
 /**
  * 按未缩放 PDF 坐标在页面版面中命中最贴近的原文句子（优先精确内部命中，再回退轻量边沿容差）。
  */
-export function hitTestPageSentence(layout: PageLayoutResult | undefined, pdfPoint: PagePoint): SentenceHitResult | null {
+export function hitTestPageSentence(
+  layout: PageLayoutResult | undefined,
+  pdfPoint: PagePoint,
+  maxDist = 4
+): SentenceHitResult | null {
   if (!layout || !layout.hasText || layout.blocks.length === 0) return null
 
   let best: SentenceHitResult | null = null
@@ -255,7 +260,7 @@ export function hitTestPageSentence(layout: PageLayoutResult | undefined, pdfPoi
     for (const sentence of block.sentences) {
       for (const rect of sentence.rects) {
         const dist = pointToRectDistance(pdfPoint, rect)
-        if (dist > 4) continue
+        if (dist > maxDist) continue
         const area = Math.max(1, rect.width * rect.height)
         if (dist < bestDist - 1e-6 || (Math.abs(dist - bestDist) <= 1e-6 && area < bestArea)) {
           bestDist = dist
@@ -353,13 +358,40 @@ function hasTokenOverlap(
   return false
 }
 
+function hasInternalSentenceBoundary(selectedText: string | undefined): boolean {
+  if (!selectedText) return false
+  const cleaned = selectedText.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return false
+  return splitTranslatedSentences(cleaned).length > 1
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function sentenceContainsFragment(sentenceText: string, normFrag: string, normFragCompact: string): boolean {
+  if (!normFrag) return false
+  const normCand = normalizeSelectionText(sentenceText)
+  if (!/[\u4e00-\u9fff]/.test(normFrag) && /[a-z0-9]/.test(normFrag) && normFrag.length < 4) {
+    const escaped = escapeRegExp(normFrag)
+    const boundaryRe =
+      normFrag.length === 1
+        ? new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`)
+        : new RegExp(`(?:^|[^a-z0-9])${escaped}`)
+    if (boundaryRe.test(normCand)) return true
+    return false
+  }
+  if (normCand.includes(normFrag)) return true
+  return normFragCompact.length >= 2 && toCompactAlphaCjk(normCand).includes(normFragCompact)
+}
+
 function pruneBoundarySelectionCandidates(
   candidates: ScoredSentenceCandidate[],
   selectedText: string | undefined
 ): ScoredSentenceCandidate[] {
   if (!selectedText || candidates.length <= 1) return candidates
   const normSel = normalizeSelectionText(selectedText)
-  if (normSel.length < 2) return candidates
+  if (normSel.length < 1) return candidates
 
   const normSelCompact = toCompactAlphaCjk(normSel)
   const normSelTokens = extractBoundaryTokens(normSel)
@@ -373,9 +405,15 @@ function pruneBoundarySelectionCandidates(
   const normSelTailCompact = toCompactAlphaCjk(normSelTail)
   const normSelTailSet = new Set(extractBoundaryTokens(normSelTail))
   const selTailTokens = normSelTokens.slice(-2)
+  const hasCjk = /[\u4e00-\u9fff]/.test(normSel)
 
   const sentenceMatchesSelection = (candidate: ScoredSentenceCandidate): boolean => {
     const normCand = normalizeSelectionText(candidate.sentence.text)
+    if (normSelCompact.length === 1) {
+      return hasCjk
+        ? toCompactAlphaCjk(normCand).includes(normSelCompact)
+        : sentenceContainsFragment(candidate.sentence.text, normSel, normSelCompact)
+    }
     const tokens = extractBoundaryTokens(normCand)
     if (tokens.length > 0 && hasTokenOverlap(tokens, normSelTokenSet, normSelCompact)) return true
     return normSelCompact.length >= 2 && toCompactAlphaCjk(normCand).includes(normSelCompact)
@@ -386,15 +424,20 @@ function pruneBoundarySelectionCandidates(
   while (kept.length > 1) {
     const first = kept[0]
     if (first.strictOverlapArea / first.sentenceArea >= 0.35) break
-    const firstTokens = extractBoundaryTokens(normalizeSelectionText(first.sentence.text))
-    if (firstTokens.length === 0) break
+    const firstNorm = normalizeSelectionText(first.sentence.text)
+    const firstTokens = extractBoundaryTokens(firstNorm)
+    const firstTailWindow = firstNorm.slice(Math.max(0, firstNorm.length - 24))
+    const firstTailWindowCompact = toCompactAlphaCjk(firstTailWindow)
+    if (firstTokens.length === 0 && !firstTailWindowCompact) break
     const firstTailTokens = firstTokens.slice(-3)
-    const firstTokenSet = new Set(firstTokens)
-    const firstCompact = toCompactAlphaCjk(normalizeSelectionText(first.sentence.text))
+    const firstTailTokenSet = new Set(firstTailTokens)
 
     const matchesHead =
-      hasTokenOverlap(firstTailTokens, normSelHeadSet, normSelHeadCompact) ||
-      hasTokenOverlap(selLeadTokens, firstTokenSet, firstCompact)
+      normSelCompact.length === 1
+        ? hasCjk && firstTailWindowCompact.includes(normSelCompact)
+        : hasTokenOverlap(firstTailTokens, normSelHeadSet, normSelHeadCompact) ||
+          hasTokenOverlap(selLeadTokens, firstTailTokenSet, firstTailWindowCompact) ||
+          ((hasCjk || normSelHeadCompact.length >= 4) && firstTailWindowCompact.includes(normSelHeadCompact))
     if (matchesHead) break
 
     const rest = kept.slice(1)
@@ -405,15 +448,20 @@ function pruneBoundarySelectionCandidates(
   while (kept.length > 1) {
     const last = kept[kept.length - 1]
     if (last.strictOverlapArea / last.sentenceArea >= 0.35) break
-    const lastTokens = extractBoundaryTokens(normalizeSelectionText(last.sentence.text))
-    if (lastTokens.length === 0) break
+    const lastNorm = normalizeSelectionText(last.sentence.text)
+    const lastTokens = extractBoundaryTokens(lastNorm)
+    const lastHeadWindow = lastNorm.slice(0, Math.min(lastNorm.length, 24))
+    const lastHeadWindowCompact = toCompactAlphaCjk(lastHeadWindow)
+    if (lastTokens.length === 0 && !lastHeadWindowCompact) break
     const lastHeadTokens = lastTokens.slice(0, 3)
-    const lastTokenSet = new Set(lastTokens)
-    const lastCompact = toCompactAlphaCjk(normalizeSelectionText(last.sentence.text))
+    const lastHeadTokenSet = new Set(lastHeadTokens)
 
     const matchesTail =
-      hasTokenOverlap(lastHeadTokens, normSelTailSet, normSelTailCompact) ||
-      hasTokenOverlap(selTailTokens, lastTokenSet, lastCompact)
+      normSelCompact.length === 1
+        ? hasCjk && lastHeadWindowCompact.includes(normSelCompact)
+        : hasTokenOverlap(lastHeadTokens, normSelTailSet, normSelTailCompact) ||
+          hasTokenOverlap(selTailTokens, lastHeadTokenSet, lastHeadWindowCompact) ||
+          ((hasCjk || normSelTailCompact.length >= 4) && lastHeadWindowCompact.includes(normSelTailCompact))
     if (matchesTail) break
 
     const rest = kept.slice(0, -1)
@@ -422,6 +470,94 @@ function pruneBoundarySelectionCandidates(
   }
 
   return kept
+}
+
+function disambiguateSingleLineFragmentCandidates(
+  layout: PageLayoutResult,
+  pageRegions: readonly PdfSelectionRegion[],
+  chosen: ScoredSentenceCandidate[],
+  selectedText: string | undefined
+): ScoredSentenceCandidate[] {
+  if (pageRegions.length !== 1 || chosen.length === 0 || hasInternalSentenceBoundary(selectedText)) {
+    return chosen
+  }
+
+  const pr = pageRegions[0].rect
+  const normSel = selectedText ? normalizeSelectionText(selectedText) : ''
+  const normSelCompact = toCompactAlphaCjk(normSel)
+
+  if (chosen.length > 1) {
+    if (normSel.length >= 1) {
+      const textMatched = chosen.filter(candidate =>
+        sentenceContainsFragment(candidate.sentence.text, normSel, normSelCompact)
+      )
+      if (textMatched.length === 1) {
+        return [textMatched[0]]
+      }
+    }
+
+    const scoreOf = (candidate: ScoredSentenceCandidate): number =>
+      candidate.strictOverlapArea > 0 ? candidate.strictOverlapArea : candidate.looseOverlapArea
+    const ranked = [...chosen].sort((a, b) => scoreOf(b) - scoreOf(a))
+    const total = ranked.reduce((sum, item) => sum + scoreOf(item), 0)
+    const best = scoreOf(ranked[0])
+    const second = scoreOf(ranked[1])
+    if (total > 0 && (best / total >= 0.62 || best >= second * 1.45)) {
+      return [ranked[0]]
+    }
+    return chosen
+  }
+
+  const sole = chosen[0]
+  const canCheckSeamDrift = normSel.length >= 2 || /[\u4e00-\u9fff]/.test(normSel)
+  if (!canCheckSeamDrift || sentenceContainsFragment(sole.sentence.text, normSel, normSelCompact)) {
+    return chosen
+  }
+
+  const hostBlock = layout.blocks.find(block => computeStableTranslationBlockKey(block) === sole.blockKey)
+  if (!hostBlock || hostBlock.sentences.length <= 1) return chosen
+
+  let bestNeighbor: { sentence: AnalyzedSentence; gapX: number } | null = null
+  for (const neighbor of hostBlock.sentences) {
+    if (neighbor.order !== sole.sentence.order - 1 && neighbor.order !== sole.sentence.order + 1) continue
+
+    const normNeighbor = normalizeSelectionText(neighbor.text)
+    const windowText =
+      neighbor.order > sole.sentence.order
+        ? normNeighbor.slice(0, Math.min(normNeighbor.length, 72))
+        : normNeighbor.slice(Math.max(0, normNeighbor.length - 72))
+    const windowCompact = toCompactAlphaCjk(windowText)
+    const matchesWindow =
+      windowText.includes(normSel) || (normSelCompact.length >= 2 && windowCompact.includes(normSelCompact))
+    if (!matchesWindow) continue
+
+    let minGapX = Number.POSITIVE_INFINITY
+    for (const sr of neighbor.rects) {
+      const overlapY = Math.min(sr.y + sr.height, pr.y + pr.height) - Math.max(sr.y, pr.y)
+      if (overlapY < Math.min(sr.height, pr.height) * 0.25) continue
+      const gapX = Math.max(0, sr.x - (pr.x + pr.width), pr.x - (sr.x + sr.width))
+      if (gapX <= 28 && gapX < minGapX) {
+        minGapX = gapX
+      }
+    }
+    if (minGapX <= 28 && (!bestNeighbor || minGapX < bestNeighbor.gapX)) {
+      bestNeighbor = { sentence: neighbor, gapX: minGapX }
+    }
+  }
+
+  if (bestNeighbor) {
+    return [
+      {
+        sentence: bestNeighbor.sentence,
+        blockKey: sole.blockKey,
+        strictOverlapArea: 1,
+        looseOverlapArea: 1,
+        sentenceArea: 1
+      }
+    ]
+  }
+
+  return chosen
 }
 
 /**
@@ -453,15 +589,49 @@ export function matchSelectionRegionsToSentences(
     pageRegions.map(r => r.rect),
     sentence => sentence.rects
   )
-  if (scored.length === 0) return null
 
-  const strictCandidates = scored.filter(candidate => candidate.strictOverlapArea > 0)
-  const chosen =
-    strictCandidates.length > 0
-      ? pruneBoundarySelectionCandidates(strictCandidates, selectedText)
-      : [pickMaxLooseCandidate(scored)]
+  let chosen: ScoredSentenceCandidate[]
+  if (scored.length > 0) {
+    const strictCandidates = scored.filter(candidate => candidate.strictOverlapArea > 0)
+    chosen =
+      strictCandidates.length > 0
+        ? pruneBoundarySelectionCandidates(strictCandidates, selectedText)
+        : [pickMaxLooseCandidate(scored)]
+  } else {
+    const seenFallback = new Set<string>()
+    const fallbackCandidates: ScoredSentenceCandidate[] = []
+    for (const region of pageRegions) {
+      const center = {
+        x: region.rect.x + region.rect.width / 2,
+        y: region.rect.y + region.rect.height / 2
+      }
+      const hit = hitTestPageSentence(targetLayout, center, 12)
+      if (hit && !seenFallback.has(hit.sentence.id)) {
+        seenFallback.add(hit.sentence.id)
+        const area = hit.sentence.rects.reduce((sum, sr) => sum + Math.max(1, sr.width * sr.height), 0)
+        fallbackCandidates.push({
+          sentence: hit.sentence,
+          blockKey: hit.blockKey,
+          strictOverlapArea: 0,
+          looseOverlapArea: 1,
+          sentenceArea: Math.max(1, area)
+        })
+      }
+    }
+    if (fallbackCandidates.length === 0) return null
+    chosen = pruneBoundarySelectionCandidates(fallbackCandidates, selectedText)
+  }
 
-  return buildSelectionMatchFromChosen(targetPageNumber, chosen)
+  chosen = disambiguateSingleLineFragmentCandidates(targetLayout, pageRegions, chosen, selectedText)
+
+  const match = buildSelectionMatchFromChosen(targetPageNumber, chosen)
+  if (!match) return null
+
+  const exactRects = pageRegions
+    .map(r => r.rect)
+    .filter(r => Number.isFinite(r.x) && Number.isFinite(r.y) && r.width > 0 && r.height > 0)
+    .slice(0, 200)
+  return exactRects.length > 0 ? { ...match, sourceRects: exactRects, sentenceRects: match.sentenceRects } : match
 }
 
 function scoreLayoutSentencesAgainstRects(
@@ -486,10 +656,15 @@ function scoreLayoutSentencesAgainstRects(
           if (!overlap) continue
           const minH = Math.max(0.5, Math.min(sr.height, pr.height))
           const minW = Math.max(0.5, Math.min(sr.width, pr.width))
-          if (overlap.oh >= minH * 0.35 && overlap.ow >= 1.5) {
+          const isNarrowTarget = pr.width < 10
+          const looseMinH = isNarrowTarget ? 0.25 : 0.35
+          const looseMinW = isNarrowTarget ? Math.min(0.6, minW * 0.4) : 1.5
+          const strictMinH = isNarrowTarget ? 0.4 : 0.45
+          const strictMinW = isNarrowTarget ? Math.min(0.8, minW * 0.5) : 1.5
+          if (overlap.oh >= minH * looseMinH && overlap.ow >= looseMinW) {
             looseOverlapArea += overlap.area
           }
-          if (overlap.oh >= minH * 0.45 && overlap.ow >= 1.5 && overlap.ow >= Math.min(minW * 0.5, 14)) {
+          if (overlap.oh >= minH * strictMinH && overlap.ow >= strictMinW && overlap.ow >= Math.min(minW * 0.5, 14)) {
             strictOverlapArea += overlap.area
           }
         }
@@ -526,7 +701,7 @@ function buildSelectionMatchFromChosen(
 ): SelectionSentenceMatch | null {
   const sentenceIds: string[] = []
   const blockKeys: string[] = []
-  const sourceRects: PageRect[] = []
+  const sentenceRects: PageRect[] = []
   const seenSentences = new Set<string>()
   const seenBlocks = new Set<string>()
 
@@ -535,9 +710,9 @@ function buildSelectionMatchFromChosen(
       seenSentences.add(candidate.sentence.id)
       sentenceIds.push(candidate.sentence.id)
       if (candidate.sentence.rects.length > 0) {
-        sourceRects.push(...candidate.sentence.rects)
+        sentenceRects.push(...candidate.sentence.rects)
       } else if (candidate.blockBounds) {
-        sourceRects.push(candidate.blockBounds)
+        sentenceRects.push(candidate.blockBounds)
       }
     }
     if (!seenBlocks.has(candidate.blockKey)) {
@@ -551,7 +726,8 @@ function buildSelectionMatchFromChosen(
     pageNumber,
     sentenceIds,
     blockKeys,
-    sourceRects
+    sourceRects: [...sentenceRects],
+    sentenceRects
   }
 }
 
@@ -651,7 +827,14 @@ export function resolveMirrorDragSelection(
   if (scored.length === 0) return null
 
   const strictCandidates = scored.filter(candidate => candidate.strictOverlapArea > 0)
-  const chosen = strictCandidates.length > 0 ? strictCandidates : [pickMaxLooseCandidate(scored)]
+  let chosen = strictCandidates.length > 0 ? strictCandidates : [pickMaxLooseCandidate(scored)]
+  if (strictCandidates.length > 1 && dragRect.height <= Math.max(layout.bodyFontSize * 2.2, 24)) {
+    const totalStrict = strictCandidates.reduce((sum, item) => sum + item.strictOverlapArea, 0)
+    const sortedStrict = [...strictCandidates].sort((a, b) => b.strictOverlapArea - a.strictOverlapArea)
+    if (totalStrict > 0 && sortedStrict[0].strictOverlapArea / totalStrict >= 0.72) {
+      chosen = [sortedStrict[0]]
+    }
+  }
   const match = buildSelectionMatchFromChosen(layout.pageNumber, chosen)
   return match ? { ...match, usedMarquee: true } : null
 }

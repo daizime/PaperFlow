@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { extractCleanPaperTitle, isLikelyMessyAcademicFilename } from '../../src/shared/citation'
 import {
-  displayTitleSchema, documentIdArgsSchema, importPdfBytesArgsSchema, noArgsSchema,
-  pageCountArgsSchema, readerStateSchema, renameDocumentArgsSchema
+  clearChatMessagesArgsSchema,
+  createFolderArgsSchema, deleteFolderArgsSchema, displayTitleSchema, documentIdArgsSchema,
+  exportFolderPdfsArgsSchema, getDocumentTranslationScopeArgsSchema, importFolderArgsSchema,
+  importPdfBytesArgsSchema, listChatMessagesArgsSchema, noArgsSchema, pageCountArgsSchema,
+  readerStateSchema, renameDocumentArgsSchema, saveResearchProfileArgsSchema,
+  sendAiChatArgsSchema, updateDocumentMetaArgsSchema, updateFolderArgsSchema
 } from '../../src/shared/schemas'
 
 describe('IPC 参数验证', () => {
@@ -48,5 +53,181 @@ describe('IPC 参数验证', () => {
     expect(importPdfBytesArgsSchema.safeParse([{ originalFilename: 'a.pdf', bytes: sample, path: '/etc/passwd' }]).success).toBe(false)
     expect(importPdfBytesArgsSchema.safeParse([{ originalFilename: 'a.pdf', bytes: [37, 80, 68, 70] }]).success).toBe(false)
     expect(importPdfBytesArgsSchema.safeParse([{ originalFilename: 'a.pdf', bytes: sample }, 'extra']).success).toBe(false)
+  })
+
+  it('研究向导配置参数校验模式、门类、范式、课题长度与控制字符', () => {
+    expect(
+      saveResearchProfileArgsSchema.safeParse([
+        {
+          completed: true,
+          mode: 'direct',
+          stage: 'master-1',
+          facultyId: 'chem-mat',
+          selectedTrackIds: ['chem-energy'],
+          customTopic: '钙钛矿太阳能电池',
+          paradigm: 'exp',
+          readingGoal: 'survey',
+          recommendedTags: ['电催化', '钙钛矿'],
+          applyStarterGlossary: true
+        }
+      ]).success
+    ).toBe(true)
+
+    expect(
+      saveResearchProfileArgsSchema.safeParse([
+        {
+          completed: true,
+          mode: 'skipped',
+          stage: 'phd',
+          facultyId: '',
+          selectedTrackIds: [],
+          customTopic: '',
+          paradigm: 'theory',
+          readingGoal: 'writing',
+          recommendedTags: [],
+          applyStarterGlossary: false
+        }
+      ]).success
+    ).toBe(true)
+
+    // 控制字符 / 超长自定义课题 / 非法字段应拒绝
+    expect(
+      saveResearchProfileArgsSchema.safeParse([
+        {
+          completed: true,
+          mode: 'direct',
+          stage: 'master-1',
+          facultyId: 'bio-med',
+          selectedTrackIds: ['bio-cell'],
+          customTopic: 'bad\x00topic',
+          paradigm: 'exp',
+          readingGoal: 'survey',
+          recommendedTags: ['分子细胞']
+        }
+      ]).success
+    ).toBe(false)
+
+    expect(
+      saveResearchProfileArgsSchema.safeParse([
+        {
+          completed: true,
+          mode: 'direct',
+          stage: 'master-1',
+          facultyId: 'bio-med',
+          selectedTrackIds: ['bio-cell'],
+          customTopic: 'a'.repeat(161),
+          paradigm: 'exp',
+          readingGoal: 'survey',
+          recommendedTags: []
+        }
+      ]).success
+    ).toBe(false)
+
+    expect(
+      saveResearchProfileArgsSchema.safeParse([
+        {
+          completed: true,
+          mode: 'direct',
+          stage: 'master-1',
+          facultyId: 'bio-med',
+          selectedTrackIds: [],
+          customTopic: '',
+          paradigm: 'exp',
+          readingGoal: 'survey',
+          recommendedTags: [],
+          unexpectedField: true
+        }
+      ]).success
+    ).toBe(false)
+  })
+
+  it('分类文件夹与文献 folderId 参数校验名称、深度字段与 UUID', () => {
+    expect(
+      createFolderArgsSchema.safeParse([
+        {
+          parentId: null,
+          name: '电催化与新能源',
+          facultyId: 'chem-mat',
+          contextSummary: '过电位与原位表征研究',
+          glossary: [{ source: 'ablation', target: '激光烧蚀' }],
+          inheritGlobalGlossary: false
+        }
+      ]).success
+    ).toBe(true)
+    expect(createFolderArgsSchema.safeParse([{ name: '   ' }]).success).toBe(false)
+    expect(createFolderArgsSchema.safeParse([{ name: 'a'.repeat(65) }]).success).toBe(false)
+    expect(updateFolderArgsSchema.safeParse([{ id, name: '新名字', inheritGlobalGlossary: true }]).success).toBe(true)
+    expect(updateFolderArgsSchema.safeParse([{ id: 'bad-id', name: '新名字' }]).success).toBe(false)
+    expect(deleteFolderArgsSchema.safeParse([id]).success).toBe(true)
+    expect(exportFolderPdfsArgsSchema.safeParse([{ scope: 'all', includeAnnotations: true }]).success).toBe(true)
+    expect(exportFolderPdfsArgsSchema.safeParse([{ scope: 'unassigned' }]).success).toBe(true)
+    expect(exportFolderPdfsArgsSchema.safeParse([{ scope: 'folder', folderId: id }]).success).toBe(true)
+    expect(exportFolderPdfsArgsSchema.safeParse([{ scope: 'folder' }]).success).toBe(false)
+    expect(exportFolderPdfsArgsSchema.safeParse([{ scope: 'all', folderId: id }]).success).toBe(false)
+    expect(importFolderArgsSchema.safeParse([]).success).toBe(true)
+    expect(importFolderArgsSchema.safeParse([{ parentFolderId: null }]).success).toBe(true)
+    expect(importFolderArgsSchema.safeParse([{ parentFolderId: id }]).success).toBe(true)
+    expect(importFolderArgsSchema.safeParse([{ parentFolderId: 'bad' }]).success).toBe(false)
+    expect(getDocumentTranslationScopeArgsSchema.safeParse([id]).success).toBe(true)
+    expect(getDocumentTranslationScopeArgsSchema.safeParse(['bad']).success).toBe(false)
+    expect(updateDocumentMetaArgsSchema.safeParse([{ documentId: id, folderId: id }]).success).toBe(true)
+    expect(updateDocumentMetaArgsSchema.safeParse([{ documentId: id, folderId: null }]).success).toBe(true)
+    expect(updateDocumentMetaArgsSchema.safeParse([{ documentId: id, folderId: 'not-uuid' }]).success).toBe(false)
+
+    expect(listChatMessagesArgsSchema.safeParse([`doc:${id}`]).success).toBe(true)
+    expect(listChatMessagesArgsSchema.safeParse(['bad key with spaces']).success).toBe(false)
+    expect(clearChatMessagesArgsSchema.safeParse(['workspace:general']).success).toBe(true)
+    expect(
+      sendAiChatArgsSchema.safeParse([
+        {
+          sessionKey: `doc:${id}`,
+          question: '请对比左栏与右栏文献的核心方法差异。',
+          scope: 'all-open',
+          quoteText: 'Overpotential reached 210 mV.',
+          contexts: [
+            { documentId: id, title: 'Paper A', paneLabel: '左栏', pageNumber: 1, excerpt: 'Sample excerpt' }
+          ]
+        }
+      ]).success
+    ).toBe(true)
+    expect(
+      sendAiChatArgsSchema.safeParse([
+        {
+          sessionKey: `doc:${id}`,
+          question: '   ',
+          scope: 'active',
+          contexts: []
+        }
+      ]).success
+    ).toBe(false)
+  })
+
+  it('乱码/编号学术文件名识别与干净标题提取', () => {
+    expect(isLikelyMessyAcademicFilename('2405.12345.pdf')).toBe(true)
+    expect(isLikelyMessyAcademicFilename('1-s2.0-S0092867423001234-main.pdf')).toBe(true)
+    expect(isLikelyMessyAcademicFilename('s41586-023-06747-5.pdf')).toBe(true)
+    expect(isLikelyMessyAcademicFilename('main.pdf')).toBe(true)
+    expect(isLikelyMessyAcademicFilename('paper.pdf')).toBe(false)
+    expect(isLikelyMessyAcademicFilename('Attention Is All You Need.pdf')).toBe(false)
+
+    expect(
+      extractCleanPaperTitle(
+        {
+          page1Text: 'Electrochemical Water Splitting\nJohn Doe',
+          pdfInfo: { title: 'Efficient Electrocatalytic Oxygen Evolution' }
+        },
+        '2405.12345'
+      )
+    ).toBe('Efficient Electrocatalytic Oxygen Evolution')
+
+    expect(
+      extractCleanPaperTitle(
+        {
+          page1Text: 'Abstract only',
+          pdfInfo: { title: '2405.12345' }
+        },
+        '2405.12345'
+      )
+    ).toBeNull()
   })
 })

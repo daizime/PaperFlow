@@ -119,9 +119,17 @@ describe('Stage 2 & 3 schemas', () => {
       sentenceIds: ['p1-s1']
     })
     expect(annInput.color).toBe('blue')
+    expect(
+      createAnnotationInputSchema.parse({
+        ...annInput,
+        note: 'AI 对话页面总结笔记',
+        rects: []
+      }).rects
+    ).toEqual([])
     expect(() =>
       createAnnotationInputSchema.parse({
         ...annInput,
+        note: '',
         rects: []
       })
     ).toThrow()
@@ -232,7 +240,7 @@ describe('Database v3 migration, annotations CRUD, and Markdown export', () => {
     db.deleteDocument(docId)
     const inspect = new Database(dbPath, { readonly: true })
     try {
-      expect(inspect.pragma('user_version', { simple: true })).toBe(4)
+      expect(inspect.pragma('user_version', { simple: true })).toBe(7)
       expect(inspect.prepare('SELECT COUNT(*) AS cnt FROM annotations').get()).toEqual({ cnt: 0 })
     } finally {
       inspect.close()
@@ -325,6 +333,15 @@ describe('TranslationService glossary, streaming progress, and explainSelection'
     )
     expect(explainPrompt).toContain('- factorized join => 因式分解连接')
     expect(explainPrompt).toContain('目标公式/表达式')
+
+    const unifiedExplainPrompt = buildExplainPrompt(
+      { pageNumber: 1, selectedText: 'Compute δS in O(1) time.', contextText: 'Factorized join model.', mode: 'explain' },
+      'zh-CN',
+      saved.glossary
+    )
+    expect(unifiedExplainPrompt).toContain('自动判断正文或公式')
+    expect(unifiedExplainPrompt).toContain('逐项拆解关键变量、上下标与运算符')
+    expect(unifiedExplainPrompt).toContain('技术方法、因果逻辑或关键术语含义')
 
     // 超过单批上限（2400 字）以触发多批渐进回调
     const blocks = Array.from({ length: 12 }, (_, idx) => {

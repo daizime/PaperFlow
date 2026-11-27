@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 import { getDocument, type PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
-  clientPointToPdf, pdfPointToViewport, pdfRectToViewport, viewportPointToPdf, viewportRectToPdf,
+  MAX_CANVAS_DIMENSION, MAX_CANVAS_PIXELS,
+  clientPointToPdf, computeCanvasRenderRatio, hitTestPageAnnotation, pdfPointToViewport, pdfRectToViewport, viewportPointToPdf, viewportRectToPdf,
   type PageGeometry, type PagePoint
 } from '../../src/renderer/src/features/reader/pdf-geometry'
 import manifest from '../fixtures/verification/reader/manifest.json'
@@ -128,3 +129,56 @@ test('600-page fixture has valid operator lists on every page and distinct first
     metrics.longPages = document.numPages
   } finally { await task.destroy() }
 }, 30000)
+
+describe('HiDPI canvas supersampling ratio', () => {
+  test('uses integer-multiple supersampling on low-DPR displays and narrow split panes within safe pixel caps', () => {
+    expect(computeCanvasRenderRatio(612, 792, 1.0, 1.0)).toBeCloseTo(2.0, 6)
+    expect(computeCanvasRenderRatio(612, 792, 1.0, 1.25)).toBeCloseTo(2.5, 6)
+    expect(computeCanvasRenderRatio(612, 792, 1.0, 1.5)).toBeCloseTo(3.0, 6)
+
+    // 窄分栏小字号缩放时提升至 3x 过采样，避免锯齿发虚
+    expect(computeCanvasRenderRatio(420, 560, 0.65, 1.0)).toBeCloseTo(3.0, 6)
+    expect(computeCanvasRenderRatio(460, 600, 0.75, 1.25)).toBeCloseTo(3.75, 6)
+
+    // 2x HiDPI 在常规及较高缩放下保持原生 2.0 精度，不被旧 8M 上限提前降级
+    expect(computeCanvasRenderRatio(612, 792, 1.0, 2.0)).toBeCloseTo(2.0, 6)
+    expect(computeCanvasRenderRatio(1530, 1980, 2.5, 2.0)).toBeCloseTo(2.0, 6)
+
+    // 极端大图受 16M 像素与 8192 单边限制
+    const huge = computeCanvasRenderRatio(3200, 4200, 3.0, 2.0)
+    expect(huge).toBeLessThanOrEqual(Math.sqrt(MAX_CANVAS_PIXELS / (3200 * 4200)) + 1e-9)
+    const wide = computeCanvasRenderRatio(5000, 600, 3.0, 2.0)
+    expect(wide * 5000).toBeLessThanOrEqual(MAX_CANVAS_DIMENSION + 1e-6)
+  })
+})
+
+describe('hitTestPageAnnotation', () => {
+  test('prefers exact interior hits, smaller word highlights over enclosing sentences, and newer ties within tolerance', () => {
+    const sentenceAnn = {
+      id: 'ann-sentence',
+      rects: [{ x: 50, y: 600, width: 220, height: 12 }],
+      updatedAt: '2026-11-26T00:00:00Z'
+    }
+    const wordAnn = {
+      id: 'ann-word',
+      rects: [{ x: 110, y: 600, width: 32, height: 12 }],
+      updatedAt: '2026-11-25T00:00:00Z'
+    }
+    const edgeAnnOld = {
+      id: 'ann-edge-old',
+      rects: [{ x: 50, y: 560, width: 80, height: 10 }],
+      updatedAt: '2026-11-25T00:00:00Z'
+    }
+    const edgeAnnNew = {
+      id: 'ann-edge-new',
+      rects: [{ x: 50, y: 560, width: 80, height: 10 }],
+      updatedAt: '2026-11-26T00:00:00Z'
+    }
+    const list = [sentenceAnn, wordAnn, edgeAnnOld, edgeAnnNew]
+
+    expect(hitTestPageAnnotation(list, { x: 125, y: 606 })?.id).toBe('ann-word')
+    expect(hitTestPageAnnotation(list, { x: 70, y: 606 })?.id).toBe('ann-sentence')
+    expect(hitTestPageAnnotation(list, { x: 80, y: 558.5 })?.id).toBe('ann-edge-new')
+    expect(hitTestPageAnnotation(list, { x: 80, y: 555 })).toBeNull()
+  })
+})

@@ -24,6 +24,17 @@
   min-height: 0;
 }
 
+.split-panes-stage .reader-panel .reader-outline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(232px, calc(100% - 12px));
+  max-width: 100%;
+  z-index: 15;
+  box-shadow: 6px 0 22px rgba(20, 34, 62, 0.16);
+}
+
 .reader-outline__header {
   display: flex;
   align-items: center;
@@ -218,9 +229,9 @@
   }
 
   .pdf-sentence-highlight {
-    fill: rgba(56, 100, 181, 0.14);
-    stroke: rgba(56, 100, 181, 0.72);
-    stroke-width: 1.4;
+    fill: rgba(56, 100, 181, 0.10);
+    stroke: rgba(56, 100, 181, 0.65);
+    stroke-width: 1.2;
     stroke-linejoin: round;
   }
 }

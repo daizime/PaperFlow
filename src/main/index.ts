@@ -6,6 +6,7 @@ import { isAbsolute, join } from 'node:path'
 import { BackupService } from './services/backup-service'
 import { LibraryDatabase } from './services/database'
 import { DocumentService } from './services/document-service'
+import { LiteratureSearchService } from './services/literature-search-service'
 import { validatePdfInSandbox } from './services/pdf-validation'
 import { TranslationService } from './services/translation-service'
 import { registerIpc } from './ipc'
@@ -41,8 +42,21 @@ app.whenReady().then(async () => {
   const documents = new DocumentService(database, join(userData, 'library'), validatePdfInSandbox)
   translationService = new TranslationService({ database, safeStorage })
   const backupService = new BackupService(database, documents)
+  const testLitBase = process.env.PAPERFLOW_TEST_LITERATURE_BASE?.trim()
+  const literatureSearch = new LiteratureSearchService({
+    database,
+    documents,
+    translations: translationService,
+    ...(testLitBase
+      ? {
+          openAlexBaseUrl: `${testLitBase.replace(/\/+$/, '')}/openalex`,
+          arxivBaseUrl: `${testLitBase.replace(/\/+$/, '')}/arxiv`,
+          allowInsecureTestBase: testLitBase
+        }
+      : {})
+  })
   await documents.cleanupOrphanFiles()
-  registerIpc(() => mainWindow, database, documents, translationService, backupService)
+  registerIpc(() => mainWindow, database, documents, translationService, backupService, literatureSearch)
   const remember = (window: BrowserWindow): void => { mainWindow = window; window.on('closed', () => { mainWindow = null }) }
   await createWindow(remember)
   app.on('activate', () => {

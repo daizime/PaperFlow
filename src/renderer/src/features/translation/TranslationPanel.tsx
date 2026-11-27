@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent
 } from 'react'
@@ -19,8 +21,9 @@ import {
   type InlineFormulaSpan,
   type PageLayoutResult
 } from '../reader/layout-analysis'
-import type { PagePoint, PageRect } from '../reader/pdf-geometry'
+import { cleanSelectedQuoteText, type PagePoint, type PageRect } from '../reader/pdf-geometry'
 import type { PageBackdropSnapshot, ReaderMirrorState } from '../reader/PdfViewer'
+import { mapColorToDarkPaperFilter } from './dark-paper-color'
 import {
   alignBlockSentences,
   computeColumnLeftEdges,
@@ -37,6 +40,7 @@ export interface TargetSentenceSelection {
   sentenceIds: string[]
   blockKeys: string[]
   sourceRects: PageRect[]
+  selectedText?: string
   toggleIfSame?: boolean
 }
 
@@ -55,7 +59,10 @@ export interface TranslationPanelProps {
   translatingPage: number | null
   retranslatingBlockKeys?: ReadonlySet<string>
   translationError: string | null
+  staleScopeNotice?: string | null
+  onRefreshStalePage?(pageNumber: number): void
   onRetranslateBlock?(pageNumber: number, blockKey: string): void
+  onEditBlockTranslation?(pageNumber: number, blockKey: string, sourceHash: string, translatedText: string): Promise<void>
   onOpenSettings(): void
   onDismissTranslationError(): void
   scrollRef?: (element: HTMLDivElement | null) => void
@@ -65,6 +72,10 @@ export interface TranslationPanelProps {
   onChangeSplitRatio?(ratio: number | null): void
   getSplitDragContext?: () => { leftWidth: number; rightWidth: number } | null
   bottomPill?: React.ReactNode
+  splitDropActive?: boolean
+  onDragOverSplitTarget?(event: DragEvent<HTMLElement>): void
+  onDragLeaveSplitTarget?(event: DragEvent<HTMLElement>): void
+  onDropSplitTarget?(event: DragEvent<HTMLElement>): void
 }
 
 export function LockIcon({ locked }: { locked: boolean }): React.JSX.Element {
@@ -128,28 +139,39 @@ function collectSelectedTranslatedSentences(
     if (!range.intersectsNode(span)) continue
 
     let hasSelectedContent = false
-    for (let i = 0; i < span.childNodes.length; i += 1) {
-      const child = span.childNodes[i]
-      if (child instanceof Text) {
-        if (child.length === 0) continue
+    const walker = document.createTreeWalker(span, NodeFilter.SHOW_TEXT)
+    let textNode = walker.nextNode() as Text | null
+    while (textNode) {
+      if (textNode.length > 0) {
         try {
-          const startPos = range.comparePoint(child, 0)
-          const endPos = range.comparePoint(child, child.length)
-          if (endPos < 0 || startPos > 0) continue
+          const startPos = range.comparePoint(textNode, 0)
+          const endPos = range.comparePoint(textNode, textNode.length)
+          if (endPos >= 0 && startPos <= 0) {
+            const selStart = range.startContainer === textNode ? range.startOffset : 0
+            const selEnd = range.endContainer === textNode ? range.endOffset : textNode.length
+            if (selEnd > selStart && textNode.data.slice(selStart, selEnd).trim()) {
+              hasSelectedContent = true
+              break
+            }
+          }
         } catch {
-          continue
+          // ignore cross-tree errors
         }
-        const selStart = range.startContainer === child ? range.startOffset : 0
-        const selEnd = range.endContainer === child ? range.endOffset : child.length
-        if (selEnd > selStart && child.data.slice(selStart, selEnd).trim()) {
-          hasSelectedContent = true
-          break
-        }
-      } else if (child instanceof Element) {
+      }
+      textNode = walker.nextNode() as Text | null
+    }
+
+    if (!hasSelectedContent) {
+      const imgs = span.querySelectorAll<HTMLImageElement>('img.translation-inline-formula')
+      for (const img of imgs) {
+        const parent = img.parentNode
+        if (!parent) continue
+        const childIdx = Array.prototype.indexOf.call(parent.childNodes, img)
+        if (childIdx < 0) continue
         try {
-          const beforeImg = range.comparePoint(span, i)
-          const afterImg = range.comparePoint(span, i + 1)
-          if (beforeImg <= 0 && afterImg >= 0) {
+          const beforeImg = range.comparePoint(parent, childIdx)
+          const afterImg = range.comparePoint(parent, childIdx + 1)
+          if ((beforeImg < 0 && afterImg > 0) || (beforeImg === 0 && afterImg === 0)) {
             hasSelectedContent = true
             break
           }
@@ -198,6 +220,7 @@ function collectSelectedTranslatedSentences(
     sentenceIds,
     blockKeys,
     sourceRects,
+    selectedText: cleanSelectedQuoteText(selection.toString()) ?? undefined,
     toggleIfSame: false
   }
 }
@@ -300,6 +323,18 @@ interface OverlayPageContentProps {
   suppressNextClickRef: MutableRefObject<boolean>
   onSelectTargetSentences?(selection: TargetSentenceSelection | null): void
   onRetranslateBlock?(pageNumber: number, blockKey: string): void
+  onEditBlockTranslation?(pageNumber: number, blockKey: string, sourceHash: string, translatedText: string): Promise<void>
+}
+
+interface EditingBlockState {
+  blockKey: string
+  sourceHash: string
+  draft: string
+  left: number
+  top: number
+  width: number
+  saving: boolean
+  error: string | null
 }
 
 const OverlayPageContent = memo(function OverlayPageContent({
@@ -314,7 +349,8 @@ const OverlayPageContent = memo(function OverlayPageContent({
   activeSentenceIds,
   suppressNextClickRef,
   onSelectTargetSentences,
-  onRetranslateBlock
+  onRetranslateBlock,
+  onEditBlockTranslation
 }: OverlayPageContentProps): React.JSX.Element {
   const layerRef = useRef<HTMLDivElement | null>(null)
   const highlightSvgRef = useRef<SVGSVGElement | null>(null)
@@ -326,6 +362,11 @@ const OverlayPageContent = memo(function OverlayPageContent({
     active: boolean
   } | null>(null)
   const [marqueeBox, setMarqueeBox] = useState<PageRect | null>(null)
+  const [editingBlock, setEditingBlock] = useState<EditingBlockState | null>(null)
+
+  useEffect(() => {
+    setEditingBlock(null)
+  }, [layout.pageNumber])
 
   const columnRightByIndex = new Map<number, number>()
   const columnLeftByIndex = computeColumnLeftEdges(layout.blocks)
@@ -336,6 +377,16 @@ const OverlayPageContent = memo(function OverlayPageContent({
       if (rightEdge > prev) columnRightByIndex.set(b.columnIndex, rightEdge)
     }
   }
+
+  const hasTranslatedBlocks =
+    Boolean(translations && translations.size > 0) &&
+    layout.blocks.some(block => {
+      if (block.sentences.length === 0 || !isTranslatableBlock(block)) return false
+      const key = computeStableTranslationBlockKey(block)
+      const sourceHash = hashTranslationBlockSource(getBlockTranslationSourceText(block))
+      const cached = translations?.get(key)
+      return Boolean(cached && cached.sourceHash === sourceHash && cached.translatedText.trim())
+    })
 
   // 先利用同栏右侧安全留白避免无谓缩微字号，再自适应微调字号/行高确保 0px 纵向漂移
   useLayoutEffect(() => {
@@ -470,9 +521,36 @@ const OverlayPageContent = memo(function OverlayPageContent({
     [layout.naturalHeight, layout.naturalWidth, scale]
   )
 
+  const handleLayerMouseDown = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (
+      event.button !== 0 ||
+      event.detail !== 1 ||
+      event.shiftKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey
+    ) {
+      return
+    }
+    const targetEl = event.target instanceof Element ? event.target : null
+    if (targetEl?.closest('button')) return
+    const insideTranslatedBlock = Boolean(targetEl?.closest('.translation-overlay-block.is-translated'))
+    const insideMirrorHotspot = Boolean(targetEl?.closest('.translation-mirror-sentence'))
+    if (insideTranslatedBlock || (hasTranslatedBlocks && !insideMirrorHotspot)) {
+      const sel = window.getSelection()
+      if (sel && !sel.isCollapsed) {
+        sel.removeAllRanges()
+      }
+    }
+  }
+
   const handleLayerPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return
-    if (event.target instanceof Element && event.target.closest('.translation-overlay-block.is-translated')) {
+    const targetEl = event.target instanceof Element ? event.target : null
+    if (targetEl?.closest('.translation-overlay-block.is-translated')) {
+      return
+    }
+    if (hasTranslatedBlocks && !targetEl?.closest('.translation-mirror-sentence')) {
       return
     }
     const startDisplayPoint = toDisplayPoint(event.clientX, event.clientY)
@@ -501,16 +579,19 @@ const OverlayPageContent = memo(function OverlayPageContent({
     const currentDisplayPoint = toDisplayPoint(event.clientX, event.clientY)
     if (!currentDisplayPoint) return
     const matched = resolveMirrorDragSelection(layout, drag.startDisplayPoint, currentDisplayPoint)
-    if (matched?.usedMarquee) {
-      setMarqueeBox({
-        x: Math.min(drag.startDisplayPoint.x, currentDisplayPoint.x) * scale,
-        y: Math.min(drag.startDisplayPoint.y, currentDisplayPoint.y) * scale,
-        width: Math.abs(currentDisplayPoint.x - drag.startDisplayPoint.x) * scale,
-        height: Math.abs(currentDisplayPoint.y - drag.startDisplayPoint.y) * scale
-      })
+    const dragBoxPx: PageRect = {
+      x: Math.min(drag.startDisplayPoint.x, currentDisplayPoint.x) * scale,
+      y: Math.min(drag.startDisplayPoint.y, currentDisplayPoint.y) * scale,
+      width: Math.abs(currentDisplayPoint.x - drag.startDisplayPoint.x) * scale,
+      height: Math.abs(currentDisplayPoint.y - drag.startDisplayPoint.y) * scale
+    }
+    const useMarquee = !matched || matched.usedMarquee
+    if (useMarquee && (dragBoxPx.width >= 2 || dragBoxPx.height >= 2)) {
+      setMarqueeBox(dragBoxPx)
     } else {
       setMarqueeBox(null)
     }
+
     if (matched) {
       onSelectTargetSentences?.({
         pageNumber: matched.pageNumber,
@@ -542,7 +623,9 @@ const OverlayPageContent = memo(function OverlayPageContent({
   return (
     <div
       ref={layerRef}
-      className="translation-overlay-layer"
+      className={hasTranslatedBlocks ? 'translation-overlay-layer has-translations' : 'translation-overlay-layer'}
+      onMouseDown={handleLayerMouseDown}
+      onDragStart={event => event.preventDefault()}
       onPointerDown={handleLayerPointerDown}
       onPointerMove={handleLayerPointerMove}
       onPointerUp={handleLayerPointerUpOrCancel}
@@ -558,6 +641,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
         const firstLineIndentPx =
           baseIndentGeom.firstLineIndent > 0 ? Math.round(baseIndentGeom.firstLineIndent * scale * 10) / 10 : 0
         const bgColor = blockColors?.[blockKey] ?? '#ffffff'
+        const darkBgColor = mapColorToDarkPaperFilter(bgColor)
 
         if (block.sentences.length === 0) {
           if (block.kind !== 'formula' && block.continuedFromPrevColumn && translations && translations.size > 0) {
@@ -571,8 +655,9 @@ const OverlayPageContent = memo(function OverlayPageContent({
                   top: boxTop,
                   width: baseWidth,
                   height: Math.max(4, block.displayBounds.height * scale + 2),
-                  backgroundColor: bgColor
-                }}
+                  '--overlay-bg': bgColor,
+                  '--overlay-bg-dark': darkBgColor
+                } as CSSProperties}
               />
             )
           }
@@ -667,13 +752,18 @@ const OverlayPageContent = memo(function OverlayPageContent({
             ? 'is-pending'
             : 'is-untranslated'
 
-        const style: CSSProperties = {
+        const style = {
           left: boxLeft,
           top: boxTop,
           width: baseWidth,
           height: boxHeight,
-          ...(translatedText ? { backgroundColor: bgColor } : {})
-        }
+          ...(translatedText
+            ? {
+                '--overlay-bg': bgColor,
+                '--overlay-bg-dark': darkBgColor
+              }
+            : {})
+        } as CSSProperties
 
         const sentenceById = new Map<string, AnalyzedSentence>(block.sentences.map(s => [s.id, s]))
 
@@ -759,6 +849,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
 
         const alignment = alignBlockSentences(block.sentences, translatedText)
         const isBlockRetranslating = Boolean(retranslatingBlockKeys?.has(blockKey))
+        const isTopEdgeBlock = boxTop < 24
 
         return (
           <div
@@ -766,7 +857,7 @@ const OverlayPageContent = memo(function OverlayPageContent({
             tabIndex={0}
             className={`translation-overlay-block translation-overlay-block--${block.kind} ${statusClass}${
               isBlockRetranslating ? ' is-retranslating' : ''
-            }`}
+            }${isTopEdgeBlock ? ' is-top-edge' : ''}`}
             style={style}
             data-block-id={block.id}
             data-block-key={blockKey}
@@ -784,33 +875,78 @@ const OverlayPageContent = memo(function OverlayPageContent({
               }
             }}
           >
-            {onRetranslateBlock ? (
-              <button
-                type="button"
-                className="translation-block-retranslate-btn"
-                aria-label="重译此段"
-                title="仅重新翻译此段落"
-                disabled={isBlockRetranslating || isTranslating}
-                onClick={event => {
-                  event.stopPropagation()
-                  onRetranslateBlock(block.pageNumber, blockKey)
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M13.5 8a5.5 5.5 0 1 1-1.4-3.65" />
-                  <path d="M13.5 2.5v2.75h-2.75" />
-                </svg>
-              </button>
+            {onRetranslateBlock || onEditBlockTranslation ? (
+              <div className="translation-block-actions" onClick={event => event.stopPropagation()}>
+                {onEditBlockTranslation ? (
+                  <button
+                    type="button"
+                    className="translation-block-edit-btn"
+                    data-testid="translation-block-edit-btn"
+                    aria-label="编辑此段译文"
+                    title="手动修改此段译文（自动保存到本地缓存）"
+                    disabled={isBlockRetranslating || isTranslating}
+                    onClick={event => {
+                      event.stopPropagation()
+                      const pageWidth = Math.max(280, layout.naturalWidth * scale)
+                      const popWidth = Math.min(Math.max(250, baseWidth), Math.max(250, pageWidth - 16))
+                      const popLeft = Math.max(8, Math.min(boxLeft, pageWidth - popWidth - 8))
+                      const popTop = Math.max(8, boxTop + Math.min(boxHeight, 26))
+                      setEditingBlock({
+                        blockKey,
+                        sourceHash,
+                        draft: translatedText,
+                        left: popLeft,
+                        top: popTop,
+                        width: popWidth,
+                        saving: false,
+                        error: null
+                      })
+                    }}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M11.5 2.5a1.8 1.8 0 0 1 2.5 2.5L5.7 13.3l-3.4.9.9-3.4 8.3-8.3Z" />
+                    </svg>
+                  </button>
+                ) : null}
+                {onRetranslateBlock ? (
+                  <button
+                    type="button"
+                    className="translation-block-retranslate-btn"
+                    aria-label="重译此段"
+                    title="仅重新翻译此段落"
+                    disabled={isBlockRetranslating || isTranslating}
+                    onClick={event => {
+                      event.stopPropagation()
+                      onRetranslateBlock(block.pageNumber, blockKey)
+                    }}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M13.5 8a5.5 5.5 0 1 1-1.4-3.65" />
+                      <path d="M13.5 2.5v2.75h-2.75" />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
             ) : null}
             <p
               className="translation-overlay-block__text"
@@ -899,6 +1035,107 @@ const OverlayPageContent = memo(function OverlayPageContent({
           aria-hidden="true"
         />
       ) : null}
+      {editingBlock && onEditBlockTranslation ? (
+        <div
+          className="translation-block-editor-popover"
+          data-testid="translation-block-editor"
+          style={{
+            left: editingBlock.left,
+            top: editingBlock.top,
+            width: editingBlock.width
+          }}
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="translation-block-editor-popover__head">
+            <span>手动校对本段译文（Ctrl+Enter 保存）</span>
+            <button
+              type="button"
+              aria-label="关闭译文编辑框"
+              disabled={editingBlock.saving}
+              onClick={() => setEditingBlock(null)}
+            >
+              ×
+            </button>
+          </div>
+          <textarea
+            data-testid="translation-block-edit-input"
+            aria-label="手动校对译文内容"
+            rows={4}
+            autoFocus
+            value={editingBlock.draft}
+            disabled={editingBlock.saving}
+            onChange={e =>
+              setEditingBlock(curr => (curr ? { ...curr, draft: e.target.value, error: null } : curr))
+            }
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                if (!editingBlock.saving) setEditingBlock(null)
+              } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault()
+                const clean = editingBlock.draft.trim()
+                if (!clean || editingBlock.saving) return
+                setEditingBlock(curr => (curr ? { ...curr, saving: true, error: null } : curr))
+                void onEditBlockTranslation(layout.pageNumber, editingBlock.blockKey, editingBlock.sourceHash, clean)
+                  .then(() => {
+                    setEditingBlock(null)
+                  })
+                  .catch((err: unknown) => {
+                    setEditingBlock(curr =>
+                      curr
+                        ? {
+                            ...curr,
+                            saving: false,
+                            error: err instanceof Error ? err.message : String(err)
+                          }
+                        : curr
+                    )
+                  })
+              }
+            }}
+          />
+          {editingBlock.error ? (
+            <div className="translation-block-editor-popover__err" role="alert">
+              {editingBlock.error}
+            </div>
+          ) : null}
+          <div className="translation-block-editor-popover__actions">
+            <button type="button" disabled={editingBlock.saving} onClick={() => setEditingBlock(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="is-primary"
+              data-testid="translation-block-edit-save"
+              disabled={editingBlock.saving || !editingBlock.draft.trim()}
+              onClick={() => {
+                const clean = editingBlock.draft.trim()
+                if (!clean || editingBlock.saving) return
+                setEditingBlock(curr => (curr ? { ...curr, saving: true, error: null } : curr))
+                void onEditBlockTranslation(layout.pageNumber, editingBlock.blockKey, editingBlock.sourceHash, clean)
+                  .then(() => {
+                    setEditingBlock(null)
+                  })
+                  .catch((err: unknown) => {
+                    setEditingBlock(curr =>
+                      curr
+                        ? {
+                            ...curr,
+                            saving: false,
+                            error: err instanceof Error ? err.message : String(err)
+                          }
+                        : curr
+                    )
+                  })
+              }}
+            >
+              {editingBlock.saving ? '保存中…' : '保存译文'}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 })
@@ -912,7 +1149,10 @@ export function TranslationPanel({
   translatingPage,
   retranslatingBlockKeys,
   translationError,
+  staleScopeNotice,
+  onRefreshStalePage,
   onRetranslateBlock,
+  onEditBlockTranslation,
   onOpenSettings,
   onDismissTranslationError,
   scrollRef,
@@ -921,7 +1161,11 @@ export function TranslationPanel({
   onSelectTargetSentences,
   onChangeSplitRatio,
   getSplitDragContext,
-  bottomPill
+  bottomPill,
+  splitDropActive = false,
+  onDragOverSplitTarget,
+  onDragLeaveSplitTarget,
+  onDropSplitTarget
 }: TranslationPanelProps): React.JSX.Element {
   const dragStateRef = useRef<{ startX: number; startRightWidth: number; totalWidth: number } | null>(null)
   const panelRef = useRef<HTMLElement | null>(null)
@@ -957,10 +1201,19 @@ export function TranslationPanel({
         syncFromRightSelection()
       })
     }
+    const onMouseUp = (): void => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        rafId = null
+      }
+      syncFromRightSelection()
+    }
     document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('mouseup', onMouseUp)
     return () => {
       if (rafId !== null) window.cancelAnimationFrame(rafId)
       document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('mouseup', onMouseUp)
     }
   }, [hasDocument, scrollContainerEl])
 
@@ -1005,7 +1258,14 @@ export function TranslationPanel({
   }
 
   return (
-    <aside ref={panelRef} className="translation-panel" aria-label="译文区域">
+    <aside
+      ref={panelRef}
+      className="translation-panel"
+      aria-label="译文区域"
+      onDragOver={onDragOverSplitTarget}
+      onDragLeave={onDragLeaveSplitTarget}
+      onDrop={onDropSplitTarget}
+    >
       {onChangeSplitRatio ? (
         <div
           className="translation-resizer"
@@ -1042,6 +1302,20 @@ export function TranslationPanel({
             </button>
             <button type="button" onClick={onDismissTranslationError}>关闭</button>
           </div>
+        </div>
+      ) : null}
+      {staleScopeNotice && !translatingPage ? (
+        <div role="status" className="translation-stale-banner" data-testid="translation-stale-scope-banner">
+          <span>{staleScopeNotice}</span>
+          {onRefreshStalePage ? (
+            <button
+              type="button"
+              data-testid="translation-stale-refresh-btn"
+              onClick={() => onRefreshStalePage(mirror.currentPage)}
+            >
+              按新词库重译本页
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div
@@ -1118,6 +1392,7 @@ export function TranslationPanel({
                             suppressNextClickRef={suppressNextClickRef}
                             onSelectTargetSentences={onSelectTargetSentences}
                             onRetranslateBlock={onRetranslateBlock}
+                            onEditBlockTranslation={onEditBlockTranslation}
                           />
                         ) : (
                           <div className="translation-page-status">正在分析第 {pageNumber} 页版面结构…</div>
@@ -1138,6 +1413,11 @@ export function TranslationPanel({
       <div className="translation-bottom-dock" aria-hidden={bottomPill ? undefined : true}>
         {bottomPill}
       </div>
+      {splitDropActive ? (
+        <div className="split-drop-overlay split-drop-overlay--full" aria-hidden="true">
+          <div className="split-drop-overlay__badge">放到右侧形成双开对照</div>
+        </div>
+      ) : null}
     </aside>
   )
 }

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -8,6 +8,7 @@ import Database from 'better-sqlite3'
 import { LibraryDatabase } from '../../src/main/services/database'
 import {
   buildAcademicPrompt,
+  detectLocalAiClients,
   hasAllExpectedFormulaPlaceholders,
   normalizeTranslatedBlockText,
   parseBatchTranslationOutput,
@@ -100,7 +101,7 @@ describe('SQLite v1 -> v2 无损迁移与缓存级联', () => {
       db.deleteDocument(docId)
       const inspect = new Database(dbPath, { readonly: true })
       try {
-        expect(inspect.pragma('user_version', { simple: true })).toBe(4)
+        expect(inspect.pragma('user_version', { simple: true })).toBe(7)
         expect(inspect.prepare('SELECT COUNT(*) AS cnt FROM translation_cache').get()).toEqual({ cnt: 0 })
         expect(inspect.prepare('SELECT COUNT(*) AS cnt FROM annotations').get()).toEqual({ cnt: 0 })
       } finally {
@@ -171,6 +172,9 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
 
       const tested = await service.testConnection()
       expect(tested.ok).toBe(true)
+      expect(tested.testedProvider).toBe('openai-compatible')
+      expect(tested.testedLabel).toBe('mock-gpt')
+      expect(tested.testedTarget).toContain('127.0.0.1')
       expect(tested.sampleOutput).toContain('中译：')
       expect(lastAuthHeader).toBe('Bearer sk-secret-99887766')
 
@@ -282,6 +286,9 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
 
       const testRes = await service.testConnection()
       expect(testRes.ok).toBe(true)
+      expect(testRes.testedProvider).toBe('cli')
+      expect(testRes.testedLabel).toBe('自定义 CLI')
+      expect(testRes.testedTarget).toBe(process.execPath)
       expect(testRes.sampleOutput).toContain('CLI译：')
 
       const pageRes = await service.translatePage({
@@ -292,6 +299,166 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
         ]
       })
       expect(pageRes.items[0]?.translatedText).toBe('CLI译：Two-column layout.')
+
+      // 切换回 API 保存后，以草稿模式传入 CLI 试连不应修改磁盘已生效的 API 引擎
+      service.saveSettings({
+        provider: 'openai-compatible',
+        targetLanguage: 'zh-CN',
+        openai: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        cli: {
+          preset: 'custom',
+          command: process.execPath,
+          model: '',
+          extraArgs: [stubScript],
+          timeoutSec: 30
+        }
+      })
+      const draftCliTest = await service.testConnection({
+        provider: 'cli',
+        targetLanguage: 'zh-CN',
+        openai: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        cli: {
+          preset: 'custom',
+          command: process.execPath,
+          model: '',
+          extraArgs: [stubScript],
+          timeoutSec: 30
+        }
+      })
+      expect(draftCliTest.ok).toBe(true)
+      expect(draftCliTest.testedProvider).toBe('cli')
+      expect(service.getSettings().provider).toBe('openai-compatible')
+    } finally {
+      service.cancelAll()
+      db.close()
+    }
+  })
+
+  test('detectLocalAiClients 自动识别 Codex / Gemini 本机客户端状态，支持 gemini 预设调用并安全回退历史 claude 配置', async () => {
+    const isWin = process.platform === 'win32'
+    const fakeHome = join(workRoot, 'home')
+    const fakeLocalAppData = join(workRoot, 'localappdata')
+    const fakeAppData = join(workRoot, 'appdata')
+    const fakeBin = join(workRoot, 'bin')
+    await mkdir(fakeBin, { recursive: true })
+    await mkdir(fakeHome, { recursive: true })
+    await mkdir(fakeAppData, { recursive: true })
+    await mkdir(join(fakeLocalAppData, 'Google', 'Gemini', 'app-1.0.0'), { recursive: true })
+
+    const argLogStub = join(fakeBin, 'gemini-stub.mjs')
+    await writeFile(
+      argLogStub,
+      [
+        "import { readFileSync } from 'node:fs'",
+        'const args = process.argv.slice(2)',
+        "const input = readFileSync(0, 'utf8')",
+        "const arrStart = input.lastIndexOf('[')",
+        'const items = JSON.parse(input.slice(arrStart))',
+        'const textPrefix = args.includes("-m") ? "GEMINI预设:" : "MISSING:"',
+        'console.log(JSON.stringify({ translations: items.map(x => ({ id: x.id, text: textPrefix + args.join(" ") })) }))'
+      ].join('\n'),
+      'utf8'
+    )
+
+    const geminiBin = join(fakeBin, isWin ? 'gemini.cmd' : 'gemini')
+    const codexBin = join(fakeBin, isWin ? 'codex.cmd' : 'codex')
+    if (isWin) {
+      await writeFile(geminiBin, `@echo off\r\n"${process.execPath}" "%~dp0gemini-stub.mjs" %*\r\n`, 'utf8')
+      await writeFile(codexBin, '@echo off\r\necho codex-mock\r\n', 'utf8')
+      await writeFile(join(fakeLocalAppData, 'Google', 'Gemini', 'app-1.0.0', 'Gemini.exe'), 'mock', 'utf8')
+    } else {
+      await writeFile(geminiBin, `#!/bin/sh\nexec "${process.execPath}" "${argLogStub}" "$@"\n`, 'utf8')
+      await chmod(geminiBin, 0o755)
+      await writeFile(codexBin, '#!/bin/sh\necho codex-mock\n', 'utf8')
+      await chmod(codexBin, 0o755)
+    }
+
+    const fakeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: fakeBin,
+      Path: fakeBin,
+      ComSpec: process.env.ComSpec || process.env.COMSPEC || 'C:\\Windows\\System32\\cmd.exe',
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+      APPDATA: fakeAppData,
+      LOCALAPPDATA: fakeLocalAppData,
+      PAPERFLOW_SKIP_APPX_PROBE: '1',
+      PAPERFLOW_SKIP_VERSION_PROBE: '1'
+    }
+
+    const detected = await detectLocalAiClients(fakeEnv, { probeVersion: false })
+    expect(detected.map(c => c.preset)).toEqual(['codex', 'gemini'])
+    expect(detected.find(c => c.preset === 'codex')).toMatchObject({
+      status: 'ready',
+      command: codexBin
+    })
+    expect(detected.find(c => c.preset === 'gemini')).toMatchObject({
+      status: 'ready',
+      command: geminiBin
+    })
+
+    const emptyEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: join(workRoot, 'none'),
+      Path: join(workRoot, 'none'),
+      HOME: join(workRoot, 'none-home'),
+      USERPROFILE: join(workRoot, 'none-home'),
+      APPDATA: join(workRoot, 'none-appdata'),
+      LOCALAPPDATA: join(workRoot, 'none-local'),
+      PAPERFLOW_SKIP_APPX_PROBE: '1',
+      PAPERFLOW_SKIP_VERSION_PROBE: '1'
+    }
+    const noneDetected = await detectLocalAiClients(emptyEnv, { probeVersion: false })
+    expect(noneDetected.every(c => c.status === 'not-found')).toBe(true)
+
+    const guiEnv: NodeJS.ProcessEnv = {
+      ...emptyEnv,
+      LOCALAPPDATA: fakeLocalAppData
+    }
+    if (isWin) {
+      const guiDetected = await detectLocalAiClients(guiEnv, { probeVersion: false })
+      expect(guiDetected.find(c => c.preset === 'gemini')).toMatchObject({
+        status: 'gui-only',
+        command: null
+      })
+    }
+
+    const db = new LibraryDatabase(dbPath)
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage, env: fakeEnv })
+    const docId = insertSampleDocument(db)
+    try {
+      db.setSetting(
+        'translation.config.v1',
+        JSON.stringify({
+          provider: 'cli',
+          targetLanguage: 'zh-CN',
+          glossary: [],
+          openai: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+          cli: { preset: 'claude', command: 'claude', model: '', extraArgs: [], timeoutSec: 30 }
+        })
+      )
+      expect(service.getSettings().cli.preset).toBe('codex')
+
+      service.saveSettings({
+        provider: 'cli',
+        targetLanguage: 'zh-CN',
+        openai: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        cli: {
+          preset: 'gemini',
+          command: 'gemini',
+          model: 'gemini-2.5-flash-test',
+          extraArgs: [],
+          timeoutSec: 30
+        }
+      })
+      const pageRes = await service.translatePage({
+        documentId: docId,
+        pageNumber: 1,
+        blocks: [
+          { blockId: 'gm-1', kind: 'paragraph', sourceText: 'Gemini preset test.', sourceHash: '6666666666666666' }
+        ]
+      })
+      expect(pageRes.items[0]?.translatedText).toContain('GEMINI预设:-m gemini-2.5-flash-test')
     } finally {
       service.cancelAll()
       db.close()
@@ -388,6 +555,79 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
       expect(callCount).toBe(3)
       expect(res.items.find(i => i.blockId === 'blk-drop')?.translatedText).toBe('计算 ⟪M1⟫ 只需 ⟪M2⟫。')
       expect(res.items.find(i => i.blockId === 'blk-fallback')?.translatedText).toBe('稳健兜底译文。')
+    } finally {
+      service.cancelAll()
+      db.close()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  test('TranslationService.chat 支持多篇对照上下文、多轮历史透传与 SQLite 对话持久化和清空', async () => {
+    const receivedPayloads: Array<{ messages: Array<{ role: string; content: string }> }> = []
+    const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        messages: Array<{ role: string; content: string }>
+      }
+      receivedPayloads.push(body)
+      res.setHeader('Content-Type', 'application/json')
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: `第 ${receivedPayloads.length} 轮回答：已综合左/右两篇对比。` } }]
+        })
+      )
+    })
+
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as { port: number }
+    const db = new LibraryDatabase(dbPath)
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage })
+    const docId = insertSampleDocument(db)
+
+    try {
+      service.saveSettings({
+        provider: 'openai-compatible',
+        targetLanguage: 'zh-CN',
+        glossary: [{ source: 'overpotential', target: '过电位' }],
+        openai: { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'mock-chat', apiKey: 'sk-chat-test' },
+        cli: { preset: 'codex', command: 'codex', model: '', extraArgs: [], timeoutSec: 60 }
+      })
+
+      const sessionKey = `doc:${docId}`
+      const first = await service.chat({
+        sessionKey,
+        question: '对比这两篇实验设计差异？',
+        scope: 'all-open',
+        quoteText: 'Low overpotential was measured.',
+        contexts: [
+          { documentId: docId, title: 'Paper A', paneLabel: '左栏', pageNumber: 1, excerpt: 'Method A' },
+          { documentId: docId, title: 'Paper B', paneLabel: '右栏', pageNumber: 3, excerpt: 'Method B' }
+        ]
+      })
+      expect(first.userMessage.content).toBe('对比这两篇实验设计差异？')
+      expect(first.assistantMessage.content).toContain('第 1 轮回答')
+      expect(receivedPayloads[0].messages[0].content).toContain('overpotential => 过电位')
+      expect(receivedPayloads[0].messages[1].content).toContain('[左栏] Paper A (P.1)')
+      expect(receivedPayloads[0].messages[1].content).toContain('[右栏] Paper B (P.3)')
+
+      // 第二轮应自动附带第一轮历史消息
+      await service.chat({
+        sessionKey,
+        question: '进一步总结优缺点',
+        scope: 'active',
+        contexts: [{ documentId: docId, title: 'Paper A', pageNumber: 1 }]
+      })
+      expect(receivedPayloads[1].messages.map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
+
+      expect(db.listChatMessages(sessionKey)).toHaveLength(4)
+      db.clearChatMessages(sessionKey)
+      expect(db.listChatMessages(sessionKey)).toHaveLength(0)
+
+      await service.chat({ sessionKey, question: '重建一条记录', scope: 'free', contexts: [] })
+      expect(db.listChatMessages(sessionKey)).toHaveLength(2)
+      db.resetLibrary()
+      expect(db.listChatMessages(sessionKey)).toHaveLength(0)
     } finally {
       service.cancelAll()
       db.close()

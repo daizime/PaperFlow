@@ -573,3 +573,47 @@ export function formatGbt7714(meta: CitationMetadata): string {
   const doiText = meta.doi.trim() ? ` DOI: ${meta.doi.trim()}.` : ''
   return `${authorText}${meta.title}${docType}.${pubText}${doiText}`.trim()
 }
+
+/**
+ * 判断文件名或初始展示标题是否为常见乱码/编号式学术文件名（如 arXiv 编号、ScienceDirect、Springer、DOI、长哈希或通用占位名）。
+ */
+export function isLikelyMessyAcademicFilename(rawName: string): boolean {
+  const stem = rawName.trim().replace(/\.pdf$/i, '').trim()
+  if (stem.length < 2) return false
+  if (/^\d{4}\.\d{4,5}(?:v\d+)?$/i.test(stem)) return true
+  if (/^[a-z-]+-\d{7}(?:v\d+)?$/i.test(stem)) return true
+  if (/^1-s2\.0-/i.test(stem)) return true
+  if (/^s\d{5}-\d{3}-\d{4,5}/i.test(stem)) return true
+  if (/^10\.\d{4,9}[._-]/i.test(stem)) return true
+  if (/^PIIS\d{8,}/i.test(stem)) return true
+  if (/^PMC\d{5,}$/i.test(stem)) return true
+  if (/^nihms-?\d+$/i.test(stem)) return true
+  if (/^\d[\d_-]{4,}$/.test(stem)) return true
+  if (/^[0-9a-f]{12,}$/i.test(stem)) return true
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)) return true
+  if (/^(?:download|document|article|paper|manuscript|preprint|fulltext|main|draft|supplementary|appendix|file)[_-]\d+$/i.test(stem)) {
+    return true
+  }
+  if (/^(?:main|manuscript|fulltext|preprint|submitted|draft|download|document|supplementary|merged)$/i.test(stem)) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 从 PDF 首页文本及文档信息中提取可用于自动命名的清晰论文标题；若提取结果无改进或仍像噪声则回退 null。
+ */
+export function extractCleanPaperTitle(source: FirstPageCitationSource, fallbackTitle: string): string | null {
+  const meta = extractCitationMetadata(source, fallbackTitle)
+  const cleanTitle = normalizeLine(meta.title)
+  if (cleanTitle.length < 8 || cleanTitle.length > 220) return null
+
+  const normalizedFallback = normalizeLine(fallbackTitle.replace(/\.pdf$/i, ''))
+  if (cleanTitle.toLowerCase() === normalizedFallback.toLowerCase()) return null
+  if (cleanTitle === fallbackTitle.trim()) return null
+  if (isLikelyMessyAcademicFilename(cleanTitle)) return null
+  if (/^(?:https?:\/\/|arxiv:|doi:|abstract\b|introduction\b|keywords?\b|contents\b|references\b)/i.test(cleanTitle)) {
+    return null
+  }
+  return cleanTitle
+}

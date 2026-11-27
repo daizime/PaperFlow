@@ -28,7 +28,7 @@ test('T03 真实多页Canvas、Worker、文字选取复制、缩放与关闭恢�
       return { ink, width: element.width, cssWidth: element.getBoundingClientRect().width, dpr: devicePixelRatio }
     })
     expect(pixels.ink).toBeGreaterThan(100)
-    expect(pixels.width / pixels.cssWidth).toBeGreaterThanOrEqual(Math.min(pixels.dpr, 2) - 0.02)
+    expect(pixels.width / pixels.cssWidth).toBeGreaterThanOrEqual(Math.max(2, Math.min(pixels.dpr, 2)) - 0.05)
     const text = page.locator('.pdf-page[data-page-number="1"] .textLayer span').filter({ hasText: 'Selectable text on page 1' }).first()
     await expect(text).toHaveCount(1)
     await text.scrollIntoViewIfNeeded()
@@ -89,7 +89,7 @@ test('T03 快速缩放切换与扫描页提示', async () => {
     await waitForPage(page, 1)
     for (let index = 0; index < 8; index++) {
       await page.getByRole('button', { name: index % 2 ? '缩小' : '放大', exact: true }).click()
-      await page.locator('.document-item').nth(index % 2).click()
+      await page.locator('.library-tree-doc-btn').nth(index % 2).click()
     }
     await waitForPage(page, 1)
     await importFixture(app, page, 'scanned.pdf')

@@ -7,7 +7,7 @@ import { BackupService } from '../../src/main/services/backup-service'
 import { LibraryDatabase } from '../../src/main/services/database'
 import { DocumentService } from '../../src/main/services/document-service'
 import { createZipBuffer, readZipBuffer, validateZipEntryName } from '../../src/main/services/zip-archive'
-import { extractAutoOutlineFromPages } from '../../src/renderer/src/features/reader/pdf-outline'
+import { extractAutoOutlineFromPages, scoreOutlineHeadingMatch } from '../../src/renderer/src/features/reader/pdf-outline'
 import { computeTightFigureCropBox } from '../../src/renderer/src/features/study/figure-crop'
 import { findReferenceMatchInPages } from '../../src/renderer/src/features/study/reference-peek'
 import {
@@ -304,6 +304,27 @@ describe('多出版商引用提取、无噪点自动大纲与紧致图表裁剪'
       'Appendix A Supplementary Proofs'
     ])
     expect(outline[2].items.map(sub => sub.title)).toEqual(['2.1 Band Segmentation', '2.2 ScaleStore vs. GAM'])
+  })
+
+  it('自动大纲支持中文一/（一）章节识别且过滤句末长句，并正确计算标题匹配分', () => {
+    const cnOutline = extractAutoOutlineFromPages([
+      {
+        pageNumber: 1,
+        lines: [
+          { text: '一、总体安排与报到须知', fontSize: 13 },
+          { text: '（一）网上迎新系统注册流程', fontSize: 11.5 },
+          { text: '（二）请各位新生务必在截止日期前完成登记。', fontSize: 10 },
+          { text: '二、心理健康测评与校园卡办理', fontSize: 13 }
+        ]
+      }
+    ])
+
+    expect(cnOutline.map(item => item.title)).toEqual(['一、总体安排与报到须知', '二、心理健康测评与校园卡办理'])
+    expect(cnOutline[0].items.map(item => item.title)).toEqual(['（一）网上迎新系统注册流程'])
+
+    expect(scoreOutlineHeadingMatch('2.1 Band Segmentation', 'heading', '2.1 Band Segmentation')).toBe(120)
+    expect(scoreOutlineHeadingMatch('Band Segmentation', 'paragraph', '2.1 Band Segmentation')).toBe(92)
+    expect(scoreOutlineHeadingMatch('Unrelated paragraph text.', 'paragraph', '2.1 Band Segmentation')).toBe(0)
   })
 
   it('紧致图表裁剪算法消除图上方大片白边且不误裁上方正文段落', () => {

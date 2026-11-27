@@ -3,7 +3,11 @@ import { lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/p
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
-  formatPdfByteSize, hasControlCharacters, MAX_PDF_BYTES as SHARED_MAX_PDF_BYTES, type ImportResult
+  formatPdfByteSize,
+  hasControlCharacters,
+  MAX_PDF_BYTES as SHARED_MAX_PDF_BYTES,
+  type ImportResult,
+  type ResetLibraryResult
 } from '../../shared/contracts'
 import { documentIdSchema, pageNumberSchema } from '../../shared/schemas'
 import { LibraryDatabase } from './database'
@@ -101,6 +105,14 @@ export class DocumentService {
     return this.enqueue(() => this.runOrphanCleanup())
   }
 
+  resetLibrary(): Promise<ResetLibraryResult> {
+    return this.enqueue(async () => {
+      const summary = this.database.resetLibrary()
+      await this.runOrphanCleanup()
+      return summary
+    })
+  }
+
   private async readSnapshot(sourcePath: string, displayName?: string): Promise<Buffer> {
     const prefix = labelPrefix(displayName)
     if (extname(sourcePath).toLowerCase() !== '.pdf') {
@@ -194,7 +206,9 @@ export class DocumentService {
             pageCount: existing.pageCount,
             importedAt: existing.importedAt,
             starred: existing.starred,
-            tags: existing.tags
+            tags: existing.tags,
+            folderId: existing.folderId,
+            readingStatus: existing.readingStatus
           }
         }
       }

@@ -121,6 +121,8 @@ const ABBREV_DOT_RE = /\b(?:vs|e\.g|i\.e|etc|Dr|Mr|Ms|Prof|Fig|Eq|Sec|No|Vol)\.\
 const NUMBERED_SECTION_RE = /^(\d+(?:\.\d+){0,2})\.?\s+([A-Za-z\u4e00-\u9fff][^\n]{1,95})$/
 const ROMAN_SECTION_RE = /^([IVX]{1,4})\.\s+([A-Za-z][^\n]{2,80})$/
 const CHINESE_CHAPTER_RE = /^(第[一二三四五六七八九十百\d]+[章节编]\s*[^\n]{1,60})$/
+const CHINESE_NUM_SECTION_RE = /^([一二三四五六七八九十]+)、\s*([^\n]{2,55})$/
+const CHINESE_SUB_SECTION_RE = /^[（(]([一二三四五六七八九十]+)[）)]\s*([^\n]{2,55})$/
 const STANDARD_HEADINGS_RE =
   /^(?:Abstract|Introduction|Related\s+Work|Background|Preliminaries|Problem\s+Statement|Overview|System\s+Design|Architecture|Methodology|Methods|Approach|Implementation|Evaluation|Experiments?|Experimental\s+Setup|Results?|Discussion|Limitations?|Future\s+Work|Conclusion(?:s)?(?:\s+and\s+Future\s+Work)?|Acknowledg(?:e)?ments?|References|Bibliography|Appendix(?:\s+[A-Z0-9]+)?|摘要|引言|绪论|相关工作|研究背景|方法(?:与设计)?|实验(?:设置|结果)?|结果与分析|讨论|结论|参考文献|致谢|附录)$/i
 
@@ -208,6 +210,27 @@ function parseAutoHeading(
 
   if (CHINESE_CHAPTER_RE.test(clean)) {
     return { title: clean, depth: 1 }
+  }
+
+  const cnSectionMatch = clean.match(CHINESE_NUM_SECTION_RE)
+  if (cnSectionMatch) {
+    const body = cnSectionMatch[2].trim()
+    if (!/[。！？.!?：:]$/.test(body) && hasSufficientTextQuality(body)) {
+      if (fontSize === undefined || medianBodyFont === null || fontSize >= medianBodyFont * 0.94) {
+        return { title: clean, depth: 1 }
+      }
+    }
+  }
+
+  const cnSubMatch = clean.match(CHINESE_SUB_SECTION_RE)
+  if (cnSubMatch) {
+    const body = cnSubMatch[2].trim()
+    const looksLarger = fontSize !== undefined && medianBodyFont !== null && fontSize >= medianBodyFont * 0.98
+    if (!/[。！？.!?：:]$/.test(body) && hasSufficientTextQuality(body) && (hasSeenSections || looksLarger)) {
+      if (fontSize === undefined || medianBodyFont === null || fontSize >= medianBodyFont * 0.92) {
+        return { title: clean, depth: 2 }
+      }
+    }
   }
 
   if (STANDARD_HEADINGS_RE.test(clean)) {
@@ -478,4 +501,31 @@ export async function extractAutoOutlineFromPdf(
 
   if (signal?.aborted) return []
   return extractAutoOutlineFromPages(pages)
+}
+
+function normalizeOutlineHeading(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, ' ')
+    .trim()
+}
+
+function stripLeadingOutlineNumber(value: string): string {
+  return value.replace(/^(?:\d+(?:[\s.]+\d+)*|[ivx]{1,4}|[一二三四五六七八九十]+|[a-z])\s+/i, '').trim()
+}
+
+/** 计算版面块文本与目录项标题的匹配得分（>= 68 视为命中；heading 块额外加权 20 分）。 */
+export function scoreOutlineHeadingMatch(blockText: string, blockKind: string, outlineTitle: string): number {
+  const wanted = normalizeOutlineHeading(outlineTitle)
+  const wantedBody = stripLeadingOutlineNumber(wanted)
+  const text = normalizeOutlineHeading(blockText)
+  if (!wanted || !text) return 0
+  const textBody = stripLeadingOutlineNumber(text)
+  let score = 0
+  if (text === wanted) score = 100
+  else if (wantedBody.length >= 3 && textBody === wantedBody) score = 92
+  else if (text.startsWith(wanted) || wanted.startsWith(text)) score = 82
+  else if (wantedBody.length >= 4 && (text.includes(wantedBody) || wantedBody.includes(textBody))) score = 68
+  if (score > 0 && blockKind === 'heading') score += 20
+  return score
 }

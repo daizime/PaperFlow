@@ -152,7 +152,7 @@ describe('Database v4 migration, document metadata, reader progress & cross-libr
 
     const inspect = new Database(dbPath, { readonly: true })
     try {
-      expect(inspect.pragma('user_version', { simple: true })).toBe(4)
+      expect(inspect.pragma('user_version', { simple: true })).toBe(7)
     } finally {
       inspect.close()
     }

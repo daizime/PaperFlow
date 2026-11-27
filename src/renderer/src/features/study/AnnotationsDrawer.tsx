@@ -6,6 +6,16 @@ export interface AnnotationsDrawerProps {
   open: boolean
   documentId: string | null
   annotations: readonly AnnotationRecord[]
+  activePaneId?: string
+  activeDocumentTitle?: string | null
+  openPaneSummaries?: Array<{
+    paneId: string
+    documentId: string
+    label: string
+    title: string
+    annotationCount: number
+  }>
+  onSelectPaneId?(paneId: string): void
   onClose(): void
   onSelectAnnotation(annotation: AnnotationRecord): void
   onUpdateAnnotation(id: string, patch: { color?: AnnotationColor; note?: string }): Promise<void>
@@ -27,6 +37,10 @@ export function AnnotationsDrawer({
   open,
   documentId,
   annotations,
+  activePaneId,
+  activeDocumentTitle,
+  openPaneSummaries,
+  onSelectPaneId,
   onClose,
   onSelectAnnotation,
   onUpdateAnnotation,
@@ -72,6 +86,31 @@ export function AnnotationsDrawer({
         </button>
       </div>
 
+      {openPaneSummaries && openPaneSummaries.length >= 2 ? (
+        <div className="study-drawer__pane-switcher" data-testid="annotations-pane-switcher">
+          <div className="study-drawer__pane-tabs" role="tablist" aria-label="按分栏切换批注文献">
+            {openPaneSummaries.map(item => (
+              <button
+                key={item.paneId}
+                type="button"
+                role="tab"
+                aria-selected={item.paneId === activePaneId}
+                className={item.paneId === activePaneId ? 'is-active' : undefined}
+                onClick={() => onSelectPaneId?.(item.paneId)}
+              >
+                {item.label}
+                {item.annotationCount > 0 ? ` (${item.annotationCount})` : ''}
+              </button>
+            ))}
+          </div>
+          {activeDocumentTitle ? (
+            <div className="study-drawer__pane-title" title={activeDocumentTitle}>
+              当前：{activeDocumentTitle}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="study-drawer__filters" role="group" aria-label="按颜色筛选批注">
         {COLOR_FILTERS.map(f => (
           <button
@@ -100,9 +139,16 @@ export function AnnotationsDrawer({
             return (
               <article key={ann.id} className="study-annotation-card">
                 <div className="study-annotation-card__top">
-                  <span className={`study-annotation-tag study-annotation-tag--${ann.color}`}>
-                    第 {ann.pageNumber} 页
-                  </span>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span className={`study-annotation-tag study-annotation-tag--${ann.color}`}>
+                      第 {ann.pageNumber} 页
+                    </span>
+                    {ann.rects.length === 0 ? (
+                      <span className="study-annotation-ai-badge" title="来自 AI 对话保存的页面笔记">
+                        AI 笔记
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="study-annotation-swatches">
                     {COLOR_SWATCHES.map(c => (
                       <button

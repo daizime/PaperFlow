@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { AnnotationColor, ExplainMode } from '../../../../shared/contracts'
+import {
+  hasControlCharacters,
+  type AnnotationColor,
+  type AnnotationRecord,
+  type ExplainMode
+} from '../../../../shared/contracts'
 import type { ReferencePeekMatch, ReferenceTarget } from './reference-peek'
 import './study.css'
 
@@ -27,6 +32,7 @@ export interface ReferencePeekState {
 
 export interface SelectionCompanionBarProps {
   selection: SelectionCompanionState | null
+  activeAnnotation?: AnnotationRecord | null
   explainState: ExplainCardState | null
   savingAnnotation: boolean
   referenceTargets?: readonly ReferenceTarget[]
@@ -34,6 +40,9 @@ export interface SelectionCompanionBarProps {
   peekPinned?: boolean
   returnPageNumber?: number | null
   onCreateHighlight(color: AnnotationColor, note?: string): Promise<void>
+  onUpdateAnnotation?(id: string, patch: { color?: AnnotationColor; note?: string }): Promise<void>
+  onDeleteAnnotation?(id: string): Promise<void>
+  onCloseNoteEditor?(): void
   onExplain(mode: ExplainMode): void
   onSaveExplainAsNote(): Promise<void>
   onCloseExplain(): void
@@ -43,6 +52,10 @@ export interface SelectionCompanionBarProps {
   onTogglePeekPin?(): void
   onJumpToPage?(pageNumber: number, fromPage?: number): void
   onReturnToPage?(): void
+  glossaryScopeLabel?: string | null
+  sourcePaneLabel?: string | null
+  onAddGlossaryTerm?(input: { source: string; target: string; retranslateAfter?: boolean }): Promise<boolean>
+  onAskAi?(quoteText: string): void
 }
 
 const COLOR_OPTIONS: Array<{ color: AnnotationColor; label: string; title: string }> = [
@@ -60,6 +73,7 @@ const MODE_TITLES: Record<ExplainMode, string> = {
 
 export function SelectionCompanionBar({
   selection,
+  activeAnnotation = null,
   explainState,
   savingAnnotation,
   referenceTargets = [],
@@ -67,6 +81,9 @@ export function SelectionCompanionBar({
   peekPinned = false,
   returnPageNumber,
   onCreateHighlight,
+  onUpdateAnnotation,
+  onDeleteAnnotation,
+  onCloseNoteEditor,
   onExplain,
   onSaveExplainAsNote,
   onCloseExplain,
@@ -75,11 +92,18 @@ export function SelectionCompanionBar({
   onClosePeek,
   onTogglePeekPin,
   onJumpToPage,
-  onReturnToPage
+  onReturnToPage,
+  glossaryScopeLabel,
+  sourcePaneLabel,
+  onAddGlossaryTerm,
+  onAskAi
 }: SelectionCompanionBarProps): React.JSX.Element | null {
-  const [noteOpen, setNoteOpen] = useState(false)
-  const [noteColor, setNoteColor] = useState<AnnotationColor>('yellow')
   const [noteDraft, setNoteDraft] = useState('')
+  const [termOpen, setTermOpen] = useState(false)
+  const [termSource, setTermSource] = useState('')
+  const [termTarget, setTermTarget] = useState('')
+  const [termError, setTermError] = useState<string | null>(null)
+  const [savingTerm, setSavingTerm] = useState(false)
   const [copiedNotice, setCopiedNotice] = useState(false)
   const [copiedPeekImage, setCopiedPeekImage] = useState(false)
   const [copiedPeekText, setCopiedPeekText] = useState(false)
@@ -87,9 +111,18 @@ export function SelectionCompanionBar({
   const [savedExplainNotice, setSavedExplainNotice] = useState(false)
 
   useEffect(() => {
-    setNoteOpen(false)
-    setNoteDraft('')
+    setTermOpen(false)
+    setTermSource(selection?.quoteText ? selection.quoteText.replace(/\s+/g, ' ').trim().slice(0, 80) : '')
+    setTermTarget('')
+    setTermError(null)
   }, [selection?.quoteText, selection?.pageNumber])
+
+  useEffect(() => {
+    setNoteDraft(activeAnnotation?.note ?? '')
+    if (activeAnnotation) {
+      setTermOpen(false)
+    }
+  }, [activeAnnotation])
 
   useEffect(() => {
     setSavedExplainNotice(false)
@@ -102,13 +135,45 @@ export function SelectionCompanionBar({
     setCaptionExpanded(false)
   }, [peekState?.target.key, peekState?.match?.imageDataUrl, peekState?.match?.excerpt])
 
-  if (!selection && !explainState && !peekState && returnPageNumber == null) return null
+  if (!selection && !activeAnnotation && !explainState && !peekState && returnPageNumber == null) return null
 
-  const handleNoteSubmit = async (): Promise<void> => {
-    if (!selection) return
-    await onCreateHighlight(noteColor, noteDraft)
-    setNoteDraft('')
-    setNoteOpen(false)
+  const handleSaveActiveNote = async (): Promise<void> => {
+    if (!activeAnnotation || !onUpdateAnnotation || savingAnnotation) return
+    await onUpdateAnnotation(activeAnnotation.id, { note: noteDraft.trim() })
+    onCloseNoteEditor?.()
+  }
+
+  const handleDeleteActiveAnnotation = async (): Promise<void> => {
+    if (!activeAnnotation || !onDeleteAnnotation || savingAnnotation) return
+    await onDeleteAnnotation(activeAnnotation.id)
+  }
+
+  const handleTermSubmit = async (retranslateAfter: boolean): Promise<void> => {
+    if (!onAddGlossaryTerm || savingTerm) return
+    const cleanSource = termSource.trim()
+    const cleanTarget = termTarget.trim()
+    if (!cleanSource || !cleanTarget) {
+      setTermError('请填写术语原文和中文标准译法。')
+      return
+    }
+    if (hasControlCharacters(cleanSource) || hasControlCharacters(cleanTarget)) {
+      setTermError('术语不能包含控制字符。')
+      return
+    }
+    setTermError(null)
+    setSavingTerm(true)
+    try {
+      const ok = await onAddGlossaryTerm({ source: cleanSource, target: cleanTarget, retranslateAfter })
+      if (ok) {
+        setTermOpen(false)
+        setTermTarget('')
+        setTermError(null)
+      }
+    } catch (err: unknown) {
+      setTermError(err instanceof Error ? err.message : '保存术语失败，请重试。')
+    } finally {
+      setSavingTerm(false)
+    }
   }
 
   return (
@@ -122,7 +187,10 @@ export function SelectionCompanionBar({
           aria-label="引用与图表速览"
         >
           <div className="study-peek-card__header">
-            <strong>{peekState.match ? peekState.match.title : `速览 ${peekState.target.label}`}</strong>
+            <strong>
+              {sourcePaneLabel ? `[${sourcePaneLabel}] ` : ''}
+              {peekState.match ? peekState.match.title : `速览 ${peekState.target.label}`}
+            </strong>
             <div className="study-peek-card__header-actions">
               {!peekState.loading && peekState.match?.imageDataUrl ? (
                 <button
@@ -233,7 +301,10 @@ export function SelectionCompanionBar({
       {explainState ? (
         <div className="study-explain-card" role="dialog" aria-label={MODE_TITLES[explainState.mode]}>
           <div className="study-explain-card__header">
-            <strong>{MODE_TITLES[explainState.mode]}</strong>
+            <strong>
+              {sourcePaneLabel ? `[${sourcePaneLabel}] ` : ''}
+              {MODE_TITLES[explainState.mode]}
+            </strong>
             <span className="study-explain-card__page">第 {explainState.pageNumber} 页</span>
             <button
               type="button"
@@ -285,51 +356,85 @@ export function SelectionCompanionBar({
         </div>
       ) : null}
 
-      {selection ? (
+      {(selection || activeAnnotation) ? (
         <div className="study-companion-bar">
           <div className="study-companion-bar__row">
+            {sourcePaneLabel ? (
+              <span className="study-companion-pane-badge" data-testid="companion-pane-badge">
+                {sourcePaneLabel}
+              </span>
+            ) : null}
             <div className="study-companion-colors" role="group" aria-label="高亮颜色">
-              {COLOR_OPTIONS.map(opt => (
-                <button
-                  key={opt.color}
-                  type="button"
-                  className={`study-color-dot study-color-dot--${opt.color}`}
-                  aria-label={opt.label}
-                  title={opt.title}
-                  disabled={savingAnnotation}
-                  onClick={() => {
-                    void onCreateHighlight(opt.color)
-                  }}
-                />
-              ))}
+              {COLOR_OPTIONS.map(opt => {
+                const isSelected = activeAnnotation?.color === opt.color
+                return (
+                  <button
+                    key={opt.color}
+                    type="button"
+                    className={
+                      isSelected
+                        ? `study-color-dot study-color-dot--${opt.color} is-selected`
+                        : `study-color-dot study-color-dot--${opt.color}`
+                    }
+                    aria-label={opt.label}
+                    aria-pressed={activeAnnotation ? isSelected : undefined}
+                    title={activeAnnotation ? `切换为${opt.label}` : `${opt.label}并记笔记`}
+                    disabled={savingAnnotation}
+                    onClick={() => {
+                      if (activeAnnotation && onUpdateAnnotation) {
+                        void onUpdateAnnotation(activeAnnotation.id, { color: opt.color })
+                        return
+                      }
+                      void onCreateHighlight(opt.color)
+                    }}
+                  />
+                )
+              })}
             </div>
-            <button
-              type="button"
-              className={noteOpen ? 'study-companion-btn is-active' : 'study-companion-btn'}
-              aria-label="添加批注笔记"
-              disabled={savingAnnotation}
-              onClick={() => setNoteOpen(open => !open)}
-            >
-              记笔记
-            </button>
-            <button
-              type="button"
-              className={selection.isFormulaLikely ? 'study-companion-btn' : 'study-companion-btn study-companion-btn--accent'}
-              aria-label="AI 解释选中内容"
-              disabled={Boolean(explainState?.loading)}
-              onClick={() => onExplain('explain')}
-            >
-              AI 解释
-            </button>
-            <button
-              type="button"
-              className={selection.isFormulaLikely ? 'study-companion-btn study-companion-btn--accent' : 'study-companion-btn'}
-              aria-label="解释公式"
-              disabled={Boolean(explainState?.loading)}
-              onClick={() => onExplain('formula')}
-            >
-              解释公式
-            </button>
+            {onAddGlossaryTerm && selection ? (
+              <button
+                type="button"
+                className={termOpen ? 'study-companion-btn is-active' : 'study-companion-btn'}
+                data-testid="companion-add-term-btn"
+                aria-label="收录为领域术语"
+                disabled={savingAnnotation || savingTerm}
+                onClick={() => {
+                  setTermError(null)
+                  setTermOpen(open => {
+                    const next = !open
+                    if (next && !termSource.trim()) {
+                      setTermSource(selection.quoteText.replace(/\s+/g, ' ').trim().slice(0, 80))
+                    }
+                    return next
+                  })
+                }}
+              >
+                + 记术语
+              </button>
+            ) : null}
+            {selection ? (
+              <button
+                type="button"
+                className="study-companion-btn study-companion-btn--accent"
+                aria-label="AI 解释选中内容"
+                title="AI 精读解读（自动识别正文与公式变量）"
+                disabled={Boolean(explainState?.loading)}
+                onClick={() => onExplain('explain')}
+              >
+                AI 解释
+              </button>
+            ) : null}
+            {onAskAi && (selection || activeAnnotation) ? (
+              <button
+                type="button"
+                className="study-companion-btn study-companion-btn--accent"
+                data-testid="companion-ask-ai-btn"
+                aria-label="带选中片段向 AI 对话提问"
+                onClick={() => onAskAi((selection?.quoteText || activeAnnotation?.quoteText) ?? '')}
+              >
+                问 AI
+              </button>
+            ) : null}
             {onPeekReference && referenceTargets.length > 0
               ? referenceTargets.map(target => (
                   <button
@@ -352,38 +457,103 @@ export function SelectionCompanionBar({
               ×
             </button>
           </div>
-          {noteOpen ? (
-            <div className="study-note-composer">
-              <div className="study-note-composer__colors">
-                {COLOR_OPTIONS.map(opt => (
-                  <button
-                    key={opt.color}
-                    type="button"
-                    className={
-                      noteColor === opt.color
-                        ? `study-color-dot study-color-dot--${opt.color} is-selected`
-                        : `study-color-dot study-color-dot--${opt.color}`
-                    }
-                    aria-label={`选择${opt.label}`}
-                    onClick={() => setNoteColor(opt.color)}
-                  />
-                ))}
+          {activeAnnotation ? (
+            <div className="study-note-composer" data-testid="annotation-note-editor">
+              <div className="study-note-composer__header">
+                <span className={`study-annotation-tag study-annotation-tag--${activeAnnotation.color}`}>
+                  {COLOR_OPTIONS.find(opt => opt.color === activeAnnotation.color)?.label ?? '已高亮'}
+                </span>
+                <span className="study-note-composer__quote" title={activeAnnotation.quoteText}>
+                  {activeAnnotation.quoteText}
+                </span>
               </div>
               <textarea
                 rows={2}
                 aria-label="批注笔记输入框"
                 value={noteDraft}
                 onChange={e => setNoteDraft(e.target.value)}
-                placeholder="输入批注笔记，支持保存后导出为 Markdown…"
+                onKeyDown={e => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    void handleSaveActiveNote()
+                  }
+                }}
+                placeholder="输入批注笔记（Ctrl+Enter 保存；不填则保留纯高亮）…"
               />
-              <button
-                type="button"
-                className="study-companion-btn--primary"
-                disabled={savingAnnotation}
-                onClick={() => void handleNoteSubmit()}
-              >
-                保存批注
-              </button>
+              <div className="study-note-composer__actions">
+                {onDeleteAnnotation ? (
+                  <button
+                    type="button"
+                    className="study-companion-btn study-companion-btn--danger"
+                    aria-label="删除批注"
+                    disabled={savingAnnotation}
+                    onClick={() => void handleDeleteActiveAnnotation()}
+                  >
+                    删除标注
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="study-companion-btn--primary"
+                  disabled={savingAnnotation}
+                  onClick={() => void handleSaveActiveNote()}
+                >
+                  保存批注
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {termOpen && onAddGlossaryTerm ? (
+            <div className="study-term-composer" data-testid="companion-term-composer">
+              <div className="study-term-composer__header">
+                <span>目标词库：{glossaryScopeLabel || '全局词库'}</span>
+              </div>
+              <div className="study-term-composer__inputs">
+                <input
+                  type="text"
+                  data-testid="companion-term-source"
+                  aria-label="术语原文"
+                  placeholder="术语原文（如 Overpotential）"
+                  maxLength={120}
+                  value={termSource}
+                  disabled={savingTerm}
+                  onChange={e => setTermSource(e.target.value)}
+                />
+                <input
+                  type="text"
+                  data-testid="companion-term-target"
+                  aria-label="术语译法"
+                  placeholder="中文标准译法（如 过电位）"
+                  maxLength={120}
+                  value={termTarget}
+                  disabled={savingTerm}
+                  onChange={e => setTermTarget(e.target.value)}
+                />
+              </div>
+              {termError ? (
+                <div className="study-term-composer__error" role="alert">
+                  {termError}
+                </div>
+              ) : null}
+              <div className="study-term-composer__actions">
+                <button
+                  type="button"
+                  data-testid="companion-term-save"
+                  disabled={savingTerm}
+                  onClick={() => void handleTermSubmit(false)}
+                >
+                  {savingTerm ? '保存中…' : '仅存入词库'}
+                </button>
+                <button
+                  type="button"
+                  className="study-companion-btn--primary"
+                  data-testid="companion-term-save-retranslate"
+                  disabled={savingTerm}
+                  onClick={() => void handleTermSubmit(true)}
+                >
+                  保存并重译当前段
+                </button>
+              </div>
             </div>
           ) : null}
         </div>

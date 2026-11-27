@@ -166,10 +166,17 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await page.getByLabel('API Base URL', { exact: true }).fill(apiBaseUrl)
     await page.getByLabel('API 模型名称', { exact: true }).fill('mock-academic-v1')
     await page.getByLabel('API Key', { exact: true }).fill('sk-e2e-test-99998888')
-    await page.getByRole('button', { name: '测试连接', exact: true }).click()
-    await expect(page.locator('.translation-modal__status--ok')).toContainText('连接成功')
+    const apiTestBtn = page.getByTestId('translation-test-btn')
+    await expect(apiTestBtn).toContainText('测试 API（mock-academic-v1）')
+    await apiTestBtn.click()
+    const apiToast = page.getByTestId('translation-test-result')
+    await expect(apiToast).toHaveClass(/translation-modal__toast/)
+    await expect(apiToast).toContainText('连接成功')
+    await expect(apiToast).toContainText('OpenAI 兼容 API')
+    await expect(apiToast).toBeHidden({ timeout: 7000 })
     await page.getByRole('button', { name: '保存设置', exact: true }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(page.getByTestId('header-engine-btn')).toContainText('API · mock-academic-v1')
 
     // 重开弹窗核验 API Key 输入框为空且提示脱敏预览
     await page.getByRole('button', { name: '翻译设置', exact: true }).click()
@@ -260,7 +267,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     // 捕获带有双向逐句多边形高亮的完整截图（左 3 行单多边形轮廓 + 右自然句单多边形轮廓）
     await info.attach('translation-dual-pdf2zh-page1', { body: await page.screenshot(), contentType: 'image/png' })
 
-    // (2) 左侧拖选文字 ("Every sentence keeps unscaled boxes.") -> 右侧同步渲染多边形高亮对应中文句且不重叠渲染左侧 .pdf-sentence-highlight
+    // (2) 左侧拖选文字 ("Every sentence keeps unscaled boxes.") -> 左右均高亮对应整句多边形
     const dragLeftSpan = page
       .locator('.pdf-page[data-page-number="1"] .textLayer span')
       .filter({ hasText: 'Every sentence keeps unscaled boxes.' })
@@ -270,13 +277,13 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await page.mouse.down()
     await page.mouse.move(dragLeftBox.x + dragLeftBox.width - 2, dragLeftBox.y + dragLeftBox.height / 2, { steps: 10 })
     await page.mouse.up()
-    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(0)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(1)
     await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
     const activeTargetAfterLeftDrag = page.locator('.translation-page[data-page-number="1"] .translation-overlay-sentence.is-active')
     await expect(activeTargetAfterLeftDrag).toHaveCount(1)
     await expect(activeTargetAfterLeftDrag.first()).toContainText('每个句子均维持未缩放坐标框')
 
-    // (2b) 左侧同行第二句起手处精确拖选 ("As shown in"，紧接同一行上一句 "Smith et al., 2025)." 之后) -> 右侧只高亮第 2 句 ("如图 1 所示...")，不能串扰前半句 ("现代阅读器...")
+    // (2b) 左侧同行第二句起手处精确拖选 ("As shown in"，紧接同一行上一句 "Smith et al., 2025)." 之后) -> 左右同时仅高亮第 2 句整句，不串扰前一句
     const startSpan = page
       .locator('.pdf-page[data-page-number="1"] .textLayer span')
       .filter({ hasText: 'As shown in' })
@@ -314,7 +321,7 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await page.mouse.down()
     await page.mouse.move(dragCoords!.endX, dragCoords!.endY, { steps: 10 })
     await page.mouse.up()
-    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(0)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(1)
     await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
     const activeTargetAfterMidLineDrag = page.locator(
       '.translation-page[data-page-number="1"] .translation-overlay-sentence.is-active'
@@ -322,6 +329,75 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await expect(activeTargetAfterMidLineDrag).toHaveCount(1)
     await expect(activeTargetAfterMidLineDrag.first()).toContainText('如图 1 所示')
     await expect(activeTargetAfterMidLineDrag.first()).not.toContainText('现代阅读器')
+
+    // (2c) 左侧仅框选/划选整句中的单个词 ("scale") -> 左侧保留单词原生选区且整句蓝框，右栏精确高亮对应的整句译文
+    const wordSpanBox = (await page
+      .locator('.pdf-page[data-page-number="1"] .textLayer span')
+      .filter({ hasText: 'scale factor' })
+      .first()
+      .boundingBox())!
+    const wordDragCoords = await page.evaluate(() => {
+      const spans = Array.from(document.querySelectorAll<HTMLElement>('.pdf-page[data-page-number="1"] .textLayer span'))
+      const targetSpan = spans.find(el => el.textContent?.includes('scale factor'))
+      if (!targetSpan) return null
+      const walker = document.createTreeWalker(targetSpan, NodeFilter.SHOW_TEXT)
+      let wordRect: DOMRect | null = null
+      let node = walker.nextNode() as Text | null
+      while (node) {
+        const text = node.textContent ?? ''
+        const idx = text.indexOf('scale')
+        if (idx !== -1) {
+          const range = document.createRange()
+          range.setStart(node, idx)
+          range.setEnd(node, idx + 'scale'.length)
+          wordRect = range.getBoundingClientRect()
+          break
+        }
+        node = walker.nextNode() as Text | null
+      }
+      if (!wordRect) return null
+      return {
+        startX: wordRect.left + 1,
+        startY: wordRect.top + wordRect.height / 2,
+        endX: wordRect.right - 1,
+        endY: wordRect.top + wordRect.height / 2,
+        width: wordRect.width
+      }
+    })
+    expect(wordDragCoords).not.toBeNull()
+    await page.mouse.move(wordDragCoords!.startX, wordDragCoords!.startY)
+    await page.mouse.down()
+    await page.mouse.move(wordDragCoords!.endX, wordDragCoords!.endY, { steps: 10 })
+    await page.mouse.up()
+    const leftSelectedWord = await page.evaluate(() => (window.getSelection()?.toString() ?? '').trim())
+    expect(leftSelectedWord).toContain('scale')
+    expect(leftSelectedWord.length).toBeLessThanOrEqual(8)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(1)
+    await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
+    const activeTargetAfterLeftWordDrag = page.locator(
+      '.translation-page[data-page-number="1"] .translation-overlay-sentence.is-active'
+    )
+    await expect(activeTargetAfterLeftWordDrag).toHaveCount(1)
+    await expect(activeTargetAfterLeftWordDrag.first()).toContainText('如图 1 所示')
+    await expect(activeTargetAfterLeftWordDrag.first()).not.toContainText('现代阅读器')
+
+    // (2d) 对左栏划选的单个词点击“蓝色高亮” -> 左栏仅对单词加永久蓝色标注（不整句加标注），右栏仍保留对应整句译文蓝框联动（无标注高亮）
+    await expect(page.locator('.study-companion-bar')).toBeVisible({ timeout: 10000 })
+    await page.getByRole('button', { name: '蓝色高亮', exact: true }).click()
+    const leftWordBlueHighlight = page.locator('.pdf-page[data-page-number="1"] .pdf-annotation-highlight--blue').first()
+    await expect(leftWordBlueHighlight).toBeVisible({ timeout: 10000 })
+    const blueBox = (await leftWordBlueHighlight.boundingBox())!
+    expect(blueBox.width).toBeLessThan(wordSpanBox.width * 0.55)
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed ?? true)).toBe(true)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(0)
+    await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
+    await expect(page.locator('.translation-page[data-page-number="1"] .pdf-annotation-highlight')).toHaveCount(0)
+    const activeTargetAfterWordAnnotation = page.locator(
+      '.translation-page[data-page-number="1"] .translation-overlay-sentence.is-active'
+    )
+    await expect(activeTargetAfterWordAnnotation).toHaveCount(1)
+    await expect(activeTargetAfterWordAnnotation.first()).toContainText('如图 1 所示')
+    await expect(activeTargetAfterWordAnnotation.first()).not.toContainText('现代阅读器')
 
     // (3) 右点译文 2 行第 1 句 ("现代阅读器需要稳定的版面架构...") -> 左右两侧均渲染单一连续多边形轮廓
     const rightFirstSentenceSpan = page
@@ -391,6 +467,54 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
     await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(1)
 
+    // (4c) 直接在已有选区内重新起拖，右侧仅划选单个中文词 ("缩放") -> 左右两侧同时仅高亮对应整句且不串扰前一句
+    const rightWordCoords = await page.evaluate(() => {
+      const spans = Array.from(
+        document.querySelectorAll<HTMLElement>('.translation-page[data-page-number="1"] .translation-overlay-sentence')
+      )
+      const target = spans.find(el => el.textContent?.includes('双栏缩放因子'))
+      if (!target) return null
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT)
+      let node = walker.nextNode() as Text | null
+      while (node) {
+        const text = node.textContent ?? ''
+        const idx = text.indexOf('缩放')
+        if (idx !== -1) {
+          const range = document.createRange()
+          range.setStart(node, idx)
+          range.setEnd(node, idx + 2)
+          const rect = range.getClientRects()[0]
+          if (rect && rect.width > 0 && rect.height > 0) {
+            return {
+              startX: rect.left + 1,
+              startY: rect.top + rect.height / 2,
+              endX: rect.right - 1,
+              endY: rect.top + rect.height / 2
+            }
+          }
+        }
+        node = walker.nextNode() as Text | null
+      }
+      return null
+    })
+    expect(rightWordCoords).not.toBeNull()
+    await page.mouse.move(rightWordCoords!.startX, rightWordCoords!.startY)
+    await page.mouse.down()
+    await page.mouse.move(rightWordCoords!.endX, rightWordCoords!.endY, { steps: 10 })
+    await page.mouse.up()
+    const rightSelectedWord = await page.evaluate(() => (window.getSelection()?.toString() ?? '').trim())
+    expect(rightSelectedWord).toContain('缩放')
+    expect(rightSelectedWord.length).toBeLessThanOrEqual(6)
+    const activeTargetAfterRightWordDrag = page.locator(
+      '.translation-page[data-page-number="1"] .translation-overlay-sentence.is-active'
+    )
+    await expect(activeTargetAfterRightWordDrag).toHaveCount(1)
+    await expect(activeTargetAfterRightWordDrag.first()).toContainText('如图 1 所示')
+    await expect(activeTargetAfterRightWordDrag.first()).not.toContainText('现代阅读器')
+    await expect(page.locator('.translation-page[data-page-number="1"] .translation-sentence-polygon')).toHaveCount(1)
+    await expect(page.locator('.pdf-page[data-page-number="1"] .pdf-highlight-layer .pdf-sentence-highlight')).toHaveCount(1)
+    await expect(page.locator('.translation-drag-marquee')).toHaveCount(0)
+
     // 4. 重启应用后验证从 SQLite 缓存直接恢复译文（不再请求远端）
     const callsAfterFirstTranslate = httpRequests
     await running.app.close()
@@ -403,16 +527,43 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await expect(p2.locator('.translation-overlay-block.is-translated').first()).toContainText('面向本地科研阅读器的确定性版面流水线')
     expect(httpRequests).toBe(callsAfterFirstTranslate)
 
-    // 5. 切换为本机 CLI 模式（Node 桩脚本），测试连接并执行重译本页
+    // 5. 切换为本机 AI CLI / 客户端模式：验证生效状态横幅、无副作用试连（不改生效引擎）、与具名切换按钮
     await p2.getByRole('button', { name: '翻译设置', exact: true }).click()
+    await expect(p2.getByTestId('active-engine-banner')).toContainText('OpenAI 兼容 API')
     await p2.getByRole('button', { name: /本机 AI CLI/ }).click()
+    await expect(p2.getByTestId('engine-draft-preview-badge')).toBeVisible()
+    const clientsPanel = p2.getByTestId('local-ai-clients-panel')
+    await expect(clientsPanel).toBeVisible()
+    await expect(p2.getByTestId('local-ai-client-claude')).toHaveCount(0)
+    await expect(p2.getByTestId('local-ai-client-codex')).toBeVisible()
+    await expect(p2.getByTestId('local-ai-client-gemini')).toBeVisible()
+    await clientsPanel.getByRole('button', { name: '重新扫描', exact: true }).click()
+    await expect(clientsPanel.getByRole('button', { name: '重新扫描', exact: true })).toBeEnabled({ timeout: 15000 })
+
+    // 切回 API 再切回 CLI，确认无残留提示串台
+    await p2.getByRole('button', { name: /OpenAI 兼容 API/ }).click()
+    await expect(p2.getByTestId('engine-draft-preview-badge')).toHaveCount(0)
+    await p2.getByRole('button', { name: /本机 AI CLI/ }).click()
+
     await p2.getByRole('button', { name: '自定义 CLI', exact: true }).click()
-    await p2.getByLabel('CLI 命令', { exact: true }).fill(process.execPath)
+    await running.app.evaluate(({ dialog }, exePath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [exePath] })
+    }, process.execPath)
+    await p2.getByRole('button', { name: '浏览程序…', exact: true }).click()
+    await expect(p2.getByLabel('CLI 命令', { exact: true })).toHaveValue(process.execPath)
     await p2.getByLabel('CLI 附加参数', { exact: true }).fill(cliStubPath)
-    await p2.getByRole('button', { name: '测试连接', exact: true }).click()
+    const cliTestBtn = p2.getByTestId('translation-test-btn')
+    await expect(cliTestBtn).toContainText('测试 CLI（自定义 CLI）')
+    await cliTestBtn.click()
     await expect(p2.locator('.translation-modal__status--ok')).toContainText('连接成功')
-    await p2.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect(p2.locator('.translation-modal__status--ok')).toContainText('本机 AI CLI')
+    await expect(p2.locator('.translation-modal__status--ok')).toContainText('仅测试当前草稿')
+    // 验证纯试连不会篡改当前已生效引擎
+    await expect(p2.getByTestId('active-engine-banner')).toContainText('OpenAI 兼容 API')
+
+    await p2.getByRole('button', { name: '保存并切换为本机 CLI', exact: true }).click()
     await expect(p2.getByRole('dialog')).toHaveCount(0)
+    await expect(p2.getByTestId('header-engine-btn')).toContainText('CLI ·')
 
     await p2.getByRole('button', { name: '重译本页', exact: true }).click()
     await expect(p2.locator('.translation-overlay-block.is-translated').first()).toContainText('CLI复译：', {
@@ -424,5 +575,219 @@ test('1:1 双栏对照、文献库收起、原页底图覆写译文、OpenAI 兼
     await running.app.close()
     await new Promise<void>(resolve => server.close(() => resolve()))
     await rm(cliTempDir, { recursive: true, force: true })
+  }
+})
+
+test('翻译本页期间切换其他 PDF 不中止后台翻译，标签页标出译中并在完成后切回即见完整译文', async () => {
+  let releaseDelayedTranslation = (): void => {}
+  let translateRequestCount = 0
+
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = []
+    for await (const chunk of req) chunks.push(Buffer.from(chunk))
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      messages: Array<{ role: string; content: string }>
+    }
+    const userPrompt = body.messages[body.messages.length - 1]?.content ?? ''
+    const arrStart = userPrompt.lastIndexOf('[')
+    const blocks = JSON.parse(userPrompt.slice(arrStart)) as Array<{ id: string; text: string }>
+    const isTestPing = blocks.length === 1 && blocks[0]?.id === 'test-b001'
+    if (!isTestPing) {
+      translateRequestCount += 1
+      if (translateRequestCount === 1) {
+        await new Promise<void>(resolveDelay => {
+          releaseDelayedTranslation = resolveDelay
+          setTimeout(resolveDelay, 12000)
+        })
+      }
+    }
+    const translations = blocks.map(item => ({
+      id: item.id,
+      text: `后台持久译文：${item.text.slice(0, 20)}`
+    }))
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }))
+  })
+
+  await new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', () => resolveListen()))
+  const addr = server.address() as { port: number }
+  const apiBaseUrl = `http://127.0.0.1:${addr.port}/v1`
+  const dataDir = await createTestData()
+  const running = await launchApp(dataDir, { deviceScaleFactor: 1 })
+  const failures: string[] = []
+  running.page.on('pageerror', error => failures.push(error.message))
+
+  try {
+    const { app, page } = running
+    await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await waitForPageReady(page, 1)
+    const docsAfterFirst = await page.evaluate(() => window.paperflow.listDocuments())
+    const docAId = docsAfterFirst[0].id
+
+    await importFixture(app, page, 'valid.pdf')
+    const docsAfterSecond = await page.evaluate(() => window.paperflow.listDocuments())
+    const docBId = docsAfterSecond.find(d => d.id !== docAId)!.id
+
+    // 切回 docA 并配置模拟 API 端点
+    await page.getByTestId(`pdf-tab-${docAId}`).locator('button.workspace-tab__select').click()
+    await waitForPageReady(page, 1)
+    await page.getByRole('button', { name: '翻译设置', exact: true }).click()
+    await page.getByLabel('API Base URL', { exact: true }).fill(apiBaseUrl)
+    await page.getByLabel('API 模型名称', { exact: true }).fill('mock-bg-v1')
+    await page.getByLabel('API Key', { exact: true }).fill('sk-bg-123456')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+
+    // 在 docA 启动整页翻译（服务端暂挂起响应），随即切换到 docB
+    await page.getByRole('button', { name: '翻译本页', exact: true }).click()
+    await expect.poll(() => translateRequestCount).toBe(1)
+
+    await page.getByTestId(`pdf-tab-${docBId}`).locator('button.workspace-tab__select').click()
+    await expect(page.getByTestId(`pdf-tab-translating-${docAId}`)).toHaveText('译中')
+
+    // 放行 docA 的后台翻译响应，确认其不中止并在后台自动完成写库
+    releaseDelayedTranslation()
+    await expect(page.getByTestId(`pdf-tab-translating-${docAId}`)).toHaveCount(0, { timeout: 10000 })
+
+    // 切回 docA：译文已从 SQLite 自动加载完成，且没有重发第二轮整页请求
+    await page.getByTestId(`pdf-tab-${docAId}`).locator('button.workspace-tab__select').click()
+    await expect(page.locator('.translation-overlay-block.is-translated')).toHaveCount(8, { timeout: 10000 })
+    await expect(page.locator('.translation-overlay-block.is-translated').first()).toContainText('后台持久译文：')
+    expect(translateRequestCount).toBe(1)
+    expect(failures).toEqual([])
+  } finally {
+    releaseDelayedTranslation()
+    await running.app.close()
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()))
+  }
+})
+
+test('支持余额接口时翻译后自动刷新顶栏与 5 秒完成浮窗、触发低余额预警，并可在设置卡刷新与统计用量', async () => {
+  let currentBalance = '18.42'
+  let chatCalls = 0
+  let balanceCalls = 0
+
+  const server = createServer(async (req, res) => {
+    if (req.url === '/deepseek/user/balance') {
+      balanceCalls += 1
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          is_available: true,
+          balance_infos: [
+            {
+              currency: 'CNY',
+              total_balance: currentBalance,
+              granted_balance: '0.00',
+              topped_up_balance: currentBalance
+            }
+          ]
+        })
+      )
+      return
+    }
+
+    chatCalls += 1
+    const chunks: Buffer[] = []
+    for await (const chunk of req) chunks.push(Buffer.from(chunk))
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      messages: Array<{ role: string; content: string }>
+    }
+    const userPrompt = body.messages[body.messages.length - 1]?.content ?? ''
+    const arrStart = userPrompt.lastIndexOf('[')
+    const blocks = JSON.parse(userPrompt.slice(arrStart)) as Array<{ id: string; text: string }>
+    const translations = blocks.map(item => ({
+      id: item.id,
+      text: `余额联动译文：${item.text.slice(0, 18)}`
+    }))
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ translations }) } }],
+        usage: { prompt_tokens: 1120, completion_tokens: 720, total_tokens: 1840 }
+      })
+    )
+  })
+
+  await new Promise<void>(resolveListen => server.listen(0, '127.0.0.1', () => resolveListen()))
+  const addr = server.address() as { port: number }
+  const deepseekMockBase = `http://127.0.0.1:${addr.port}/deepseek/v1`
+
+  const dataDir = await createTestData()
+  const running = await launchApp(dataDir, { deviceScaleFactor: 1 })
+  const failures: string[] = []
+  running.page.on('pageerror', error => failures.push(error.message))
+
+  try {
+    const { app, page } = running
+    await importFixture(app, page, 'verification/layout-analysis/' + layoutManifest.file.name)
+    await waitForPageReady(page, 1)
+
+    await page.getByRole('button', { name: '翻译设置', exact: true }).click()
+    await page.getByLabel('API Base URL', { exact: true }).fill(deepseekMockBase)
+    await page.getByLabel('API 模型名称', { exact: true }).fill('deepseek-chat')
+    await page.getByLabel('API Key', { exact: true }).fill('sk-deepseek-e2e-9999')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    const engineBtn = page.getByTestId('header-engine-btn')
+    await expect(engineBtn).toContainText('API · deepseek-chat · 余 ¥18.42')
+    await expect(engineBtn).toHaveAttribute('data-billing-tone', 'ok')
+
+    await page.getByRole('button', { name: '翻译本页', exact: true }).click()
+    const usageToast = page.getByTestId('translation-usage-toast')
+    await expect(usageToast).toBeVisible({ timeout: 15000 })
+    await expect(usageToast).toHaveAttribute('data-tone', 'ok')
+    await expect(usageToast).toContainText('1,840 tokens')
+    await expect(usageToast).toContainText('¥18.42')
+    // 5 秒后自动消失
+    await expect(usageToast).toBeHidden({ timeout: 7500 })
+
+    // 模拟余额降至 ¥1.20（低于默认预警阈值 ¥2.00），重译本页后变橙色低余额预警
+    currentBalance = '1.20'
+    await page.getByRole('button', { name: '重译本页', exact: true }).click()
+    await expect(usageToast).toBeVisible({ timeout: 15000 })
+    await expect(usageToast).toHaveAttribute('data-tone', 'warn')
+    await expect(usageToast).toContainText('余额偏低：剩余 ¥1.20')
+    await expect(engineBtn).toContainText('余 ¥1.20 ⚠')
+    await expect(engineBtn).toHaveAttribute('data-billing-tone', 'warn')
+
+    // 打开设置弹窗查看余额与累计 Token 明细卡并测试手动刷新
+    await page.getByRole('button', { name: '翻译设置', exact: true }).click()
+    const usageCard = page.getByTestId('usage-balance-card')
+    await expect(usageCard).toBeVisible()
+    await expect(page.getByTestId('usage-balance-value')).toContainText('¥ 1.20')
+    await expect(page.getByTestId('usage-today-tokens')).toContainText('3,680 tok')
+
+    currentBalance = '25.00'
+    await page.getByTestId('refresh-balance-btn').click()
+    await expect(page.getByTestId('usage-balance-value')).toContainText('¥ 25.00')
+
+    // 切到「本机 AI CLI」页签时实时跟随切换且隐藏 API 计价输入框；切回「OpenAI 兼容 API」不再串台残留 CLI 文案
+    await page.getByRole('button', { name: /本机 AI CLI/ }).click()
+    await expect(page.getByTestId('usage-balance-value')).toHaveText('CLI 订阅配额')
+    await expect(page.getByTestId('refresh-balance-btn')).toHaveCount(0)
+    await expect(page.getByLabel('低余额预警线', { exact: true })).toHaveCount(0)
+
+    await page.getByRole('button', { name: /OpenAI 兼容 API/ }).click()
+    await expect(page.getByTestId('usage-balance-value')).toContainText('¥ 25.00')
+    await expect(page.getByTestId('refresh-balance-btn')).toBeVisible()
+    await expect(page.getByLabel('低余额预警线', { exact: true })).toBeVisible()
+    await expect(usageCard).not.toContainText('CLI 订阅配额')
+    await expect(usageCard).not.toContainText('本机 AI CLI')
+
+    // 点击 OpenAI / Ollama 预设时，余额卡片状态同步切换而不沿用旧服务商余额
+    await page.getByRole('button', { name: 'OpenAI', exact: true }).click()
+    await expect(page.getByTestId('usage-balance-value')).toHaveText('服务商未开放')
+    await page.getByRole('button', { name: 'Ollama（本机离线）', exact: true }).click()
+    await expect(page.getByTestId('usage-balance-value')).toHaveText('本机离线免费')
+
+    await page.getByRole('button', { name: '关闭设置', exact: true }).click()
+
+    expect(chatCalls).toBe(2)
+    expect(balanceCalls).toBeGreaterThanOrEqual(4)
+    expect(failures).toEqual([])
+  } finally {
+    await running.app.close()
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()))
   }
 })

@@ -186,3 +186,27 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* 双栏模式下底部悬浮页码与缩放胶囊居中横跨整个阅读区 */
+.workspace-dual-pill-dock {
+  position: absolute;
+  bottom: 5px;
+  left: calc(var(--library-col-width, 252px) + (100% - var(--library-col-width, 252px)) / 2);
+  transform: translateX(-50%);
+  z-index: 18;
+  height: 36px;
+  max-width: calc(100% - var(--library-col-width, 252px) - 24px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.workspace.workspace--library-collapsed .workspace-dual-pill-dock {
+  left: 50%;
+  max-width: calc(100% - 24px);
+}
+
+.workspace-dual-pill-dock > * {
+  pointer-events: auto;
+}

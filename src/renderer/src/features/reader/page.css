@@ -41,6 +41,10 @@
 .pdf-page-surface > .pdf-highlight-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .pdf-annotation-highlight-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .pdf-annotation-highlight { stroke-width: 1; stroke-linejoin: round; }
+.pdf-annotation-highlight.is-editing {
+  stroke-width: 2;
+  filter: drop-shadow(0 0 2px rgba(30, 58, 138, 0.35));
+}
 .pdf-annotation-highlight--yellow { fill: rgba(250, 204, 21, 0.34); stroke: rgba(202, 138, 4, 0.55); }
 .pdf-annotation-highlight--green { fill: rgba(74, 222, 128, 0.28); stroke: rgba(22, 163, 74, 0.5); }
 .pdf-annotation-highlight--blue { fill: rgba(96, 165, 250, 0.28); stroke: rgba(37, 99, 235, 0.5); }

@@ -144,9 +144,11 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await docCard.getByLabel('添加文献标签', { exact: true }).press('Enter')
 
     await page.keyboard.press('Escape')
+    await waitForPageReady(page, 1)
+    await otherSpan.scrollIntoViewIfNeeded()
     const noteBox = (await otherSpan.boundingBox())!
     await page.mouse.click(noteBox.x + noteBox.width / 2, noteBox.y + noteBox.height / 2)
-    await page.getByRole('button', { name: '添加批注笔记', exact: true }).click()
+    await page.getByRole('button', { name: '黄色高亮', exact: true }).click()
     await page.getByLabel('批注笔记输入框', { exact: true }).fill('备份还原验证批注')
     await page.getByRole('button', { name: '保存批注', exact: true }).click()
     await expect(page.getByRole('button', { name: '批注与笔记', exact: true })).toContainText('批注 (1)')
@@ -154,6 +156,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await app.evaluate(({ dialog }, targetPath) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: targetPath })
     }, backupZipPath)
+    await page.getByTestId('library-more-menu-btn').click()
     await page.getByRole('button', { name: '导出文献库备份', exact: true }).click()
     await expect(page.locator('.library-feedback--success')).toContainText('已导出备份', { timeout: 15000 })
 
@@ -194,6 +197,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await appB.evaluate(({ dialog }, sourcePath) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [sourcePath] })
     }, backupZipPath)
+    await pageB.getByTestId('library-more-menu-btn').click()
     await pageB.getByRole('button', { name: '从备份恢复文献库', exact: true }).click()
     await expect(pageB.locator('.library-feedback--success')).toContainText('新增 1 篇', { timeout: 20000 })
 
@@ -205,6 +209,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await expect(pageB.getByRole('button', { name: '批注与笔记', exact: true })).toContainText('批注 (1)')
 
     // 二次重复恢复验证幂等性（新增 0 篇、已有 1 篇、批注不重复）
+    await pageB.getByTestId('library-more-menu-btn').click()
     await pageB.getByRole('button', { name: '从备份恢复文献库', exact: true }).click()
     await expect(pageB.locator('.library-feedback--success')).toContainText('已有 1 篇', { timeout: 20000 })
     await expect(pageB.getByRole('button', { name: '批注与笔记', exact: true })).toContainText('批注 (1)')

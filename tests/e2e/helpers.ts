@@ -12,7 +12,10 @@ export async function createTestData(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'paperflow-e2e-'))
 }
 
-export async function launchApp(dataDir: string, options: { deviceScaleFactor?: number } = {}): Promise<{ app: ElectronApplication; page: Page }> {
+export async function launchApp(
+  dataDir: string,
+  options: { deviceScaleFactor?: number; keepOnboardingOpen?: boolean } = {}
+): Promise<{ app: ElectronApplication; page: Page }> {
   const factor = options.deviceScaleFactor
   if (factor !== undefined && (!Number.isFinite(factor) || factor <= 0)) {
     throw new Error('deviceScaleFactor must be a finite positive number')
@@ -29,6 +32,14 @@ export async function launchApp(dataDir: string, options: { deviceScaleFactor?: 
   try {
     const page = await app.firstWindow()
     await expect(page.getByText('PaperFlow', { exact: true })).toBeVisible()
+    await expect(page.locator('.app-shell')).toHaveAttribute('data-onboarding-ready', 'true', { timeout: 15000 })
+    if (!options.keepOnboardingOpen) {
+      const skipBtn = page.getByTestId('onboarding-skip')
+      if (await skipBtn.isVisible().catch(() => false)) {
+        await skipBtn.click()
+        await expect(page.getByTestId('onboarding-modal')).toBeHidden({ timeout: 10000 })
+      }
+    }
     if (factor !== undefined) {
       await app.evaluate(({ BrowserWindow }) => {
         const win = BrowserWindow.getAllWindows()[0]

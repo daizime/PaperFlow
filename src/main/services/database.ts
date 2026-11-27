@@ -4,27 +4,42 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { z } from 'zod'
 import type {
+  AiChatMessageRecord,
+  AiChatRole,
   AnnotationColor,
   AnnotationRecord,
   AnnotationRect,
   CreateAnnotationInput,
+  CreateFolderInput,
+  DocumentPageTranslations,
   DocumentRecord,
+  GlossaryEntry,
+  LibraryFolder,
   LibrarySearchHit,
   ReaderState,
+  ReadingStatus,
+  ResetLibraryResult,
   TranslatedBlockRecord,
   UpdateAnnotationInput,
-  UpdateDocumentMetaInput
+  UpdateDocumentMetaInput,
+  UpdateFolderInput
 } from '../../shared/contracts'
 import {
   annotationIdSchema,
+  chatSessionKeySchema,
   createAnnotationInputSchema,
+  createFolderInputSchema,
   displayTitleSchema,
   documentIdSchema,
+  folderIdSchema,
+  glossaryEntrySchema,
   librarySearchQuerySchema,
   pageNumberSchema,
   readerStateSchema,
+  readingStatusSchema,
   updateAnnotationInputSchema,
-  updateDocumentMetaInputSchema
+  updateDocumentMetaInputSchema,
+  updateFolderInputSchema
 } from '../../shared/schemas'
 
 export interface StoredDocumentRecord extends DocumentRecord {
@@ -32,9 +47,11 @@ export interface StoredDocumentRecord extends DocumentRecord {
   storedFilename: string
 }
 
-export type InsertDocumentInput = Omit<StoredDocumentRecord, 'starred' | 'tags'> & {
+export type InsertDocumentInput = Omit<StoredDocumentRecord, 'starred' | 'tags' | 'folderId' | 'readingStatus'> & {
   starred?: boolean
   tags?: string[]
+  folderId?: string | null
+  readingStatus?: ReadingStatus
 }
 
 export interface StoredTranslationCacheRow {
@@ -58,7 +75,9 @@ const storedDocumentSchema = z.object({
   pageCount: pageNumberSchema.nullable(),
   importedAt: z.iso.datetime(),
   starred: z.boolean().default(false),
-  tags: z.array(z.string()).default([])
+  tags: z.array(z.string()).default([]),
+  folderId: folderIdSchema.nullable().default(null),
+  readingStatus: readingStatusSchema.default('unread')
 }).strict()
 
 interface DocumentRow {
@@ -72,6 +91,20 @@ interface DocumentRow {
   imported_at: string
   starred?: number
   tags_json?: string
+  folder_id?: string | null
+  reading_status?: string | null
+}
+
+interface FolderRow {
+  id: string
+  parent_id: string | null
+  name: string
+  faculty_id: string
+  context_summary: string
+  glossary_json: string
+  inherit_global_glossary: number
+  created_at: string
+  updated_at: string
 }
 
 interface ReaderStateRow {
@@ -146,6 +179,48 @@ function parseTagsJson(raw: string | undefined): string[] {
   }
 }
 
+function parseFolderGlossaryJson(raw: string | undefined): GlossaryEntry[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    const out: GlossaryEntry[] = []
+    for (const item of parsed) {
+      const checked = glossaryEntrySchema.safeParse(item)
+      if (checked.success) out.push(checked.data)
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+function dedupeFolderGlossary(entries: readonly GlossaryEntry[]): GlossaryEntry[] {
+  const seen = new Set<string>()
+  const out: GlossaryEntry[] = []
+  for (const item of entries) {
+    const key = item.source.trim().toLowerCase()
+    if (!key || seen.has(key) || out.length >= 200) continue
+    seen.add(key)
+    out.push({ source: item.source.trim(), target: item.target.trim() })
+  }
+  return out
+}
+
+function toLibraryFolder(row: FolderRow): LibraryFolder {
+  return {
+    id: row.id,
+    parentId: row.parent_id ?? null,
+    name: row.name,
+    facultyId: row.faculty_id ?? '',
+    contextSummary: row.context_summary ?? '',
+    glossary: parseFolderGlossaryJson(row.glossary_json),
+    inheritGlobalGlossary: Boolean(row.inherit_global_glossary),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
 function escapeLikePattern(query: string): string {
   return query.replace(/[\\%_]/g, ch => `\\${ch}`)
 }
@@ -164,6 +239,8 @@ function buildSearchSnippet(text: string, query: string, maxLen = 110): string {
 }
 
 function toStoredDocument(row: DocumentRow): StoredDocumentRecord {
+  const readingStatus: ReadingStatus =
+    row.reading_status === 'reading' || row.reading_status === 'done' ? row.reading_status : 'unread'
   return {
     id: row.id,
     sha256: row.sha256,
@@ -174,7 +251,9 @@ function toStoredDocument(row: DocumentRow): StoredDocumentRecord {
     pageCount: row.page_count,
     importedAt: row.imported_at,
     starred: Boolean(row.starred),
-    tags: parseTagsJson(row.tags_json)
+    tags: parseTagsJson(row.tags_json),
+    folderId: row.folder_id ?? null,
+    readingStatus
   }
 }
 
@@ -187,7 +266,9 @@ function toPublicDocument(record: StoredDocumentRecord): DocumentRecord {
     pageCount: record.pageCount,
     importedAt: record.importedAt,
     starred: record.starred,
-    tags: record.tags
+    tags: record.tags,
+    folderId: record.folderId,
+    readingStatus: record.readingStatus
   }
 }
 
@@ -211,8 +292,8 @@ export class LibraryDatabase {
 
   private migrate(): void {
     const version = this.database.pragma('user_version', { simple: true }) as number
-    if (version > 4) throw new Error('文献数据库版本较新，请使用更新版本的 PaperFlow。')
-    if (version === 4) return
+    if (version > 7) throw new Error('文献数据库版本较新，请使用更新版本的 PaperFlow。')
+    if (version === 7) return
     this.database.transaction(() => {
       if (version < 1) {
         this.database.exec(`
@@ -283,7 +364,57 @@ export class LibraryDatabase {
         if (!columnNames.has('tags_json')) {
           this.database.exec("ALTER TABLE documents ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]';")
         }
-        this.database.exec('PRAGMA user_version = 4;')
+      }
+      if (version < 5) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS folders (
+            id TEXT PRIMARY KEY NOT NULL,
+            parent_id TEXT REFERENCES folders(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            faculty_id TEXT NOT NULL DEFAULT '',
+            context_summary TEXT NOT NULL DEFAULT '',
+            glossary_json TEXT NOT NULL DEFAULT '[]',
+            inherit_global_glossary INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_folders_parent
+            ON folders (parent_id, name);
+        `)
+        const columns = this.database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>
+        const columnNames = new Set(columns.map(col => col.name))
+        if (!columnNames.has('folder_id')) {
+          this.database.exec('ALTER TABLE documents ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;')
+        }
+        this.database.exec(`
+          CREATE INDEX IF NOT EXISTS idx_documents_folder
+            ON documents (folder_id);
+          PRAGMA user_version = 5;
+        `)
+      }
+      if (version < 6) {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY NOT NULL,
+            session_key TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            quote_text TEXT NOT NULL DEFAULT '',
+            context_summary TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+            ON chat_messages (session_key, created_at);
+          PRAGMA user_version = 6;
+        `)
+      }
+      if (version < 7) {
+        const columns = this.database.prepare('PRAGMA table_info(documents)').all() as Array<{ name: string }>
+        const columnNames = new Set(columns.map(col => col.name))
+        if (!columnNames.has('reading_status')) {
+          this.database.exec("ALTER TABLE documents ADD COLUMN reading_status TEXT NOT NULL DEFAULT 'unread';")
+        }
+        this.database.exec('PRAGMA user_version = 7;')
       }
     })()
   }
@@ -318,9 +449,12 @@ export class LibraryDatabase {
   insertDocument(input: InsertDocumentInput): DocumentRecord {
     const record = storedDocumentSchema.parse(input)
     if (record.storedFilename !== `${record.id}.pdf`) throw new Error('文献存储文件名无效。')
+    if (record.folderId !== null && !this.getFolder(record.folderId)) {
+      throw new Error('目标分类文件夹不存在。')
+    }
     this.database.prepare(`
-      INSERT INTO documents (id, sha256, original_filename, display_title, stored_filename, byte_size, page_count, imported_at, starred, tags_json)
-      VALUES (@id, @sha256, @originalFilename, @displayTitle, @storedFilename, @byteSize, @pageCount, @importedAt, @starred, @tagsJson)
+      INSERT INTO documents (id, sha256, original_filename, display_title, stored_filename, byte_size, page_count, imported_at, starred, tags_json, folder_id, reading_status)
+      VALUES (@id, @sha256, @originalFilename, @displayTitle, @storedFilename, @byteSize, @pageCount, @importedAt, @starred, @tagsJson, @folderId, @readingStatus)
     `).run({
       id: record.id,
       sha256: record.sha256,
@@ -331,7 +465,9 @@ export class LibraryDatabase {
       pageCount: record.pageCount,
       importedAt: record.importedAt,
       starred: record.starred ? 1 : 0,
-      tagsJson: JSON.stringify(record.tags)
+      tagsJson: JSON.stringify(record.tags),
+      folderId: record.folderId,
+      readingStatus: record.readingStatus
     })
     return toPublicDocument(record)
   }
@@ -417,6 +553,33 @@ export class LibraryDatabase {
       providerSignature: row.provider_signature,
       updatedAt: row.updated_at
     }))
+  }
+
+  listDocumentTranslations(documentId: string, targetLanguage: string): DocumentPageTranslations[] {
+    const document = this.requireDocument(documentId)
+    const rows = this.database.prepare(`
+      SELECT page_number, block_id, source_hash, translated_text, provider_signature, updated_at
+      FROM translation_cache
+      WHERE document_id = ? AND target_language = ?
+      ORDER BY page_number ASC, block_id ASC
+    `).all(document.id, targetLanguage) as Array<TranslationCacheRow & { page_number: number }>
+
+    const pages: DocumentPageTranslations[] = []
+    let current: DocumentPageTranslations | null = null
+    for (const row of rows) {
+      if (!current || current.pageNumber !== row.page_number) {
+        current = { pageNumber: row.page_number, items: [] }
+        pages.push(current)
+      }
+      current.items.push({
+        blockId: row.block_id,
+        sourceHash: row.source_hash,
+        translatedText: row.translated_text,
+        providerSignature: row.provider_signature,
+        updatedAt: row.updated_at
+      })
+    }
+    return pages
   }
 
   upsertPageTranslations(
@@ -539,10 +702,217 @@ export class LibraryDatabase {
       }
       nextTags = deduped
     }
+    let nextFolderId = existing.folderId
+    if (validated.folderId !== undefined) {
+      if (validated.folderId !== null && !this.getFolder(validated.folderId)) {
+        throw new Error('目标分类文件夹不存在。')
+      }
+      nextFolderId = validated.folderId
+    }
+    const nextReadingStatus = validated.readingStatus ?? existing.readingStatus
     this.database
-      .prepare('UPDATE documents SET starred = ?, tags_json = ? WHERE id = ?')
-      .run(nextStarred ? 1 : 0, JSON.stringify(nextTags), existing.id)
+      .prepare('UPDATE documents SET starred = ?, tags_json = ?, folder_id = ?, reading_status = ? WHERE id = ?')
+      .run(nextStarred ? 1 : 0, JSON.stringify(nextTags), nextFolderId, nextReadingStatus, existing.id)
     return toPublicDocument(this.requireDocument(existing.id))
+  }
+
+  private getFolderDepthMap(): Map<string, FolderRow> {
+    const rows = this.database
+      .prepare('SELECT * FROM folders ORDER BY created_at ASC, name ASC')
+      .all() as FolderRow[]
+    return new Map(rows.map(row => [row.id, row]))
+  }
+
+  private measureAncestorDepth(folderId: string | null, folderMap: Map<string, FolderRow>): number {
+    let depth = 0
+    let cursor: string | null = folderId
+    const visited = new Set<string>()
+    while (cursor) {
+      if (visited.has(cursor)) {
+        throw new Error('检测到分类文件夹循环层级。')
+      }
+      visited.add(cursor)
+      const row = folderMap.get(cursor)
+      if (!row) break
+      depth += 1
+      cursor = row.parent_id ?? null
+    }
+    return depth
+  }
+
+  private collectDescendantIds(rootId: string, folderMap: Map<string, FolderRow>): string[] {
+    const childrenByParent = new Map<string, string[]>()
+    for (const row of folderMap.values()) {
+      if (!row.parent_id) continue
+      const list = childrenByParent.get(row.parent_id)
+      if (list) list.push(row.id)
+      else childrenByParent.set(row.parent_id, [row.id])
+    }
+    const collected: string[] = [rootId]
+    const queue: string[] = [rootId]
+    const seen = new Set<string>([rootId])
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      for (const childId of childrenByParent.get(current) ?? []) {
+        if (seen.has(childId)) continue
+        seen.add(childId)
+        collected.push(childId)
+        queue.push(childId)
+      }
+    }
+    return collected
+  }
+
+  private measureSubtreeHeight(rootId: string, folderMap: Map<string, FolderRow>): number {
+    const childrenByParent = new Map<string, string[]>()
+    for (const row of folderMap.values()) {
+      if (!row.parent_id) continue
+      const list = childrenByParent.get(row.parent_id)
+      if (list) list.push(row.id)
+      else childrenByParent.set(row.parent_id, [row.id])
+    }
+    const visit = (id: string, depth: number, visited: Set<string>): number => {
+      let maxDepth = depth
+      for (const childId of childrenByParent.get(id) ?? []) {
+        if (visited.has(childId)) continue
+        visited.add(childId)
+        maxDepth = Math.max(maxDepth, visit(childId, depth + 1, visited))
+      }
+      return maxDepth
+    }
+    return visit(rootId, 1, new Set([rootId]))
+  }
+
+  listFolders(): LibraryFolder[] {
+    const rows = this.database
+      .prepare('SELECT * FROM folders ORDER BY created_at ASC, name ASC')
+      .all() as FolderRow[]
+    return rows.map(toLibraryFolder)
+  }
+
+  getFolder(id: string): LibraryFolder | null {
+    const folderId = folderIdSchema.parse(id)
+    const row = this.database.prepare('SELECT * FROM folders WHERE id = ?').get(folderId) as FolderRow | undefined
+    return row ? toLibraryFolder(row) : null
+  }
+
+  createFolder(input: CreateFolderInput): LibraryFolder {
+    const validated = createFolderInputSchema.parse(input)
+    const parentId = validated.parentId ?? null
+    const folderMap = this.getFolderDepthMap()
+    if (parentId !== null) {
+      if (!folderMap.has(parentId)) {
+        throw new Error('上级分类文件夹不存在。')
+      }
+      const parentDepth = this.measureAncestorDepth(parentId, folderMap)
+      if (parentDepth + 1 > 4) {
+        throw new Error('分类文件夹层级最多支持 4 级。')
+      }
+    }
+
+    const now = new Date().toISOString()
+    const id = randomUUID()
+    const glossary = dedupeFolderGlossary(validated.glossary ?? [])
+    this.database
+      .prepare(`
+        INSERT INTO folders (
+          id, parent_id, name, faculty_id, context_summary, glossary_json, inherit_global_glossary, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        id,
+        parentId,
+        validated.name,
+        validated.facultyId ?? '',
+        validated.contextSummary ?? '',
+        JSON.stringify(glossary),
+        validated.inheritGlobalGlossary ? 1 : 0,
+        now,
+        now
+      )
+    const created = this.getFolder(id)
+    if (!created) throw new Error('分类文件夹创建失败。')
+    return created
+  }
+
+  updateFolder(input: UpdateFolderInput): LibraryFolder {
+    const validated = updateFolderInputSchema.parse(input)
+    const existing = this.getFolder(validated.id)
+    if (!existing) throw new Error('分类文件夹不存在或已被删除。')
+
+    const folderMap = this.getFolderDepthMap()
+    let nextParentId = existing.parentId
+    if (validated.parentId !== undefined && validated.parentId !== existing.parentId) {
+      if (validated.parentId === existing.id) {
+        throw new Error('分类文件夹不能设为自身的子分类。')
+      }
+      if (validated.parentId !== null) {
+        if (!folderMap.has(validated.parentId)) {
+          throw new Error('上级分类文件夹不存在。')
+        }
+        const descendants = new Set(this.collectDescendantIds(existing.id, folderMap))
+        if (descendants.has(validated.parentId)) {
+          throw new Error('不能将分类文件夹移动到其子分类下。')
+        }
+        const parentDepth = this.measureAncestorDepth(validated.parentId, folderMap)
+        const subtreeHeight = this.measureSubtreeHeight(existing.id, folderMap)
+        if (parentDepth + subtreeHeight > 4) {
+          throw new Error('分类文件夹层级最多支持 4 级。')
+        }
+      }
+      nextParentId = validated.parentId
+    }
+
+    const nextName = validated.name ?? existing.name
+    const nextFacultyId = validated.facultyId ?? existing.facultyId
+    const nextContext = validated.contextSummary ?? existing.contextSummary
+    const nextGlossary =
+      validated.glossary !== undefined ? dedupeFolderGlossary(validated.glossary) : existing.glossary
+    const nextInherit =
+      validated.inheritGlobalGlossary !== undefined
+        ? validated.inheritGlobalGlossary
+        : existing.inheritGlobalGlossary
+    const now = new Date().toISOString()
+
+    this.database
+      .prepare(`
+        UPDATE folders
+        SET parent_id = ?, name = ?, faculty_id = ?, context_summary = ?, glossary_json = ?, inherit_global_glossary = ?, updated_at = ?
+        WHERE id = ?
+      `)
+      .run(
+        nextParentId,
+        nextName,
+        nextFacultyId,
+        nextContext,
+        JSON.stringify(nextGlossary),
+        nextInherit ? 1 : 0,
+        now,
+        existing.id
+      )
+    const updated = this.getFolder(existing.id)
+    if (!updated) throw new Error('分类文件夹更新失败。')
+    return updated
+  }
+
+  deleteFolder(id: string): void {
+    const folderId = folderIdSchema.parse(id)
+    const existing = this.getFolder(folderId)
+    if (!existing) throw new Error('分类文件夹不存在或已被删除。')
+
+    const folderMap = this.getFolderDepthMap()
+    const subtreeIds = this.collectDescendantIds(folderId, folderMap)
+
+    this.database.transaction(() => {
+      if (subtreeIds.length > 0) {
+        const placeholders = subtreeIds.map(() => '?').join(', ')
+        this.database
+          .prepare(`UPDATE documents SET folder_id = NULL WHERE folder_id IN (${placeholders})`)
+          .run(...subtreeIds)
+      }
+      this.database.prepare('DELETE FROM folders WHERE id = ?').run(folderId)
+    })()
   }
 
   listReaderProgress(): Record<string, number> {
@@ -740,6 +1110,86 @@ export class LibraryDatabase {
     }
 
     return hits.slice(0, 40)
+  }
+
+  listChatMessages(sessionKey: string): AiChatMessageRecord[] {
+    const validatedKey = chatSessionKeySchema.parse(sessionKey)
+    const rows = this.database
+      .prepare(`
+        SELECT id, session_key, role, content, quote_text, context_summary, created_at
+        FROM chat_messages
+        WHERE session_key = ?
+        ORDER BY created_at ASC, rowid ASC
+      `)
+      .all(validatedKey) as Array<{
+      id: string
+      session_key: string
+      role: AiChatRole
+      content: string
+      quote_text: string
+      context_summary: string
+      created_at: string
+    }>
+    return rows.map(row => ({
+      id: row.id,
+      sessionKey: row.session_key,
+      role: row.role,
+      content: row.content,
+      quoteText: row.quote_text,
+      contextSummary: row.context_summary,
+      createdAt: row.created_at
+    }))
+  }
+
+  appendChatMessage(input: {
+    sessionKey: string
+    role: AiChatRole
+    content: string
+    quoteText?: string
+    contextSummary?: string
+    createdAt?: string
+  }): AiChatMessageRecord {
+    const sessionKey = chatSessionKeySchema.parse(input.sessionKey)
+    const record: AiChatMessageRecord = {
+      id: randomUUID(),
+      sessionKey,
+      role: input.role,
+      content: input.content,
+      quoteText: input.quoteText ?? '',
+      contextSummary: input.contextSummary ?? '',
+      createdAt: input.createdAt ?? new Date().toISOString()
+    }
+    this.database
+      .prepare(`
+        INSERT INTO chat_messages (id, session_key, role, content, quote_text, context_summary, created_at)
+        VALUES (@id, @sessionKey, @role, @content, @quoteText, @contextSummary, @createdAt)
+      `)
+      .run(record)
+    return record
+  }
+
+  clearChatMessages(sessionKey: string): void {
+    const validatedKey = chatSessionKeySchema.parse(sessionKey)
+    this.database.prepare('DELETE FROM chat_messages WHERE session_key = ?').run(validatedKey)
+  }
+
+  /** 清空文献、分类文件夹、批注、译文缓存、AI 对话与阅读状态，保留 app_settings 中的翻译服务与科研配置。 */
+  resetLibrary(): ResetLibraryResult {
+    const tx = this.database.transaction((): ResetLibraryResult => {
+      const docCountRow = this.database.prepare('SELECT COUNT(*) AS count FROM documents').get() as { count: number }
+      const folderCountRow = this.database.prepare('SELECT COUNT(*) AS count FROM folders').get() as { count: number }
+      this.database.prepare('DELETE FROM annotations').run()
+      this.database.prepare('DELETE FROM translation_cache').run()
+      this.database.prepare('DELETE FROM reader_state').run()
+      this.database.prepare('DELETE FROM chat_messages').run()
+      this.database.prepare('DELETE FROM documents').run()
+      this.database.prepare('DELETE FROM folders').run()
+      return {
+        deletedDocuments: docCountRow.count,
+        deletedFolders: folderCountRow.count
+      }
+    })
+    return tx()
   }
 
   close(): void {

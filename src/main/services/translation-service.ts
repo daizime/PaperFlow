@@ -1,31 +1,53 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, resolve } from 'node:path'
 import type {
+  AcademicSlideDeck,
   CliPreset,
+  DetectedLocalAiClient,
+  DocumentPageTranslations,
+  DocumentTranslationScope,
   ExplainSelectionInput,
   ExplainSelectionResult,
   GlossaryEntry,
+  ProviderBalanceSnapshot,
+  RunAiSkillInput,
+  RunAiSkillResult,
   SaveTranslationSettingsInput,
+  SendAiChatInput,
+  SendAiChatResult,
+  TokenUsageDelta,
   TranslatePageInput,
   TranslatePageResult,
   TranslatedBlockRecord,
   TranslationBlockInput,
   TranslationProgressEvent,
+  TranslationProviderType,
   TranslationSettings,
-  TranslationTestResult
+  TranslationTestResult,
+  UpdateBlockTranslationInput,
+  UsagePreferences,
+  UsageStatsSummary
 } from '../../shared/contracts'
 import {
   documentIdSchema,
   explainSelectionInputSchema,
   glossaryEntrySchema,
   pageNumberSchema,
+  runAiSkillInputSchema,
   saveTranslationSettingsSchema,
-  translatePageInputSchema
+  sendAiChatInputSchema,
+  translatePageInputSchema,
+  updateBlockTranslationInputSchema
 } from '../../shared/schemas'
+import { buildAcademicSkillPrompt } from './academic-skills'
 import type { LibraryDatabase } from './database'
+import { formatSlideDeckMarkdown, parseSlideDeckJson } from './pptx-builder'
+import { readOpenAiStreamOrJsonWithUsage } from './openai-stream'
+import { resolveEffectiveTranslationScope } from './research-profile'
+import { detectProviderBillingKind, mergeTokenUsage, UsageService } from './usage-service'
 
 export interface SafeStorageAdapter {
   isEncryptionAvailable(): boolean
@@ -98,11 +120,70 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '')
 }
 
-function providerSignatureFor(config: StoredTranslationConfig): string {
-  if (config.provider === 'openai-compatible') {
-    return `openai:${normalizeBaseUrl(config.openai.baseUrl)}|${config.openai.model}|${config.targetLanguage}`
+function formatOpenAiHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host || baseUrl
+  } catch {
+    return baseUrl
   }
-  return `cli:${config.cli.preset}|${config.cli.command}|${config.cli.model}|${config.targetLanguage}`
+}
+
+function formatTestedEngineMeta(
+  config: StoredTranslationConfig,
+  resolvedCommand?: string
+): {
+  testedProvider: TranslationProviderType
+  testedLabel: string
+  testedTarget: string
+} {
+  if (config.provider === 'openai-compatible') {
+    return {
+      testedProvider: 'openai-compatible',
+      testedLabel: config.openai.model,
+      testedTarget: formatOpenAiHost(config.openai.baseUrl)
+    }
+  }
+  const cliBaseName =
+    config.cli.preset === 'codex'
+      ? 'Codex CLI'
+      : config.cli.preset === 'gemini'
+        ? 'Gemini CLI'
+        : '自定义 CLI'
+  return {
+    testedProvider: 'cli',
+    testedLabel: config.cli.model ? `${cliBaseName} · ${config.cli.model}` : cliBaseName,
+    testedTarget: resolvedCommand ?? config.cli.command
+  }
+}
+
+function buildStoredConfigFromInput(
+  validated: SaveTranslationSettingsInput,
+  fallbackGlossary: GlossaryEntry[]
+): StoredTranslationConfig {
+  return {
+    provider: validated.provider,
+    targetLanguage: validated.targetLanguage,
+    glossary: validated.glossary ?? fallbackGlossary,
+    openai: {
+      baseUrl: normalizeBaseUrl(validated.openai.baseUrl),
+      model: validated.openai.model
+    },
+    cli: {
+      preset: validated.cli.preset,
+      command: validated.cli.command,
+      model: validated.cli.model,
+      extraArgs: validated.cli.extraArgs,
+      timeoutSec: validated.cli.timeoutSec
+    }
+  }
+}
+
+function providerSignatureFor(config: StoredTranslationConfig, scopeFingerprint?: string): string {
+  const base =
+    config.provider === 'openai-compatible'
+      ? `openai:${normalizeBaseUrl(config.openai.baseUrl)}|${config.openai.model}|${config.targetLanguage}`
+      : `cli:${config.cli.preset}|${config.cli.command}|${config.cli.model}|${config.targetLanguage}`
+  return scopeFingerprint ? `${base}|scope:${scopeFingerprint}` : base
 }
 
 function isExecutableFile(filePath: string): boolean {
@@ -114,14 +195,19 @@ function isExecutableFile(filePath: string): boolean {
 }
 
 /**
- * 纯文件系统扫描 PATH / 标准 Node 工具路径解析可执行命令，避免额外唤起 which/where shell 进程。
+ * 纯文件系统扫描 PATH / 标准 Node 工具路径及常见本机客户端安装目录解析可执行命令，
  * 在 Windows 上优先匹配 `.exe`/`.com`，其次匹配 npm 生成的 `.cmd`/`.bat` 包装脚本。
  */
-export function resolveCliExecutable(command: string, env: NodeJS.ProcessEnv = process.env): string | null {
+function resolveCliExecutableInternal(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options: { includeCodexRuntimeFallback?: boolean } = {}
+): string | null {
   const trimmed = command.trim()
   if (!trimmed) return null
   const isWindows = process.platform === 'win32'
   const winExts = ['.exe', '.com', '.cmd', '.bat']
+  const includeCodexRuntimeFallback = options.includeCodexRuntimeFallback !== false
 
   const probeCandidate = (basePath: string): string | null => {
     if (!isWindows) return isExecutableFile(basePath) ? basePath : null
@@ -138,24 +224,56 @@ export function resolveCliExecutable(command: string, env: NodeJS.ProcessEnv = p
     return probeCandidate(resolve(trimmed))
   }
 
-  const pathEntries = (env.PATH || env.Path || '')
+  const rawEntries = (env.PATH || env.Path || '')
     .split(isWindows ? ';' : ':')
     .map(p => p.trim())
     .filter(Boolean)
 
   if (isWindows) {
-    if (env.APPDATA) pathEntries.push(join(env.APPDATA, 'npm'))
-    if (env.LOCALAPPDATA) pathEntries.push(join(env.LOCALAPPDATA, 'Programs'))
-    if (env.USERPROFILE) pathEntries.push(join(env.USERPROFILE, '.local', 'bin'))
-  } else if (env.HOME) {
-    pathEntries.push(join(env.HOME, '.local', 'bin'))
+    if (env.APPDATA) rawEntries.push(join(env.APPDATA, 'npm'))
+    if (env.LOCALAPPDATA) {
+      rawEntries.push(join(env.LOCALAPPDATA, 'pnpm'))
+      rawEntries.push(join(env.LOCALAPPDATA, 'Programs'))
+    }
+    if (env.USERPROFILE) {
+      rawEntries.push(
+        join(env.USERPROFILE, '.local', 'bin'),
+        join(env.USERPROFILE, '.bun', 'bin'),
+        join(env.USERPROFILE, '.volta', 'bin'),
+        join(env.USERPROFILE, 'scoop', 'shims')
+      )
+    }
+    if (trimmed.toLowerCase() === 'codex' && includeCodexRuntimeFallback && env.USERPROFILE) {
+      rawEntries.push(
+        join(env.USERPROFILE, '.codex', '.sandbox-bin'),
+        join(env.USERPROFILE, '.codex', 'plugins', '.plugin-appserver')
+      )
+    }
+  } else {
+    if (env.HOME) {
+      rawEntries.push(
+        join(env.HOME, '.local', 'bin'),
+        join(env.HOME, '.npm-global', 'bin'),
+        join(env.HOME, '.bun', 'bin'),
+        join(env.HOME, '.volta', 'bin')
+      )
+    }
+    rawEntries.push('/opt/homebrew/bin', '/usr/local/bin')
   }
 
-  for (const dir of pathEntries) {
+  const seen = new Set<string>()
+  for (const dir of rawEntries) {
+    const key = isWindows ? dir.toLowerCase() : dir
+    if (seen.has(key)) continue
+    seen.add(key)
     const hit = probeCandidate(join(dir, trimmed))
     if (hit) return hit
   }
   return null
+}
+
+export function resolveCliExecutable(command: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  return resolveCliExecutableInternal(command, env, { includeCodexRuntimeFallback: true })
 }
 
 function quoteCmdToken(token: string): string {
@@ -163,6 +281,291 @@ function quoteCmdToken(token: string): string {
     throw new Error('命令行参数包含不支持的控制或特殊字符。')
   }
   return `"${token}"`
+}
+
+async function probeWindowsAppxExecutable(
+  packageName: 'OpenAI.Codex',
+  relativeSegments: readonly string[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+  if (process.platform !== 'win32' || env.PAPERFLOW_SKIP_APPX_PROBE === '1') {
+    return null
+  }
+  return new Promise<string | null>(resolvePromise => {
+    let settled = false
+    const finish = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise(value)
+    }
+
+    let child: ChildProcess
+    try {
+      child = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', `(Get-AppxPackage -Name '${packageName}').InstallLocation`],
+        {
+          env,
+          shell: false,
+          stdio: ['ignore', 'pipe', 'ignore'],
+          windowsHide: true
+        }
+      )
+    } catch {
+      finish(null)
+      return
+    }
+
+    let stdout = ''
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        // ignore
+      }
+      finish(null)
+    }, 4000)
+
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.once('error', () => finish(null))
+    child.once('close', () => {
+      const locations = stdout
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+      for (const dir of locations) {
+        const candidate = join(dir, ...relativeSegments)
+        if (isExecutableFile(candidate)) {
+          finish(candidate)
+          return
+        }
+      }
+      finish(null)
+    })
+  })
+}
+
+async function probeCliVersion(
+  executablePath: string,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+  if (env.PAPERFLOW_SKIP_VERSION_PROBE === '1') return null
+  const isWindows = process.platform === 'win32'
+  const ext = extname(executablePath).toLowerCase()
+  const isWinBatch = isWindows && (ext === '.cmd' || ext === '.bat')
+
+  return new Promise<string | null>(resolvePromise => {
+    let settled = false
+    const finish = (value: string | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolvePromise(value)
+    }
+
+    let child: ChildProcess
+    try {
+      if (isWinBatch) {
+        const cmdLine = `"${quoteCmdToken(executablePath)} --version"`
+        child = spawn(env.ComSpec || env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', cmdLine], {
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          windowsVerbatimArguments: true
+        })
+      } else {
+        child = spawn(executablePath, ['--version'], {
+          env,
+          shell: false,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true
+        })
+      }
+    } catch {
+      finish(null)
+      return
+    }
+
+    let stdout = ''
+    let stderr = ''
+    const timer = setTimeout(() => {
+      if (isWinBatch && typeof child.pid === 'number' && child.pid > 0) {
+        try {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          child.kill('SIGTERM')
+        } catch {
+          // ignore
+        }
+      }
+      finish(null)
+    }, 2500)
+
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    child.once('error', () => finish(null))
+    child.once('close', code => {
+      if (code !== 0) {
+        finish(null)
+        return
+      }
+      const line = `${stdout}\n${stderr}`
+        .split(/\r?\n/)
+        .map(item => item.trim())
+        .find(Boolean)
+      finish(line ? line.slice(0, 80) : null)
+    })
+  })
+}
+
+async function detectGuiOnlyClient(
+  _preset: 'gemini',
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string | null> {
+  if (process.platform === 'win32') {
+    const geminiBase = env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Google', 'Gemini') : null
+    if (geminiBase && existsSync(geminiBase)) {
+      try {
+        const entries = readdirSync(geminiBase, { withFileTypes: true })
+          .filter(entry => entry.isDirectory() && entry.name.toLowerCase().startsWith('app-'))
+          .sort((a, b) => b.name.localeCompare(a.name))
+        for (const entry of entries) {
+          const exePath = join(geminiBase, entry.name, 'Gemini.exe')
+          if (isExecutableFile(exePath)) return exePath
+        }
+      } catch {
+        // 忽略目录不可读
+      }
+    }
+    return null
+  }
+
+  if (process.platform === 'darwin') {
+    return existsSync('/Applications/Gemini.app') ? '/Applications/Gemini.app' : null
+  }
+
+  return null
+}
+
+/**
+ * 扫描本机已安装的 AI 客户端（OpenAI Codex / Gemini CLI）及仅桌面端应用，
+ * 供「翻译引擎设置」中一键识别并设为翻译引擎。
+ */
+export async function detectLocalAiClients(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { probeVersion?: boolean } = {}
+): Promise<DetectedLocalAiClient[]> {
+  const probeVersion = options.probeVersion !== false
+
+  const detectCodex = async (): Promise<DetectedLocalAiClient> => {
+    const pathHit = resolveCliExecutableInternal('codex', env, { includeCodexRuntimeFallback: false })
+    if (pathHit) {
+      return {
+        preset: 'codex',
+        name: 'OpenAI Codex',
+        status: 'ready',
+        command: pathHit,
+        source: 'Codex CLI (PATH)',
+        version: null,
+        hint: '已就绪，可直接点击「设为翻译引擎」使用本机已登录的 Codex CLI。'
+      }
+    }
+    const appxHit = await probeWindowsAppxExecutable('OpenAI.Codex', ['app', 'resources', 'codex.exe'], env)
+    if (appxHit) {
+      return {
+        preset: 'codex',
+        name: 'OpenAI Codex',
+        status: 'ready',
+        command: appxHit,
+        source: 'OpenAI Codex 客户端',
+        version: null,
+        hint: '已从本机 OpenAI Codex 客户端发现内置 CLI，可直接一键设为翻译引擎。'
+      }
+    }
+    const fallbackHit = resolveCliExecutableInternal('codex', env, { includeCodexRuntimeFallback: true })
+    if (fallbackHit) {
+      return {
+        preset: 'codex',
+        name: 'OpenAI Codex',
+        status: 'ready',
+        command: fallbackHit,
+        source: 'Codex 本地运行时',
+        version: null,
+        hint: '已检测到本机 Codex 运行时 CLI，可直接一键设为翻译引擎。'
+      }
+    }
+    return {
+      preset: 'codex',
+      name: 'OpenAI Codex',
+      status: 'not-found',
+      command: null,
+      source: null,
+      version: null,
+      hint: '未检测到 Codex 客户端或 codex CLI，可点击「手动指定…」选择本地可执行程序。'
+    }
+  }
+
+  const detectGemini = async (): Promise<DetectedLocalAiClient> => {
+    const cliHit = resolveCliExecutableInternal('gemini', env, { includeCodexRuntimeFallback: false })
+    if (cliHit) {
+      return {
+        preset: 'gemini',
+        name: 'Gemini CLI',
+        status: 'ready',
+        command: cliHit,
+        source: 'Gemini CLI',
+        version: null,
+        hint: '已就绪，可直接点击「设为翻译引擎」使用本机 Gemini CLI。'
+      }
+    }
+    const guiHit = await detectGuiOnlyClient('gemini', env)
+    if (guiHit) {
+      return {
+        preset: 'gemini',
+        name: 'Gemini CLI',
+        status: 'gui-only',
+        command: null,
+        source: 'Gemini 桌面应用（仅桌面端）',
+        version: null,
+        hint: '检测到本机 Gemini 桌面窗口应用（无 CLI 接口），如需接入请安装 Gemini CLI（gemini）或点击「手动指定…」。'
+      }
+    }
+    return {
+      preset: 'gemini',
+      name: 'Gemini CLI',
+      status: 'not-found',
+      command: null,
+      source: null,
+      version: null,
+      hint: '未检测到 Gemini CLI，安装 gemini 后点击「重新扫描」或「手动指定…」。'
+    }
+  }
+
+  const detected = await Promise.all([detectCodex(), detectGemini()])
+  if (probeVersion) {
+    await Promise.all(
+      detected.map(async entry => {
+        if (entry.status === 'ready' && entry.command) {
+          entry.version = await probeCliVersion(entry.command, env)
+        }
+      })
+    )
+  }
+  return detected
 }
 
 function extractJsonObjectOrArray(rawText: string): unknown {
@@ -279,14 +682,21 @@ export function hasAllExpectedFormulaPlaceholders(sourceText: string, translated
 export function buildAcademicPrompt(
   targetLanguage: string,
   blocks: readonly TranslationBlockInput[],
-  glossary: readonly GlossaryEntry[] = []
+  glossary: readonly GlossaryEntry[] = [],
+  researchContext = ''
 ): string {
   const targetName = languageLabel(targetLanguage)
   const payload = blocks.map(b => ({ id: b.blockId, kind: b.kind, text: b.sourceText }))
+  const cleanContext = researchContext.trim()
+  const contextLines = cleanContext
+    ? [
+        `读者科研背景（仅在当前论文与该学科相关时作为术语风格参考；若当前论文属于其他学科，请完全以论文本身学科规范为准）：${cleanContext}`
+      ]
+    : []
   const glossaryLines =
     glossary.length > 0
       ? [
-          '术语表（译文中遇到下列术语须严格按此统一译法）：',
+          '参考术语表（当下列术语在当前论文语境下学科与词义一致时，请优先采用此统一译法；若当前论文属于其他学科或该词在上下文中有不同专指含义，请按论文本身语境准确翻译，切勿生搬硬套）：',
           ...glossary.slice(0, 200).map(item => `- ${item.source} => ${item.target}`)
         ]
       : []
@@ -298,6 +708,7 @@ export function buildAcademicPrompt(
     '3. 尽量保持与原文块一致的自然句数量与句末标点边界，不随意合句或拆句，便于逐句对照高亮。',
     '4. 紧凑单段纯文本排版：每个译文块仅输出单段连续纯文本，禁止在块内插入多余换行符、空行或 Markdown 标记（如 **粗体**、`代码`、# 标题）。',
     '5. 仅返回严格合法的 JSON 对象，格式为 {"translations":[{"id":"原id","text":"译文"}]}，确保输入中的每个 id 都有对应译文，禁止附加解释或无关文字。',
+    ...contextLines,
     ...glossaryLines,
     '',
     JSON.stringify(payload)
@@ -307,12 +718,17 @@ export function buildAcademicPrompt(
 export function buildExplainPrompt(
   input: Pick<ExplainSelectionInput, 'selectedText' | 'contextText' | 'mode' | 'pageNumber'>,
   targetLanguage: string,
-  glossary: readonly GlossaryEntry[] = []
+  glossary: readonly GlossaryEntry[] = [],
+  researchContext = ''
 ): string {
   const targetName = languageLabel(targetLanguage)
+  const cleanContext = researchContext.trim()
+  const profileBlock = cleanContext
+    ? `\n读者科研背景（仅在当前论文与该学科相关时参考；若论文属于其他领域请以论文本身语境为准）：${cleanContext}`
+    : ''
   const glossaryBlock =
     glossary.length > 0
-      ? `\n参考术语表：\n${glossary
+      ? `\n参考术语表（仅在当前论文语境与学科词义一致时参考，切勿跨学科生搬硬套）：\n${glossary
           .slice(0, 80)
           .map(item => `- ${item.source} => ${item.target}`)
           .join('\n')}`
@@ -325,6 +741,7 @@ export function buildExplainPrompt(
       '1. 先一句话说明该式在整个论证/推导中的核心物理或数学含义；',
       '2. 逐项解释关键变量、上下标与运算符（保持原符号写法，勿擅自改名）；',
       '3. 若上下文足以判断输入输出或复杂度结论，请简要补充说明。直接输出精炼说明文字。',
+      profileBlock,
       glossaryBlock,
       `\n目标公式/表达式：\n${input.selectedText.trim()}`,
       contextBlock
@@ -336,6 +753,7 @@ export function buildExplainPrompt(
   if (input.mode === 'translate') {
     return [
       `你是一位学术论文翻译助手。请将下方选中片段准确译为${targetName}，保留全部专有术语、公式变量与引用编号。直接输出译文。`,
+      profileBlock,
       glossaryBlock,
       `\n选中片段：\n${input.selectedText.trim()}`,
       contextBlock
@@ -345,10 +763,11 @@ export function buildExplainPrompt(
   }
 
   return [
-    `你是一位科研论文精读助手。请使用${targetName}对下方选中的论文片段做精要解读：`,
-    '1. 先给出准确通顺的核心意思；',
-    '2. 点明涉及的技术方法、因果逻辑或关键术语含义；',
+    `你是一位科研论文精读助手。请使用${targetName}对下方选中的论文片段做精要解读（自动判断正文或公式）：`,
+    '1. 若选中内容包含数学公式、符号表达式或变量记号，先一句话概括其在论证/推导中的核心物理或数学含义，再逐项拆解关键变量、上下标与运算符（保持原符号写法，勿擅自改名）；',
+    '2. 若为常规学术正文，先给出准确通顺的核心意思，再点明涉及的技术方法、因果逻辑或关键术语含义；',
     '3. 控制在 3–5 句或简洁要点内，方便读者记入笔记。',
+    profileBlock,
     glossaryBlock,
     `\n选中文本：\n${input.selectedText.trim()}`,
     contextBlock
@@ -385,13 +804,26 @@ export class TranslationService {
   private readonly safeStorage?: SafeStorageAdapter
   private readonly fetchImpl: typeof fetch
   private readonly env: NodeJS.ProcessEnv
-  private readonly activeTasks = new Map<string, { documentId?: string; abort: () => void }>()
+  private readonly usageService: UsageService
+  private readonly activeTasks = new Map<
+    string,
+    {
+      documentId?: string
+      requestId?: string
+      kind?: 'translate' | 'chat' | 'test'
+      abort: () => void
+    }
+  >()
 
   constructor(options: TranslationServiceOptions) {
     this.database = options.database
     this.safeStorage = options.safeStorage
     this.fetchImpl = options.fetchImpl ?? fetch
     this.env = options.env ?? process.env
+    this.usageService = new UsageService({
+      database: this.database,
+      fetchImpl: this.fetchImpl
+    })
   }
 
   private readStoredConfig(): StoredTranslationConfig {
@@ -422,7 +854,7 @@ export class TranslationService {
             : DEFAULT_CONFIG.openai.model
         },
         cli: {
-          preset: parsed.cli?.preset && ['codex', 'claude', 'gemini', 'custom'].includes(parsed.cli.preset)
+          preset: parsed.cli?.preset && ['codex', 'gemini', 'custom'].includes(parsed.cli.preset)
             ? parsed.cli.preset
             : DEFAULT_CONFIG.cli.preset,
           command: typeof parsed.cli?.command === 'string' && parsed.cli.command.trim()
@@ -500,22 +932,7 @@ export class TranslationService {
   saveSettings(input: SaveTranslationSettingsInput): TranslationSettings {
     const validated = saveTranslationSettingsSchema.parse(input)
     const previous = this.readStoredConfig()
-    const config: StoredTranslationConfig = {
-      provider: validated.provider,
-      targetLanguage: validated.targetLanguage,
-      glossary: validated.glossary ?? previous.glossary,
-      openai: {
-        baseUrl: normalizeBaseUrl(validated.openai.baseUrl),
-        model: validated.openai.model
-      },
-      cli: {
-        preset: validated.cli.preset,
-        command: validated.cli.command,
-        model: validated.cli.model,
-        extraArgs: validated.cli.extraArgs,
-        timeoutSec: validated.cli.timeoutSec
-      }
-    }
+    const config = buildStoredConfigFromInput(validated, previous.glossary)
     this.database.setSetting(SETTINGS_KEY, JSON.stringify(config))
     if (validated.openai.apiKey !== undefined) {
       this.writeApiKey(validated.openai.apiKey)
@@ -528,6 +945,41 @@ export class TranslationService {
     const page = pageNumberSchema.parse(pageNumber)
     const config = this.readStoredConfig()
     return this.database.getPageTranslations(id, page, config.targetLanguage)
+  }
+
+  listDocumentTranslations(documentId: string): DocumentPageTranslations[] {
+    const id = documentIdSchema.parse(documentId)
+    const config = this.readStoredConfig()
+    return this.database.listDocumentTranslations(id, config.targetLanguage)
+  }
+
+  updateBlockTranslation(input: UpdateBlockTranslationInput): TranslatedBlockRecord {
+    const validated = updateBlockTranslationInputSchema.parse(input)
+    const config = this.readStoredConfig()
+    // 手动校对译文不带 |scope: 标签，确保不被后续切分/连翻缓存失效检测误覆写；仅用户主动点「重译」时替换
+    this.database.upsertPageTranslations(
+      validated.documentId,
+      validated.pageNumber,
+      config.targetLanguage,
+      'manual-edit',
+      [
+        {
+          blockId: validated.blockId,
+          sourceHash: validated.sourceHash,
+          translatedText: validated.translatedText
+        }
+      ]
+    )
+    const rows = this.database.getPageTranslations(
+      validated.documentId,
+      validated.pageNumber,
+      config.targetLanguage
+    )
+    const matched = rows.find(row => row.blockId === validated.blockId)
+    if (!matched) {
+      throw new Error('保存手动修改的译文失败，请重试。')
+    }
+    return matched
   }
 
   clearDocumentTranslations(documentId: string): void {
@@ -545,8 +997,55 @@ export class TranslationService {
     }
   }
 
+  cancelAiTask(requestId?: string): void {
+    for (const [taskId, task] of this.activeTasks.entries()) {
+      if (requestId) {
+        if (task.requestId === requestId || taskId === requestId) {
+          this.activeTasks.delete(taskId)
+          task.abort()
+        }
+      } else if (task.kind === 'chat' || task.kind === 'test') {
+        this.activeTasks.delete(taskId)
+        task.abort()
+      }
+    }
+  }
+
   cancelAll(): void {
     this.cancel(undefined)
+  }
+
+  getUsageSummary(): UsageStatsSummary {
+    return this.usageService.getSummary()
+  }
+
+  saveUsagePreferences(input: UsagePreferences): UsageStatsSummary {
+    return this.usageService.savePreferences(input)
+  }
+
+  resetUsageStats(scope?: 'today' | 'all'): UsageStatsSummary {
+    return this.usageService.resetStats(scope)
+  }
+
+  async getProviderBalance(draft?: SaveTranslationSettingsInput): Promise<ProviderBalanceSnapshot> {
+    const storedConfig = this.readStoredConfig()
+    let config = storedConfig
+    let apiKey = this.readApiKey()
+    if (draft !== undefined) {
+      const validated = saveTranslationSettingsSchema.parse(draft)
+      config = buildStoredConfigFromInput(validated, storedConfig.glossary)
+      if (validated.openai.apiKey !== undefined) {
+        apiKey = validated.openai.apiKey.trim() || null
+      }
+    }
+    return this.usageService.fetchProviderBalance({
+      provider: config.provider,
+      baseUrl: config.openai.baseUrl,
+      model: config.openai.model,
+      cliPreset: config.cli.preset,
+      cliModel: config.cli.model,
+      apiKey
+    })
   }
 
   private async invokeOpenAiCompatible(
@@ -555,8 +1054,10 @@ export class TranslationService {
     prompt: string,
     signal: AbortSignal,
     timeoutMs: number,
-    systemPrompt = 'You are a precise academic translator. Reply with strict JSON only.'
-  ): Promise<string> {
+    systemPrompt = 'You are a precise academic translator. Reply with strict JSON only.',
+    chatMessages?: ReadonlyArray<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    onDelta?: (delta: string, fullText: string) => void
+  ): Promise<{ output: string; usage?: TokenUsageDelta }> {
     const endpoint = `${normalizeBaseUrl(config.openai.baseUrl)}/chat/completions`
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (apiKey) {
@@ -569,22 +1070,34 @@ export class TranslationService {
     const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), timeoutMs)
 
     try {
-      const response = await this.fetchImpl(endpoint, {
-        method: 'POST',
-        headers,
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: config.openai.model,
-          temperature: 0.2,
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt
-            },
-            { role: 'user', content: prompt }
+      const messages = chatMessages && chatMessages.length > 0
+        ? [...chatMessages]
+        : [
+            { role: 'system' as const, content: systemPrompt },
+            { role: 'user' as const, content: prompt }
           ]
+      const sendRequest = async (includeStreamUsageOption: boolean): Promise<Response> =>
+        this.fetchImpl(endpoint, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: config.openai.model,
+            temperature: 0.2,
+            ...(onDelta
+              ? includeStreamUsageOption
+                ? { stream: true, stream_options: { include_usage: true } }
+                : { stream: true }
+              : {}),
+            messages
+          })
         })
-      })
+
+      let response = await sendRequest(Boolean(onDelta))
+      if (!response.ok && onDelta && (response.status === 400 || response.status === 422)) {
+        await response.body?.cancel().catch(() => {})
+        response = await sendRequest(false)
+      }
 
       if (!response.ok) {
         let hint = ''
@@ -597,6 +1110,9 @@ export class TranslationService {
         if (response.status === 401 || response.status === 403) {
           throw new Error(`翻译接口鉴权失败（HTTP ${response.status}），请检查 API Key${hint}`)
         }
+        if (response.status === 402) {
+          throw new Error(`翻译接口账户余额不足（HTTP 402），请先充值后再试${hint}`)
+        }
         if (response.status === 404) {
           throw new Error(`未找到翻译接口端点（HTTP 404），请确认 Base URL 是否包含 /v1${hint}`)
         }
@@ -606,21 +1122,8 @@ export class TranslationService {
         throw new Error(`翻译接口返回异常（HTTP ${response.status}）${hint}`)
       }
 
-      const payload = (await response.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>
-      }
-      const content = payload.choices?.[0]?.message?.content
-      if (typeof content === 'string' && content.trim()) return content
-      if (Array.isArray(content)) {
-        const joined = content
-          .map(part => (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
-            ? (part as { text: string }).text
-            : ''))
-          .join('')
-          .trim()
-        if (joined) return joined
-      }
-      throw new Error('翻译接口未返回有效的文本内容。')
+      const { text, usage } = await readOpenAiStreamOrJsonWithUsage(response, onDelta)
+      return { output: text, usage }
     } catch (error: unknown) {
       if (signal.aborted) {
         throw new Error('翻译任务已取消。')
@@ -636,14 +1139,31 @@ export class TranslationService {
     }
   }
 
+  async detectLocalAiClients(): Promise<DetectedLocalAiClient[]> {
+    return detectLocalAiClients(this.env)
+  }
+
+  private async resolveCliExecutableAsync(_preset: CliPreset, command: string): Promise<string | null> {
+    const trimmed = command.trim()
+    if (!trimmed) return null
+    if (trimmed.toLowerCase() === 'codex' && process.platform === 'win32') {
+      const standard = resolveCliExecutableInternal('codex', this.env, { includeCodexRuntimeFallback: false })
+      if (standard) return standard
+      const appx = await probeWindowsAppxExecutable('OpenAI.Codex', ['app', 'resources', 'codex.exe'], this.env)
+      if (appx) return appx
+      return resolveCliExecutableInternal('codex', this.env, { includeCodexRuntimeFallback: true })
+    }
+    return resolveCliExecutable(trimmed, this.env)
+  }
+
   private async invokeCli(
     config: StoredTranslationConfig,
     prompt: string,
     signal: AbortSignal
   ): Promise<{ output: string; resolvedCommand: string }> {
-    const resolved = resolveCliExecutable(config.cli.command, this.env)
+    const resolved = await this.resolveCliExecutableAsync(config.cli.preset, config.cli.command)
     if (!resolved) {
-      throw new Error(`未在系统路径中找到 CLI 命令「${config.cli.command}」，请检查是否已安装或填写绝对路径。`)
+      throw new Error(`未在系统路径或本机客户端目录中找到 CLI 命令「${config.cli.command}」，请检查是否已安装或点击「浏览程序…」选择可执行文件。`)
     }
 
     const workDir = mkdtempSync(join(tmpdir(), 'paperflow-cli-'))
@@ -656,10 +1176,6 @@ export class TranslationService {
       args.push('exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '-o', codexOutFile)
       if (model) args.push('-m', model)
       args.push(...extraArgs, '-')
-    } else if (preset === 'claude') {
-      args.push('-p', '--output-format', 'text')
-      if (model) args.push('--model', model)
-      args.push(...extraArgs)
     } else if (preset === 'gemini') {
       if (model) args.push('-m', model)
       args.push(...extraArgs)
@@ -699,7 +1215,7 @@ export class TranslationService {
         try {
           if (isWinBatch) {
             const cmdLine = `"${[quoteCmdToken(resolved), ...args.map(quoteCmdToken)].join(' ')}"`
-            child = spawn(this.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', cmdLine], {
+            child = spawn(this.env.ComSpec || this.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', cmdLine], {
               cwd: workDir,
               env: this.env,
               stdio: ['pipe', 'pipe', 'pipe'],
@@ -806,11 +1322,20 @@ export class TranslationService {
     prompt: string,
     signal: AbortSignal,
     timeoutMs = 90000,
-    systemPrompt?: string
-  ): Promise<{ output: string; resolvedCommand?: string }> {
+    systemPrompt?: string,
+    onDelta?: (delta: string, fullText: string) => void
+  ): Promise<{ output: string; resolvedCommand?: string; usage?: TokenUsageDelta }> {
     if (config.provider === 'openai-compatible') {
-      const output = await this.invokeOpenAiCompatible(config, apiKey, prompt, signal, timeoutMs, systemPrompt)
-      return { output }
+      return await this.invokeOpenAiCompatible(
+        config,
+        apiKey,
+        prompt,
+        signal,
+        timeoutMs,
+        systemPrompt,
+        undefined,
+        onDelta
+      )
     }
     return this.invokeCli(config, prompt, signal)
   }
@@ -826,10 +1351,11 @@ export class TranslationService {
       abort: () => controller.abort()
     })
     const started = Date.now()
-    const prompt = buildExplainPrompt(validated, config.targetLanguage, config.glossary)
+    const scope = resolveEffectiveTranslationScope(this.database, validated.documentId, config.glossary)
+    const prompt = buildExplainPrompt(validated, config.targetLanguage, scope.glossary, scope.researchContext)
 
     try {
-      const { output } = await this.runModelPrompt(
+      const { output, usage } = await this.runModelPrompt(
         config,
         apiKey,
         prompt,
@@ -837,10 +1363,17 @@ export class TranslationService {
         config.provider === 'openai-compatible' ? 60000 : config.cli.timeoutSec * 1000,
         'You are a rigorous academic paper reading assistant. Reply concisely in clear prose.'
       )
+      if (usage || config.provider === 'openai-compatible') {
+        this.usageService.recordUsage({
+          usage,
+          apiRequests: config.provider === 'openai-compatible' ? 1 : 0
+        })
+      }
       return {
         mode: validated.mode,
         answer: output.trim(),
-        latencyMs: Math.max(1, Date.now() - started)
+        latencyMs: Math.max(1, Date.now() - started),
+        ...(usage ? { usage } : {})
       }
     } catch (error: unknown) {
       if (isAbortError(error)) {
@@ -852,12 +1385,330 @@ export class TranslationService {
     }
   }
 
-  async testConnection(): Promise<TranslationTestResult> {
+  async chat(
+    input: SendAiChatInput,
+    onStream?: (delta: string, fullText: string) => void
+  ): Promise<SendAiChatResult> {
+    const validated = sendAiChatInputSchema.parse(input)
     const config = this.readStoredConfig()
     const apiKey = this.readApiKey()
+    const history = this.database.listChatMessages(validated.sessionKey).slice(-10)
+    const primaryContext = validated.contexts[0]
+    const scope = primaryContext
+      ? resolveEffectiveTranslationScope(this.database, primaryContext.documentId, config.glossary)
+      : { glossary: config.glossary, researchContext: '' }
+
+    const taskId = validated.requestId ?? randomUUID()
+    const controller = new AbortController()
+    this.activeTasks.set(taskId, {
+      documentId: primaryContext?.documentId,
+      requestId: taskId,
+      kind: 'chat',
+      abort: () => controller.abort()
+    })
+    const started = Date.now()
+
+    const systemParts: string[] = [
+      `You are PaperFlow's academic research assistant. Reply in ${languageLabel(config.targetLanguage)} unless the user requests another language.`,
+      'Be accurate, concise, and explicitly distinguish cited paper observations from general inference. When referencing specific findings or sections from the provided pages, include page markers like P.3 when known.'
+    ]
+    if (scope.researchContext.trim()) {
+      systemParts.push(`Research domain context: ${scope.researchContext.trim()}`)
+    }
+    if (scope.glossary.length > 0) {
+      systemParts.push(
+        `Domain terminology glossary:\n${scope.glossary
+          .slice(0, 40)
+          .map(item => `- ${item.source} => ${item.target}`)
+          .join('\n')}`
+      )
+    }
+
+    const contextSections = validated.contexts.map((ctx, index) => {
+      const label = ctx.paneLabel ? `[${ctx.paneLabel}] ` : validated.contexts.length > 1 ? `[文献 ${index + 1}] ` : ''
+      const pagePart = ctx.pageNumber ? ` (P.${ctx.pageNumber})` : ''
+      const bodyPart = ctx.excerpt?.trim() ? `\nExcerpt:\n${ctx.excerpt.trim()}` : ''
+      return `${label}${ctx.title}${pagePart}${bodyPart}`
+    })
+
+    const userSections: string[] = []
+    if (contextSections.length > 0) {
+      userSections.push(`Active paper context:\n${contextSections.join('\n\n')}`)
+    }
+    if (validated.quoteText?.trim()) {
+      userSections.push(`Highlighted selection:\n"${validated.quoteText.trim()}"`)
+    }
+    userSections.push(`Question:\n${validated.question}`)
+    const composedUserTurn = userSections.join('\n\n')
+
+    const contextSummary = validated.contexts
+      .map(ctx => `${ctx.paneLabel ? `${ctx.paneLabel}:` : ''}${ctx.title}${ctx.pageNumber ? `#P.${ctx.pageNumber}` : ''}`)
+      .join(' · ')
+      .slice(0, 240)
+
+    try {
+      let answerText = ''
+      let chatUsage: TokenUsageDelta | undefined
+      const timeoutMs = config.provider === 'openai-compatible' ? 60000 : config.cli.timeoutSec * 1000
+      if (config.provider === 'openai-compatible') {
+        const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+          { role: 'system', content: systemParts.join('\n\n') },
+          ...history.map(item => ({ role: item.role, content: item.content })),
+          { role: 'user', content: composedUserTurn }
+        ]
+        const res = await this.invokeOpenAiCompatible(
+          config,
+          apiKey,
+          composedUserTurn,
+          controller.signal,
+          timeoutMs,
+          undefined,
+          messages,
+          onStream
+        )
+        answerText = res.output
+        chatUsage = res.usage
+      } else {
+        const historyBlock =
+          history.length > 0
+            ? `Recent conversation:\n${history
+                .map(item => `${item.role === 'user' ? 'User' : 'Assistant'}: ${item.content}`)
+                .join('\n\n')}\n\n`
+            : ''
+        const cliPrompt = `${systemParts.join('\n\n')}\n\n${historyBlock}${composedUserTurn}`
+        const res = await this.invokeCli(config, cliPrompt, controller.signal)
+        answerText = res.output
+      }
+
+      if (chatUsage || config.provider === 'openai-compatible') {
+        this.usageService.recordUsage({
+          usage: chatUsage,
+          apiRequests: config.provider === 'openai-compatible' ? 1 : 0
+        })
+      }
+
+      const now = Date.now()
+      const userMessage = this.database.appendChatMessage({
+        sessionKey: validated.sessionKey,
+        role: 'user',
+        content: validated.question,
+        quoteText: validated.quoteText ?? '',
+        contextSummary,
+        createdAt: new Date(now).toISOString()
+      })
+      const assistantMessage = this.database.appendChatMessage({
+        sessionKey: validated.sessionKey,
+        role: 'assistant',
+        content: answerText.trim(),
+        quoteText: '',
+        contextSummary,
+        createdAt: new Date(now + 1).toISOString()
+      })
+      return {
+        userMessage,
+        assistantMessage,
+        latencyMs: Math.max(1, Date.now() - started),
+        ...(chatUsage ? { usage: chatUsage } : {})
+      }
+    } catch (error: unknown) {
+      if (isAbortError(error)) {
+        throw new Error('AI 对话请求已取消。')
+      }
+      throw error
+    } finally {
+      this.activeTasks.delete(taskId)
+    }
+  }
+
+  hasConfiguredAiEngine(): boolean {
+    const config = this.readStoredConfig()
+    if (config.provider === 'openai-compatible') {
+      return Boolean(this.readApiKey())
+    }
+    return Boolean(config.cli.command.trim())
+  }
+
+  async completeAcademicTask(options: {
+    systemPrompt: string
+    userPrompt: string
+    timeoutMs?: number
+  }): Promise<string> {
+    const config = this.readStoredConfig()
+    const apiKey = this.readApiKey()
+    if (config.provider === 'openai-compatible' && !apiKey) {
+      throw new Error('尚未配置 API Key。')
+    }
     const taskId = randomUUID()
     const controller = new AbortController()
     this.activeTasks.set(taskId, { abort: () => controller.abort() })
+    const timeoutMs =
+      options.timeoutMs ?? (config.provider === 'openai-compatible' ? 45_000 : config.cli.timeoutSec * 1000)
+    try {
+      const { output, usage } = await this.runModelPrompt(
+        config,
+        apiKey,
+        options.userPrompt,
+        controller.signal,
+        timeoutMs,
+        options.systemPrompt
+      )
+      if (usage || config.provider === 'openai-compatible') {
+        this.usageService.recordUsage({
+          usage,
+          apiRequests: config.provider === 'openai-compatible' ? 1 : 0
+        })
+      }
+      return output.trim()
+    } finally {
+      this.activeTasks.delete(taskId)
+    }
+  }
+
+  async runAcademicSkill(
+    input: RunAiSkillInput,
+    onStream?: (delta: string, fullText: string) => void
+  ): Promise<RunAiSkillResult> {
+    const validated = runAiSkillInputSchema.parse(input)
+    const config = this.readStoredConfig()
+    const apiKey = this.readApiKey()
+    const primaryContext = validated.contexts[0]
+    const scope = primaryContext
+      ? resolveEffectiveTranslationScope(this.database, primaryContext.documentId, config.glossary)
+      : { glossary: config.glossary, researchContext: '' }
+
+    const glossaryText =
+      scope.glossary.length > 0
+        ? scope.glossary
+            .slice(0, 40)
+            .map(item => `- ${item.source} => ${item.target}`)
+            .join('\n')
+        : ''
+
+    const promptSpec = buildAcademicSkillPrompt({
+      skill: validated.skill,
+      targetLanguage: languageLabel(config.targetLanguage),
+      researchContext: scope.researchContext,
+      glossaryText,
+      customInstruction: validated.customInstruction,
+      customSkillName: validated.customSkillName,
+      customPrompt: validated.customPrompt,
+      contexts: validated.contexts
+    })
+
+    const taskId = validated.requestId ?? randomUUID()
+    const controller = new AbortController()
+    this.activeTasks.set(taskId, {
+      documentId: primaryContext?.documentId,
+      requestId: taskId,
+      kind: 'chat',
+      abort: () => controller.abort()
+    })
+    const started = Date.now()
+    const contextSummary =
+      validated.contexts.length > 0
+        ? validated.contexts
+            .map(ctx => `${ctx.paneLabel ? `${ctx.paneLabel}:` : ''}${ctx.title}`)
+            .join(' · ')
+            .slice(0, 240)
+        : promptSpec.displayTitle
+
+    try {
+      const timeoutMs = config.provider === 'openai-compatible' ? 90_000 : config.cli.timeoutSec * 1000
+      const streamCb = validated.skill === 'ppt-deck' ? undefined : onStream
+      const { output, usage } = await this.runModelPrompt(
+        config,
+        apiKey,
+        promptSpec.userPrompt,
+        controller.signal,
+        timeoutMs,
+        promptSpec.systemPrompt,
+        streamCb
+      )
+      if (usage || config.provider === 'openai-compatible') {
+        this.usageService.recordUsage({
+          usage,
+          apiRequests: config.provider === 'openai-compatible' ? 1 : 0
+        })
+      }
+
+      let slideDeck: AcademicSlideDeck | undefined
+      let assistantText = output.trim()
+      if (validated.skill === 'ppt-deck') {
+        const fallbackTitle = primaryContext?.title || '论文汇报幻灯片'
+        slideDeck = parseSlideDeckJson(assistantText, fallbackTitle)
+        assistantText = formatSlideDeckMarkdown(slideDeck)
+      }
+
+      const now = Date.now()
+      const userMessage = this.database.appendChatMessage({
+        sessionKey: validated.sessionKey,
+        role: 'user',
+        content: promptSpec.userLabel,
+        quoteText: '',
+        contextSummary,
+        createdAt: new Date(now).toISOString()
+      })
+      const assistantMessage = this.database.appendChatMessage({
+        sessionKey: validated.sessionKey,
+        role: 'assistant',
+        content: assistantText,
+        quoteText: '',
+        contextSummary: slideDeck
+          ? `${promptSpec.displayTitle} · 共 ${slideDeck.slides.length} 页`
+          : promptSpec.displayTitle,
+        createdAt: new Date(now + 1).toISOString()
+      })
+
+      return {
+        skill: validated.skill,
+        userMessage,
+        assistantMessage,
+        ...(slideDeck ? { slideDeck } : {}),
+        latencyMs: Math.max(1, Date.now() - started),
+        ...(usage ? { usage } : {})
+      }
+    } catch (error: unknown) {
+      if (isAbortError(error)) {
+        throw new Error('科研技能生成请求已取消。')
+      }
+      throw error
+    } finally {
+      this.activeTasks.delete(taskId)
+    }
+  }
+
+  getDocumentTranslationScope(documentId: string): DocumentTranslationScope {
+    const validatedId = documentIdSchema.parse(documentId)
+    const config = this.readStoredConfig()
+    const scope = resolveEffectiveTranslationScope(this.database, validatedId, config.glossary)
+    return {
+      documentId: validatedId,
+      folderId: scope.folder?.id ?? null,
+      folderName: scope.folder?.name ?? null,
+      inheritGlobalGlossary: scope.folder ? scope.folder.inheritGlobalGlossary : true,
+      effectiveGlossaryCount: scope.glossary.length,
+      folderGlossaryCount: scope.folderGlossaryCount,
+      globalGlossaryCount: scope.globalGlossaryCount,
+      scopeFingerprint: scope.scopeFingerprint,
+      effectiveGlossary: scope.glossary
+    }
+  }
+
+  async testConnection(draft?: SaveTranslationSettingsInput): Promise<TranslationTestResult> {
+    const storedConfig = this.readStoredConfig()
+    let config = storedConfig
+    let apiKey = this.readApiKey()
+    if (draft !== undefined) {
+      const validated = saveTranslationSettingsSchema.parse(draft)
+      config = buildStoredConfigFromInput(validated, storedConfig.glossary)
+      if (validated.openai.apiKey !== undefined) {
+        apiKey = validated.openai.apiKey.trim() || null
+      }
+    }
+
+    const taskId = randomUUID()
+    const controller = new AbortController()
+    this.activeTasks.set(taskId, { kind: 'test', abort: () => controller.abort() })
     const started = Date.now()
 
     const sampleBlock: TranslationBlockInput = {
@@ -868,28 +1719,40 @@ export class TranslationService {
     }
 
     try {
-      const { output, resolvedCommand } = await this.runModelPrompt(
+      const { output, resolvedCommand, usage } = await this.runModelPrompt(
         config,
         apiKey,
         buildAcademicPrompt(config.targetLanguage, [sampleBlock]),
         controller.signal,
         config.provider === 'openai-compatible' ? 25000 : config.cli.timeoutSec * 1000
       )
+      if (usage || config.provider === 'openai-compatible') {
+        this.usageService.recordUsage({
+          usage,
+          apiRequests: config.provider === 'openai-compatible' ? 1 : 0
+        })
+      }
       const parsed = parseBatchTranslationOutput(output, [sampleBlock])
       const sampleOutput = parsed.get(sampleBlock.blockId) ?? output.slice(0, 120)
       return {
         ok: true,
         latencyMs: Math.max(1, Date.now() - started),
+        ...formatTestedEngineMeta(config, resolvedCommand),
         sampleOutput,
-        resolvedCommand
+        resolvedCommand,
+        ...(usage ? { usage } : {})
       }
     } catch (error: unknown) {
+      const resolvedCommand =
+        config.provider === 'cli'
+          ? (await this.resolveCliExecutableAsync(config.cli.preset, config.cli.command)) ?? undefined
+          : undefined
       return {
         ok: false,
         latencyMs: Math.max(1, Date.now() - started),
+        ...formatTestedEngineMeta(config, resolvedCommand),
         error: error instanceof Error ? error.message : String(error),
-        resolvedCommand:
-          config.provider === 'cli' ? resolveCliExecutable(config.cli.command, this.env) ?? undefined : undefined
+        resolvedCommand
       }
     } finally {
       this.activeTasks.delete(taskId)
@@ -903,7 +1766,11 @@ export class TranslationService {
     const validated = translatePageInputSchema.parse(input)
     const config = this.readStoredConfig()
     const apiKey = this.readApiKey()
-    const signature = providerSignatureFor(config)
+    const started = Date.now()
+    const engineMeta = formatTestedEngineMeta(config)
+    const billingKind = detectProviderBillingKind(config.provider, config.openai.baseUrl, Boolean(apiKey?.trim()))
+    const scope = resolveEffectiveTranslationScope(this.database, validated.documentId, config.glossary)
+    const signature = providerSignatureFor(config, scope.scopeFingerprint)
 
     const existingRows = this.database.getPageTranslations(
       validated.documentId,
@@ -917,7 +1784,15 @@ export class TranslationService {
 
     for (const block of validated.blocks) {
       const cached = existingById.get(block.blockId)
-      if (!validated.force && cached && cached.sourceHash === block.sourceHash && cached.translatedText.trim()) {
+      const scopeMatches =
+        !cached?.providerSignature.includes('|scope:') || cached.providerSignature === signature
+      if (
+        !validated.force &&
+        cached &&
+        cached.sourceHash === block.sourceHash &&
+        cached.translatedText.trim() &&
+        scopeMatches
+      ) {
         fromCacheCount += 1
       } else {
         pendingBlocks.push(block)
@@ -925,6 +1800,9 @@ export class TranslationService {
     }
 
     if (pendingBlocks.length === 0) {
+      if (fromCacheCount > 0) {
+        this.usageService.recordUsage({ cacheHitBlocks: fromCacheCount })
+      }
       const items = validated.blocks
         .map(block => existingById.get(block.blockId))
         .filter((row): row is TranslatedBlockRecord => Boolean(row))
@@ -933,7 +1811,10 @@ export class TranslationService {
         pageNumber: validated.pageNumber,
         items,
         fromCacheCount,
-        translatedCount: 0
+        translatedCount: 0,
+        latencyMs: Math.max(1, Date.now() - started),
+        billingKind,
+        providerLabel: engineMeta.testedLabel
       }
     }
 
@@ -945,13 +1826,17 @@ export class TranslationService {
     })
 
     let translatedCount = 0
+    let pageUsage: TokenUsageDelta | undefined
+    let apiRequests = 0
     try {
       const batches = chunkTranslationBlocks(pendingBlocks)
       for (const batch of batches) {
         if (controller.signal.aborted) throw new Error('翻译任务已取消。')
 
-        const prompt = buildAcademicPrompt(config.targetLanguage, batch, config.glossary)
-        const { output } = await this.runModelPrompt(config, apiKey, prompt, controller.signal)
+        const prompt = buildAcademicPrompt(config.targetLanguage, batch, scope.glossary, scope.researchContext)
+        const { output, usage: batchUsage } = await this.runModelPrompt(config, apiKey, prompt, controller.signal)
+        if (config.provider === 'openai-compatible') apiRequests += 1
+        pageUsage = mergeTokenUsage(pageUsage, batchUsage)
         const mapped = parseBatchTranslationOutput(output, batch)
 
         const missing: TranslationBlockInput[] = []
@@ -970,13 +1855,20 @@ export class TranslationService {
         // 若多块批输出不完整、格式偏差或丢失公式占位符，仅对相关块按单块稳健重试与回退
         for (const single of missing) {
           if (controller.signal.aborted) throw new Error('翻译任务已取消。')
-          const singlePrompt = buildAcademicPrompt(config.targetLanguage, [single], config.glossary)
-          const { output: singleOutput } = await this.runModelPrompt(
+          const singlePrompt = buildAcademicPrompt(
+            config.targetLanguage,
+            [single],
+            scope.glossary,
+            scope.researchContext
+          )
+          const { output: singleOutput, usage: singleUsage } = await this.runModelPrompt(
             config,
             apiKey,
             singlePrompt,
             controller.signal
           )
+          if (config.provider === 'openai-compatible') apiRequests += 1
+          pageUsage = mergeTokenUsage(pageUsage, singleUsage)
           const singleMapped = parseBatchTranslationOutput(singleOutput, [single])
           const retriedText = singleMapped.get(single.blockId)
           const firstFallback = partialFallback.get(single.blockId)
@@ -1022,6 +1914,31 @@ export class TranslationService {
         }
       }
 
+      this.usageService.recordUsage({
+        usage: pageUsage,
+        apiRequests,
+        translatedBlocks: translatedCount,
+        translatedPages: translatedCount > 0 ? 1 : 0,
+        cacheHitBlocks: fromCacheCount
+      })
+
+      let balance: ProviderBalanceSnapshot | null = null
+      if (translatedCount > 0 && billingKind === 'deepseek-balance' && apiKey) {
+        balance = await this.usageService
+          .fetchProviderBalance(
+            {
+              provider: config.provider,
+              baseUrl: config.openai.baseUrl,
+              model: config.openai.model,
+              cliPreset: config.cli.preset,
+              cliModel: config.cli.model,
+              apiKey
+            },
+            3500
+          )
+          .catch(() => null)
+      }
+
       const refreshed = this.database.getPageTranslations(
         validated.documentId,
         validated.pageNumber,
@@ -1037,7 +1954,12 @@ export class TranslationService {
         pageNumber: validated.pageNumber,
         items: orderedItems,
         fromCacheCount,
-        translatedCount
+        translatedCount,
+        ...(pageUsage ? { usage: pageUsage } : {}),
+        latencyMs: Math.max(1, Date.now() - started),
+        billingKind,
+        providerLabel: engineMeta.testedLabel,
+        ...(balance ? { balance } : {})
       }
     } catch (error: unknown) {
       if (isAbortError(error)) {

@@ -1,10 +1,12 @@
 # PaperFlow 架构说明
 
-本说明对应当前 PaperFlow 源码（T01–T03 基础、纯本地科研阅读器增强，以及 2026-11-24 授权放开的 T04–T06 受控双语翻译与 1:1 对称双栏阅读阶段，更新日期 2026-11-24）；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
+> 更新注记（`v0.2.0`，2026-11-27）：本文档保留 T01–T06 阶段核心架构与选区/坐标设计细节；当前主分支已扩展至 Preload **66** 个冻结 `window.paperflow` 业务 API、SQLite `PRAGMA user_version = 7` 七张表（在原有 4 张表基础上新增 `annotations`、`folders`、`chat_messages` 并扩展 `documents` 收藏/标签/分类/阅读状态字段），新增多级分类词库隔离、多篇并排分栏、AI 论文对话与学术技能（含 `.pptx` 导出）、OpenAlex/arXiv/Semantic Scholar 检索与引用补全，以及用量账单与 `.md`/`.pdf` 译文导出。安全沙盒策略、协议校验与 `--publish never` 构建约束保持不变。
+
+本说明对应 PaperFlow T01–T06 基础架构与选区/坐标边界；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
 
 ## 进程与模块
 
-项目保持 electron-vite 的主进程、Preload、Renderer 三层入口。导入时另建一个隐藏、独立沙盒的校验窗口；PDF 解析不在拥有文件系统权限的主进程中执行；外部 AI 翻译（OpenAI 兼容 HTTP API 或本机 AI CLI）仅通过主进程 `TranslationService` 受控代理执行，渲染层保持零外网直连权限。
+项目保持 electron-vite 的主进程、Preload、Renderer 三层入口。导入时另建一个隐藏、独立沙盒的校验窗口；PDF 解析不在拥有文件系统权限的主进程中执行；外部 AI 翻译与学术检索请求仅通过主进程服务受控代理执行，渲染层保持零外网直连权限。
 
 ```mermaid
 flowchart LR

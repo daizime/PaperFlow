@@ -100,6 +100,8 @@ pnpm dev
 - `paperflow.sqlite`：WAL 模式、外键开启、`user_version = 7`（支持 `v1→v7` 非破坏平滑迁移），包含 `documents`、`reader_state`、`translation_cache`、`app_settings`（含文档摘要缓存 `doc.summary.v1:*`）、`annotations`、`folders`、`chat_messages` 七张表。
 - `library/<UUID>.pdf`：本地文献副本，渲染层不接触绝对路径。
 
+当前源码的项目包名为 `foliopair`，安装器及导出内容使用 Foliopair 品牌。应用 ID `org.paperflow.desktop`、Windows 可执行文件名 `PaperFlow.exe`、Linux 包及命令 `paperflow` 沿用旧标识，以兼容已有安装与启动配置。
+
 ### 安全隔离约定
 - 强制启用 `sandbox: true`、`contextIsolation: true`、`webSecurity: true`，禁用 `nodeIntegration`、外部页面导航、弹窗与渲染层权限请求；
 - Preload 仅暴露 67 个冻结的 `window.paperflow` 业务方法；主进程 IPC 逐一校验窗口来源、主 frame、精确协议 URL（`app://bundle`）与 Zod 入参（含剪贴板、URL 协议、私有网段防 SSRF 与 CLI 参数元字符拦截）；

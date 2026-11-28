@@ -85,10 +85,19 @@ describe('本机 CLI 主进程授权（只读取合成文件，绝不执行程�
     expect(confirm).toHaveBeenCalledTimes(1)
   })
 
-  test('Codex/Gemini/自定义确切参数模板保持兼容，内部临时输出路径不影响用户配置授权', () => {
+  test('Codex/Gemini/自定义确切参数模板保持兼容，授权对话框显示当前名称', async () => {
     const config = configuration()
-    expect(cliArgumentTemplate({ ...config, preset: 'codex', model: 'synthetic-model', extraArgs: ['--color', 'never'] }))
+    const codexConfig = { ...config, preset: 'codex' as const, model: 'synthetic-model', extraArgs: ['--color', 'never'] }
+    expect(cliArgumentTemplate(codexConfig))
       .toEqual(['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '-o', '<PaperFlow 临时输出文件>', '-m', 'synthetic-model', '--color', 'never', '-'])
     expect(cliArgumentTemplate({ ...config, preset: 'gemini', model: 'synthetic-model' })).toEqual(['-m', 'synthetic-model', '--synthetic'])
+    const store = memoryStore()
+    const confirm = vi.fn(async () => true)
+    const auth = new TranslationCliAuthorization(store, confirm)
+    await expect(auth.approve(codexConfig, program)).resolves.toBe(true)
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      args: cliArgumentTemplate(codexConfig, '<Foliopair 临时输出文件>')
+    }))
+    await expect(new TranslationCliAuthorization(store).requireApproved(codexConfig, program)).resolves.toBeTruthy()
   })
 })

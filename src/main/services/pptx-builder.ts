@@ -630,7 +630,7 @@ export function buildAcademicPptxBuffer(deck: AcademicSlideDeck): Buffer {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>${escapeXml(deck.deckTitle)}</dc:title>
-  <dc:creator>${escapeXml(deck.authors || 'PaperFlow AI')}</dc:creator>
+  <dc:creator>${escapeXml(deck.authors || 'Foliopair AI')}</dc:creator>
   <dcterms:created xsi:type="dcterms:W3CDTF">${nowIso}</dcterms:created>
   <dcterms:modified xsi:type="dcterms:W3CDTF">${nowIso}</dcterms:modified>
 </cp:coreProperties>`,
@@ -643,7 +643,7 @@ export function buildAcademicPptxBuffer(deck: AcademicSlideDeck): Buffer {
     data: Buffer.from(
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
-  <Application>PaperFlow Desktop</Application>
+  <Application>Foliopair</Application>
   <Slides>${slides.length}</Slides>
   <ScaleCrop>false</ScaleCrop>
   <LinksUpToDate>false</LinksUpToDate>
@@ -723,9 +723,9 @@ export function buildAcademicPptxBuffer(deck: AcademicSlideDeck): Buffer {
     name: 'ppt/theme/theme1.xml',
     data: Buffer.from(
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="PaperFlowAcademic">
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Foliopair Academic">
   <a:themeElements>
-    <a:clrScheme name="PaperFlowAcademic">
+    <a:clrScheme name="Foliopair Academic">
       <a:dk1><a:srgbClr val="${PALETTE.slateDark}"/></a:dk1>
       <a:lt1><a:srgbClr val="${PALETTE.white}"/></a:lt1>
       <a:dk2><a:srgbClr val="${PALETTE.navy}"/></a:dk2>
@@ -739,11 +739,11 @@ export function buildAcademicPptxBuffer(deck: AcademicSlideDeck): Buffer {
       <a:hlink><a:srgbClr val="${PALETTE.royal}"/></a:hlink>
       <a:folHlink><a:srgbClr val="6B7280"/></a:folHlink>
     </a:clrScheme>
-    <a:fontScheme name="PaperFlowFonts">
+    <a:fontScheme name="Foliopair Fonts">
       <a:majorFont><a:latin typeface="Calibri"/><a:ea typeface="Microsoft YaHei UI"/><a:cs typeface=""/></a:majorFont>
       <a:minorFont><a:latin typeface="Calibri"/><a:ea typeface="Microsoft YaHei UI"/><a:cs typeface=""/></a:minorFont>
     </a:fontScheme>
-    <a:fmtScheme name="PaperFlowFormats">
+    <a:fmtScheme name="Foliopair Formats">
       <a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst>
       <a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="25400"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst>
       <a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>
@@ -976,7 +976,7 @@ export function parseSlideDeckJson(rawText: string, fallbackTitle: string): Acad
   const slides: AcademicSlideSpec[] = [
     {
       title: safeFallbackTitle,
-      subtitle: 'PaperFlow 论文汇报幻灯片大纲',
+      subtitle: 'Foliopair 论文汇报幻灯片大纲',
       layout: 'cover',
       bullets: bodyChunks[0]?.slice(0, 3) ?? ['论文精读与方法汇报']
     },

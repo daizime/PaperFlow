@@ -23,6 +23,7 @@ import type { TranslationService } from './translation-service'
 
 const DEFAULT_OPENALEX_BASE = 'https://api.openalex.org'
 const DEFAULT_ARXIV_BASE = 'https://export.arxiv.org'
+const LITERATURE_USER_AGENT = 'Foliopair (Academic Reader)'
 const SEARCH_TIMEOUT_MS = 12_000
 const DOWNLOAD_TIMEOUT_MS = 30_000
 const MAX_REDIRECT_HOPS = 5
@@ -293,7 +294,7 @@ function safePdfFilenameFromTitle(title: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80)
-  return `${cleaned || 'paperflow-article'}.pdf`
+  return `${cleaned || 'Foliopair-article'}.pdf`
 }
 
 function parseExpandedKeywords(rawOutput: string): string[] {
@@ -447,7 +448,7 @@ export class LiteratureSearchService {
 
     const limit = validated.limit ?? 15
     const perSourceLimit = Math.min(25, Math.max(limit, 12))
-    const headers = { 'User-Agent': 'PaperFlowDesktop/0.1.1 (Academic Reader)' }
+    const headers = { 'User-Agent': LITERATURE_USER_AGENT }
 
     let oaRequestUrl: string
     let oaSingleWork = false
@@ -586,7 +587,7 @@ export class LiteratureSearchService {
         {
           redirect: 'manual',
           headers: {
-            'User-Agent': 'PaperFlowDesktop/0.1.1 (Academic Reader)',
+            'User-Agent': LITERATURE_USER_AGENT,
             Accept: 'application/pdf,*/*;q=0.8'
           }
         },
@@ -692,7 +693,7 @@ export class LiteratureSearchService {
     const validated = enrichCitationInputSchema.parse(input)
     const rawDoi = validated.doi?.trim() ?? ''
     const rawTitle = validated.title?.trim() ?? ''
-    const headers = { 'User-Agent': 'PaperFlowDesktop/0.1.1 (Academic Reader)' }
+    const headers = { 'User-Agent': LITERATURE_USER_AGENT }
 
     let cleanDoi = ''
     if (rawDoi) {

@@ -1446,7 +1446,7 @@ export class TranslationService {
     const started = Date.now()
 
     const systemParts: string[] = [
-      `You are PaperFlow's academic research assistant. Reply in ${languageLabel(config.targetLanguage)} unless the user requests another language.`,
+      `You are Foliopair's academic research assistant. Reply in ${languageLabel(config.targetLanguage)} unless the user requests another language.`,
       'Be accurate, concise, and explicitly distinguish cited paper observations from general inference. When referencing specific findings or sections from the provided pages, include page markers like P.3 when known.'
     ]
     if (scope.researchContext.trim()) {

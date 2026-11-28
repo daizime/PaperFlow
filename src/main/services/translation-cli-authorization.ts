@@ -30,6 +30,7 @@ function digest(value: unknown): string { return createHash('sha256').update(JSO
 function configDigest(config: CliConfiguration): string {
   return digest([config.preset, config.command, config.model, config.extraArgs, config.timeoutSec])
 }
+// 默认占位符参与持久化授权指纹，确认对话框使用当前展示名。
 export function cliArgumentTemplate(config: CliConfiguration, outputPath = '<PaperFlow 临时输出文件>'): string[] {
   if (config.preset === 'codex') {
     return ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '-o', outputPath,
@@ -110,7 +111,7 @@ export class TranslationCliAuthorization {
     if (active) return active
     const approval = (async (): Promise<boolean> => {
       const accepted = await this.authorize?.({ preset: config.preset, resolvedExecutable: identity.path,
-        args: cliArgumentTemplate(config), model: config.model, timeoutSec: config.timeoutSec,
+        args: cliArgumentTemplate(config, '<Foliopair 临时输出文件>'), model: config.model, timeoutSec: config.timeoutSec,
         configurationFingerprint, reason: 'settings' })
       if (!accepted) return false
       // 用户阅读确认框期间程序发生变化，则不为替换后的程序颁发授权。

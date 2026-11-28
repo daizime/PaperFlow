@@ -346,7 +346,7 @@ test('导入本地文件夹、批注同步导出、乱码标题识别、排序�
     const dateTag = new Date().toISOString().slice(0, 10)
     const exportedNoteFile = join(
       exportDir,
-      `PaperFlow-分类文献-${dateTag}`,
+      `Foliopair-分类文献-${dateTag}`,
       'CatalysisLab',
       'OER',
       'Efficient Catalysis for Oxygen Evolution-批注.md'

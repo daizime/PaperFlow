@@ -22,7 +22,7 @@ export function formatTranslationExportMarkdown(
   format: 'bilingual-md' | 'zh-md',
   pages: readonly ExportTranslationPage[]
 ): string {
-  const cleanTitle = title.trim() || 'PaperFlow 论文译文'
+  const cleanTitle = title.trim() || 'Foliopair 论文译文'
   const lines: string[] = [
     `# ${cleanTitle}（${format === 'bilingual-md' ? '中英对照译文' : '中文译文'}）`,
     '',
@@ -80,7 +80,7 @@ export function buildTranslationExportHtml(
   mode: 'zh-only' | 'bilingual',
   pages: readonly ExportTranslationPage[]
 ): string {
-  const cleanTitle = escapeHtml(title.trim() || 'PaperFlow 论文译文')
+  const cleanTitle = escapeHtml(title.trim() || 'Foliopair 论文译文')
   const modeLabel = mode === 'bilingual' ? '中英对照排版导出' : '中文译文排版导出'
   const sectionsHtml = pages
     .map(page => {
@@ -218,7 +218,7 @@ export function buildTranslationExportHtml(
 <body>
   <header class="doc-cover">
     <h1 class="doc-title">${cleanTitle}</h1>
-    <div class="doc-meta">PaperFlow · ${modeLabel} · 共 ${pages.length} 页</div>
+    <div class="doc-meta">Foliopair · ${modeLabel} · 共 ${pages.length} 页</div>
   </header>
   ${sectionsHtml}
 </body>

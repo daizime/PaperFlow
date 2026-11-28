@@ -1,8 +1,8 @@
 # Foliopair（原 PaperFlow）架构说明
 
-> 更新注记（`v0.2.1`，2026-11-28）：界面与品牌已更名为 **Foliopair**，同时保持底层 `PaperFlow` 数据目录（`appId: org.paperflow.desktop`、`userData/PaperFlow`、`paperflow.sqlite`、`paperflow-backup.json`）与 `window.paperflow` 桥接契约向后兼容；当前 Preload 已扩展至 **67** 个冻结 `window.paperflow` 业务 API（新增 `setWindowTheme` 联动无框主题标题栏）、SQLite `PRAGMA user_version = 7` 七张表（含 `doc.summary.v1:*` 文档摘要缓存），新增单/双栏版面保真分段翻译（右对齐与零遮挡重排）、跨页/跨批次语义上下文连贯翻译（`translation-context.ts`）、自定义快捷键、按 Base URL 绑定密钥及本机 CLI 执行系统授权确认。安全沙盒策略、协议校验与 `--publish never` 构建约束保持不变。
+> 更新注记（`v0.2.1`，2026-11-28）：界面与品牌已更名为 **Foliopair**。为兼容升级，沿用 `org.paperflow.desktop`、`appData/PaperFlow` 下的 `paperflow.sqlite`、ZIP 内的 `paperflow-backup.json` 和 `window.paperflow` 桥接契约。Preload 扩展至 **67** 个业务 API，新增 `setWindowTheme` 联动融合标题栏。SQLite `user_version` 为 7，含文档摘要缓存。该版本新增单/双栏分段翻译、跨页/跨批次翻译语境、自定义快捷键、按 Base URL 绑定凭据和本机 CLI 授权确认。
 
-本说明对应 PaperFlow T01–T06 基础架构与选区/坐标边界；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
+本说明记录 Foliopair T01–T06 基础架构与选区、坐标边界。构建、实机与打包验收以 `implementation-notes.md` 和 `verification/summary.md` 的实际命令和结果为准。
 
 ## 进程与模块
 

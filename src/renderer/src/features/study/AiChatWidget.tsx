@@ -747,7 +747,7 @@ export function AiChatWidget({
     setError(null)
     setExportNotice(null)
     try {
-      const baseTitle = activeDocument?.displayTitle || activeDocument?.originalFilename || 'PaperFlow总结'
+      const baseTitle = activeDocument?.displayTitle || activeDocument?.originalFilename || 'Foliopair 总结'
       const res = await window.paperflow.exportMarkdownContent(`${baseTitle}-总结`, msg.content)
       if (!res.canceled && res.fileName) {
         setExportNotice(`已导出 Markdown：${res.fileName}`)

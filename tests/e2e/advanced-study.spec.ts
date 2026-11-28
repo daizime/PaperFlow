@@ -211,7 +211,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     const zipEntries = readZipBuffer(readFileSync(backupZipPath))
     expect(zipEntries.has('library.bib')).toBe(true)
     expect(zipEntries.has('library.ris')).toBe(true)
-    expect(zipEntries.has('paperflow-backup.json')).toBe(true)
+    expect(JSON.parse(zipEntries.get('paperflow-backup.json')!.toString('utf8'))).toMatchObject({ app: 'Foliopair' })
     expect(Array.from(zipEntries.keys()).some(k => k.startsWith('pdfs/') && k.endsWith('.pdf'))).toBe(true)
     expect(Array.from(zipEntries.keys()).some(k => k.startsWith('notes/') && k.endsWith('.md'))).toBe(true)
 
@@ -233,7 +233,7 @@ test('高级阅读与研究工作流：紧致原图速览/自动收起/一键复
     await runningA.app.close()
   }
 
-  // 6. 在全新空白数据目录启动第二个 PaperFlow 实例并从 ZIP 恢复全套数据 + 验证二次恢复幂等
+  // 6. 在全新空白数据目录启动第二个 Foliopair 实例并从 ZIP 恢复全套数据 + 验证二次恢复幂等
   const dataDirB = await createTestData()
   const runningB = await launchApp(dataDirB, { deviceScaleFactor: 1 })
   runningB.page.on('pageerror', error => failures.push(error.message))

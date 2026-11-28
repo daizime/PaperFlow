@@ -294,7 +294,7 @@ export class LibraryDatabase {
 
   private migrate(): void {
     const version = this.database.pragma('user_version', { simple: true }) as number
-    if (version > 7) throw new Error('文献数据库版本较新，请使用更新版本的 PaperFlow。')
+    if (version > 7) throw new Error('文献数据库版本较新，请使用更新版本的 Foliopair。')
     if (version === 7) return
     this.database.transaction(() => {
       if (version < 1) {

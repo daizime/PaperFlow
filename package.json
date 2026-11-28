@@ -1,5 +1,6 @@
 {
-  "name": "paperflow",
+  "name": "foliopair",
+  "desktopName": "paperflow.desktop",
   "version": "0.2.1",
   "private": true,
   "description": "Foliopair — 面向科研论文的本地安全隔离双语 PDF 阅读器",

@@ -60,7 +60,7 @@ export function buildAcademicSkillPrompt(options: {
         ? `【自定义技能 · ${labelName}】${customInstruction.trim()}`
         : `【自定义技能 · ${labelName}】${tpl.slice(0, 80)}${tpl.length > 80 ? '…' : ''}`,
       systemPrompt: [
-        `You are PaperFlow's rigorous scholarly reading assistant executing the user's custom workflow template "${labelName}".`,
+        `You are Foliopair's rigorous scholarly reading assistant executing the user's custom workflow template "${labelName}".`,
         `Reply in ${targetLanguage} using clean, well-structured Markdown.`,
         'Be concrete, preserve quantitative metrics and exact claims, and clearly separate observed paper facts from general inference.',
         pageCiteHint.trim(),

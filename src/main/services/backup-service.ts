@@ -302,7 +302,7 @@ function restoreFoldersFromBackup(
   return idMap
 }
 
-/** 打包与恢复 PaperFlow 文献库，兼容 Zotero / EndNote / Mendeley / Obsidian 导入格式；显式排除加密 API 密钥。 */
+/** 打包与恢复 Foliopair 文献库，兼容 Zotero / EndNote / Mendeley / Obsidian 导入格式；显式排除加密 API 密钥。 */
 export class BackupService {
   constructor(
     private readonly database: LibraryDatabase,
@@ -439,7 +439,7 @@ export class BackupService {
 
     const manifest: BackupManifest = {
       schemaVersion: 1,
-      app: 'PaperFlow',
+      app: 'Foliopair',
       exportedAt: new Date().toISOString(),
       documents: manifestDocs,
       folders,
@@ -468,7 +468,7 @@ export class BackupService {
       name: 'README-BACKUP.txt',
       data: Buffer.from(
         [
-          'PaperFlow 便携备份包说明',
+          'Foliopair 便携备份包说明',
           '========================',
           '',
           `导出时间：${manifest.exportedAt}`,
@@ -478,7 +478,7 @@ export class BackupService {
           `专业术语：${glossary.length} 条`,
           '',
           '如何在其他工具中使用：',
-          '- PaperFlow：在文献库左下角点击「恢复备份」并选择本 .zip 文件即可一键无损还原（含分类文件夹与专属术语表）。',
+          '- Foliopair：在文献库左下角点击「恢复备份」并选择本 .zip 文件即可一键无损还原（含分类文件夹与专属术语表）。',
           '- Zotero / JabRef / Mendeley：解压后直接导入 library.bib 或 library.ris（已按分类文件夹建子目录并关联 pdfs/ 与标签）。',
           '- EndNote：解压后通过 File -> Import -> File 导入 library.ris（Reference Manager / RIS 格式）。',
           '- Obsidian / Notion：直接将 notes/ 文件夹中的分类目录与 Markdown 笔记拖入仓库。',
@@ -512,7 +512,7 @@ export class BackupService {
     const entries = readZipBuffer(zipBytes, this.zipOptions)
     const manifestRaw = entries.get('paperflow-backup.json')
     if (!manifestRaw) {
-      throw new Error('所选压缩包不是有效的 PaperFlow 备份包（缺少 paperflow-backup.json）。')
+      throw new Error('所选压缩包不是有效的 Foliopair 备份包（缺少 paperflow-backup.json）。')
     }
 
     let parsedJson: unknown
@@ -786,7 +786,7 @@ export class BackupService {
     }
 
     const dateTag = new Date().toISOString().slice(0, 10)
-    const exportRoot = assertWithinRoot(resolvedParent, join(resolvedParent, `PaperFlow-分类文献-${dateTag}`))
+    const exportRoot = assertWithinRoot(resolvedParent, join(resolvedParent, `Foliopair-分类文献-${dateTag}`))
     await mkdir(exportRoot, { recursive: true })
 
     const segmentMap = buildFolderSegmentMap(folders)
@@ -983,7 +983,7 @@ export class BackupService {
     const allDocs = this.database.listStoredDocuments()
 
     let targetDocs = allDocs
-    let defaultStem = `PaperFlow-全部文献-${new Date().toISOString().slice(0, 10)}`
+    let defaultStem = `Foliopair-全部文献-${new Date().toISOString().slice(0, 10)}`
     if (validated.scope === 'unassigned') {
       targetDocs = allDocs.filter(doc => !doc.folderId || !folderSet.has(doc.folderId))
       defaultStem = '未分类文献引用'

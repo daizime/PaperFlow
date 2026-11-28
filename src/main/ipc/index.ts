@@ -260,10 +260,10 @@ export function registerIpc(
       const blockCount = input.pages.reduce((sum, page) => sum + page.blocks.length, 0)
       const isPdf = input.format === 'zh-pdf' || input.format === 'bilingual-pdf'
       const safeStem =
-        (input.title || doc.displayTitle || 'paperflow-translation')
+        (input.title || doc.displayTitle || 'Foliopair-translation')
           .replace(/[\\/:*?"<>|]/g, '_')
           .replace(/\.(md|pdf)$/i, '')
-          .slice(0, 80) || 'paperflow-translation'
+          .slice(0, 80) || 'Foliopair-translation'
       const suffix =
         input.format === 'bilingual-md'
           ? '-中英对照'
@@ -367,7 +367,7 @@ export function registerIpc(
 
   handle(CHANNELS.exportSlideDeckPptx, async (window, args) => {
     const [deck] = exportSlideDeckPptxArgsSchema.parse(args)
-    const safeStem = deck.deckTitle.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'paperflow-slides'
+    const safeStem = deck.deckTitle.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'Foliopair-slides'
     const result = await dialog.showSaveDialog(window, {
       title: '导出学术汇报 PPTX',
       defaultPath: `${safeStem}.pptx`,
@@ -383,7 +383,7 @@ export function registerIpc(
 
   handle(CHANNELS.exportMarkdownContent, async (window, args) => {
     const [suggestedName, markdown] = exportMarkdownContentArgsSchema.parse(args)
-    const safeStem = suggestedName.replace(/[\\/:*?"<>|]/g, '_').replace(/\.md$/i, '').slice(0, 80) || 'paperflow-summary'
+    const safeStem = suggestedName.replace(/[\\/:*?"<>|]/g, '_').replace(/\.md$/i, '').slice(0, 80) || 'Foliopair-summary'
     const result = await dialog.showSaveDialog(window, {
       title: '导出精读总结 Markdown',
       defaultPath: `${safeStem}.md`,
@@ -464,7 +464,7 @@ export function registerIpc(
     if (!document) throw new Error('文献不存在，请重新选择文献。')
     const annotations = database.listAnnotations(document.id)
     const markdown = formatAnnotationsMarkdown(document, annotations)
-    const safeStem = (document.displayTitle || 'paperflow-notes').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
+    const safeStem = (document.displayTitle || 'Foliopair-notes').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
     const result = await dialog.showSaveDialog(window, {
       title: '导出批注为 Markdown',
       defaultPath: `${safeStem}-批注.md`,
@@ -483,8 +483,8 @@ export function registerIpc(
       const dateTag = new Date().toISOString().slice(0, 10)
       const selection = await dialog.showSaveDialog(window, {
         title: '导出文献库一键备份包',
-        defaultPath: `PaperFlow-Backup-${dateTag}.zip`,
-        filters: [{ name: 'PaperFlow 备份压缩包', extensions: ['zip'] }]
+        defaultPath: `Foliopair-Backup-${dateTag}.zip`,
+        filters: [{ name: 'Foliopair 备份压缩包', extensions: ['zip'] }]
       })
       if (selection.canceled || !selection.filePath) {
         return {
@@ -510,9 +510,9 @@ export function registerIpc(
     handle(CHANNELS.importBackup, async (window, args) => {
       noArgsSchema.parse(args)
       const selection = await dialog.showOpenDialog(window, {
-        title: '选择 PaperFlow 备份压缩包',
+        title: '选择 Foliopair 备份压缩包',
         properties: ['openFile'],
-        filters: [{ name: 'PaperFlow 备份压缩包', extensions: ['zip'] }]
+        filters: [{ name: 'Foliopair 备份压缩包', extensions: ['zip'] }]
       })
       if (selection.canceled || !selection.filePaths[0]) {
         return {

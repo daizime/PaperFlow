@@ -108,6 +108,7 @@ describe('合成文献的备份往返、旧包兼容和恢复幂等', () => {
     const entries = readZipBuffer(zip)
     const manifest = JSON.parse(entries.get('paperflow-backup.json')!.toString('utf8')) as BackupManifest
     // 旧版 schemaVersion=1 批注不含 UUID，其余载荷保持真实生成的 PDF。
+    manifest.app = 'PaperFlow'
     for (const annotation of manifest.annotations) delete annotation.id
     entries.set('paperflow-backup.json', Buffer.from(JSON.stringify(manifest), 'utf8'))
     return createZipBuffer([...entries].map(([name, data]) => ({ name, data })))
@@ -148,7 +149,10 @@ describe('合成文献的备份往返、旧包兼容和恢复幂等', () => {
     await expect(new BackupService(source, sourceDocuments, { maxEntries: 4 }).exportBackupArchive()).rejects.toThrow('条目数')
     expect(read).not.toHaveBeenCalled()
     const archive = await new BackupService(source, sourceDocuments, { maxEntries: 5 }).exportBackupArchive()
-    expect(readZipBuffer(archive.zipBuffer, { maxEntries: 5 }).size).toBe(5)
+    const entries = readZipBuffer(archive.zipBuffer, { maxEntries: 5 })
+    expect(entries.size).toBe(5)
+    expect(JSON.parse(entries.get('paperflow-backup.json')!.toString('utf8'))).toMatchObject({ app: 'Foliopair' })
+    expect(entries.get('README-BACKUP.txt')?.toString('utf8')).toContain('Foliopair 便携备份包说明')
     expect((await new BackupService(target, targetDocuments, { maxEntries: 5 }).importBackupArchive(archive.zipBuffer)).importedDocuments).toBe(1)
   })
 

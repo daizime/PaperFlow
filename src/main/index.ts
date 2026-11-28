@@ -12,6 +12,7 @@ import { TranslationService } from './services/translation-service'
 import { registerIpc } from './ipc'
 
 registerAppScheme()
+// Electron 的内部名称保留旧版用户数据和系统存储身份，窗口及安装包展示 Foliopair。
 app.setName('PaperFlow')
 app.setAppUserModelId('org.paperflow.desktop')
 // 明确的本机启动参数，便于便携数据目录和隔离自动化测试；不经 renderer 暴露。

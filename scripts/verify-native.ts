@@ -5,11 +5,11 @@ import { join, resolve } from 'node:path'
 
 async function verify(): Promise<void> {
   // 原生兼容性检查也使用隔离数据，避免加载真实文献库或更新其阅读状态。
-  const dataDirectory = await mkdtemp(join(tmpdir(), 'paperflow-native-'))
+  const dataDirectory = await mkdtemp(join(tmpdir(), 'foliopair-native-'))
   const app = await electron.launch({ args: [resolve('out/main/index.js'), '--user-data-dir=' + dataDirectory], env: { ...process.env, ELECTRON_RENDERER_URL: '' } })
   try {
     const page = await app.firstWindow()
-    await page.getByText('PaperFlow', { exact: true }).waitFor()
+    await page.getByText('Foliopair', { exact: true }).waitFor()
     console.log(await app.evaluate(() => {
       const { createRequire } = process.getBuiltinModule('node:module')
       const require = createRequire(process.cwd() + '/package.json')

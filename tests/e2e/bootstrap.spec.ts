@@ -65,6 +65,7 @@ test('T01 真实桌面启动、安全隔离与导航阻止', async () => {
       'searchLibrary',
       'searchLiterature',
       'sendChatMessage',
+      'setWindowTheme',
       'summarizeLiteratureAbstract',
       'testTranslationConnection',
       'translatePage',

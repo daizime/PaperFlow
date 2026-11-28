@@ -48,6 +48,7 @@ import {
   searchLibraryArgsSchema,
   searchLiteratureArgsSchema,
   sendAiChatArgsSchema,
+  setWindowThemeArgsSchema,
   summarizeLiteratureAbstractArgsSchema,
   testTranslationConnectionArgsSchema,
   translatePageArgsSchema,
@@ -72,6 +73,7 @@ import {
 } from '../services/translation-export'
 import type { TranslationService } from '../services/translation-service'
 import { ZIP_ARCHIVE_LIMITS } from '../services/zip-archive'
+import { WINDOW_THEME_SETTING_KEY, applyWindowThemeChrome } from '../window'
 
 export function registerIpc(
   getWindow: () => BrowserWindow | null,
@@ -635,5 +637,11 @@ export function registerIpc(
   handle(CHANNELS.saveResearchProfile, (_window, args) => {
     const [input] = saveResearchProfileArgsSchema.parse(args)
     return saveResearchProfile(database, input)
+  })
+
+  handle(CHANNELS.setWindowTheme, (window, args) => {
+    const [theme] = setWindowThemeArgsSchema.parse(args)
+    database.setSetting(WINDOW_THEME_SETTING_KEY, theme)
+    applyWindowThemeChrome(window, theme)
   })
 }

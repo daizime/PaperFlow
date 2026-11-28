@@ -86,6 +86,7 @@ const api: PaperFlowAPI = {
   copyText: text => ipcRenderer.invoke(CHANNELS.copyText, text),
   copyImageDataUrl: dataUrl => ipcRenderer.invoke(CHANNELS.copyImageDataUrl, dataUrl),
   getResearchProfile: () => ipcRenderer.invoke(CHANNELS.getResearchProfile),
-  saveResearchProfile: input => ipcRenderer.invoke(CHANNELS.saveResearchProfile, input)
+  saveResearchProfile: input => ipcRenderer.invoke(CHANNELS.saveResearchProfile, input),
+  setWindowTheme: theme => ipcRenderer.invoke(CHANNELS.setWindowTheme, theme)
 }
 contextBridge.exposeInMainWorld('paperflow', Object.freeze(api))

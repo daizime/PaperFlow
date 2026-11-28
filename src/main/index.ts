@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, safeStorage } from 'electron'
 import { registerAppScheme, installAppProtocol } from './services/app-protocol'
-import { createWindow, installSessionSecurity } from './window'
+import { WINDOW_THEME_SETTING_KEY, createWindow, installSessionSecurity, normalizeReadingTheme } from './window'
 import { mkdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { BackupService } from './services/backup-service'
@@ -82,9 +82,11 @@ app.whenReady().then(async () => {
   await documents.cleanupOrphanFiles()
   registerIpc(() => mainWindow, database, documents, translationService, backupService, literatureSearch)
   const remember = (window: BrowserWindow): void => { mainWindow = window; window.on('closed', () => { mainWindow = null }) }
-  await createWindow(remember)
+  const readInitialTheme = (): ReturnType<typeof normalizeReadingTheme> =>
+    normalizeReadingTheme(database?.getSetting(WINDOW_THEME_SETTING_KEY))
+  await createWindow(remember, readInitialTheme())
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow(remember)
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow(remember, readInitialTheme())
   })
 }).catch((error: unknown) => {
   if (quitting) return

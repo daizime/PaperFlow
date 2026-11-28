@@ -1,8 +1,9 @@
 import { type RefObject } from 'react'
-import type { DocumentRecord, DocumentTranslationScope } from '../../../../shared/contracts'
+import type { DocumentRecord, DocumentTranslationScope, ReadingTheme } from '../../../../shared/contracts'
 import { BrandPageIcon } from '../../components/UiIcons'
+import type { HeaderEnginePillModel } from '../translation/usage-format'
 
-export type ReadingTheme = 'light' | 'sepia' | 'dark'
+export type { ReadingTheme }
 
 const THEME_OPTIONS: Array<{ id: ReadingTheme; label: string }> = [
   { id: 'light', label: '明亮' },
@@ -50,7 +51,7 @@ export interface WorkspaceHeaderProps {
   onToggleAnnotations(): void
   citationOpen: boolean
   onOpenCitation(): void
-  headerEnginePill: { text: string; tone: 'ok' | 'warn'; tooltip: string }
+  headerEnginePill: HeaderEnginePillModel
   onOpenEngineSettings(): void
   themeMenuRef: RefObject<HTMLDivElement | null>
   theme: ReadingTheme
@@ -93,32 +94,39 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps): React.JSX.Element {
   return (
     <header className="app-header">
-      <div className="brand-mark" aria-hidden="true">
-        <BrandPageIcon size={15} />
+      <div className="app-header__left">
+        <div className="app-header__brand">
+          <div className="brand-mark" aria-hidden="true">
+            <BrandPageIcon size={15} />
+          </div>
+          <strong>Foliopair</strong>
+        </div>
+        <div className="app-header__nav-group" role="group" aria-label="工作区导航">
+          <button
+            type="button"
+            className={libraryCollapsed ? 'app-header__sidebar-toggle is-collapsed' : 'app-header__sidebar-toggle'}
+            aria-label="切换文献库侧边栏"
+            aria-expanded={!libraryCollapsed}
+            onClick={onToggleLibrary}
+          >
+            {libraryCollapsed ? '展开文献库' : '收起文献库'}
+          </button>
+          <button
+            type="button"
+            className="app-header__onboarding-btn"
+            data-testid="open-onboarding-btn"
+            aria-label="设置或切换科研方向"
+            title={researchBadgeLabel ? `当前科研方向：${researchBadgeLabel}（点击修改）` : '研究生科研向导：设置研究方向、预设标签与术语表'}
+            onClick={onOpenOnboarding}
+          >
+            {researchBadgeLabel ?? '科研向导'}
+          </button>
+        </div>
       </div>
-      <strong>Foliopair</strong>
-      <button
-        type="button"
-        className={libraryCollapsed ? 'app-header__sidebar-toggle is-collapsed' : 'app-header__sidebar-toggle'}
-        aria-label="切换文献库侧边栏"
-        aria-expanded={!libraryCollapsed}
-        onClick={onToggleLibrary}
-      >
-        {libraryCollapsed ? '展开文献库' : '收起文献库'}
-      </button>
-      <button
-        type="button"
-        className="app-header__onboarding-btn"
-        data-testid="open-onboarding-btn"
-        aria-label="设置或切换科研方向"
-        title="研究生科研向导：设置研究方向、预设标签与术语表"
-        onClick={onOpenOnboarding}
-      >
-        {researchBadgeLabel ?? '科研向导'}
-      </button>
-      <div className="app-header__right">
+
+      <div className="app-header__center">
         {hasDocument ? (
-          <>
+          <div className="app-header__center-group" data-testid="header-reading-tools" role="group" aria-label="阅读工具">
             {isCompareMode && activePaneLabel ? (
               <span
                 className="app-header__focus-pill"
@@ -163,21 +171,33 @@ export function WorkspaceHeader({
             >
               引用
             </button>
-            <span className="app-header__divider" aria-hidden="true" />
-          </>
+          </div>
         ) : null}
-        <button
-          type="button"
-          className={`app-header__engine-btn${headerEnginePill.tone === 'warn' ? ' is-low-balance' : ''}`}
-          data-testid="header-engine-btn"
-          data-billing-tone={headerEnginePill.tone}
-          aria-label="翻译设置"
-          title={headerEnginePill.tooltip}
-          onClick={onOpenEngineSettings}
-        >
-          <span className="app-header__engine-dot" aria-hidden="true" />
-          <span className="app-header__engine-text">{headerEnginePill.text}</span>
-        </button>
+      </div>
+
+      <div className="app-header__right">
+        <div className="app-header__engine-wrap">
+          <button
+            type="button"
+            className={`app-header__engine-btn${headerEnginePill.tone === 'warn' ? ' is-low-balance' : ''}`}
+            data-testid="header-engine-btn"
+            data-billing-tone={headerEnginePill.tone}
+            aria-label="翻译设置"
+            title={headerEnginePill.tooltip}
+            onClick={onOpenEngineSettings}
+          >
+            <span className="app-header__engine-dot" aria-hidden="true" />
+            <span className="app-header__engine-text">{headerEnginePill.compactText}</span>
+          </button>
+          {headerEnginePill.detailBadge || headerEnginePill.tooltip ? (
+            <div className="app-header__engine-popover" data-testid="header-engine-popover" role="tooltip">
+              {headerEnginePill.detailBadge ? (
+                <strong className="app-header__engine-popover-badge">{headerEnginePill.detailBadge}</strong>
+              ) : null}
+              <span>{headerEnginePill.tooltip}</span>
+            </div>
+          ) : null}
+        </div>
         <div ref={themeMenuRef} className="theme-menu-anchor">
           <button
             type="button"

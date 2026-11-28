@@ -78,11 +78,24 @@ export const translationBlockInputSchema = z.object({
   sourceHash: z.string().regex(/^[a-f0-9]{16,64}$/)
 }).strict()
 
+export const translationContextEntrySchema = z.object({
+  kind: z.enum(['heading', 'paragraph', 'caption', 'list-item']),
+  sourceText: z.string().trim().min(1).max(1200),
+  translatedText: z.string().trim().min(1).max(1200).optional()
+}).strict()
+
+export const translationPageContextSchema = z.object({
+  documentSummary: z.string().trim().min(1).max(1200).optional(),
+  sectionHeading: z.string().trim().min(1).max(300).optional(),
+  precedingBlocks: z.array(translationContextEntrySchema).max(6).optional()
+}).strict()
+
 export const translatePageInputSchema = z.object({
   documentId: documentIdSchema,
   pageNumber: pageNumberSchema,
   blocks: z.array(translationBlockInputSchema).min(1).max(160),
-  force: z.boolean().optional()
+  force: z.boolean().optional(),
+  context: translationPageContextSchema.optional()
 }).strict()
 
 export const saveTranslationSettingsArgsSchema = z.tuple([saveTranslationSettingsSchema])
@@ -647,5 +660,8 @@ export const exportFolderBibtexInputSchema = z
       ctx.addIssue({ code: 'custom', message: '非单分类导出 .bib 不应指定 folderId。', path: ['folderId'] })
     }
   })
+
+export const readingThemeSchema = z.enum(['light', 'sepia', 'dark'])
+export const setWindowThemeArgsSchema = z.tuple([readingThemeSchema])
 
 export const exportFolderBibtexArgsSchema = z.tuple([exportFolderBibtexInputSchema])

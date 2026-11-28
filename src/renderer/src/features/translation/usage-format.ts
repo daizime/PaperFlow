@@ -111,15 +111,25 @@ export function defaultBillingNote(billingKind: ProviderBillingKind, isPreviewin
   }
 }
 
+export interface HeaderEnginePillModel {
+  text: string
+  compactText: string
+  detailBadge: string | null
+  tone: 'ok' | 'warn'
+  tooltip: string
+}
+
 export function formatHeaderEnginePill(
   settings: TranslationSettings | null,
   engineLabel: string | null,
   balance: ProviderBalanceSnapshot | null,
   usageSummary: UsageStatsSummary | null
-): { text: string; tone: 'ok' | 'warn'; tooltip: string } {
+): HeaderEnginePillModel {
   if (!settings) {
     return {
       text: '设置',
+      compactText: '设置',
+      detailBadge: null,
       tone: 'ok',
       tooltip: '翻译引擎、模型、余额与词库设置'
     }
@@ -137,6 +147,8 @@ export function formatHeaderEnginePill(
     const moneyText = formatMoney(balance.totalBalance, balance.currency, 2)
     return {
       text: `${baseText} · 余 ${moneyText}${warn ? ' ⚠' : ''}`,
+      compactText: warn ? `${baseText} · 余 ${moneyText} ⚠` : baseText,
+      detailBadge: warn ? `余 ${moneyText} ⚠ · 低于预警线` : `实时余额 ${moneyText}`,
       tone: warn ? 'warn' : 'ok',
       tooltip: warn
         ? `当前 DeepSeek 账户余额 ${moneyText}，已低于预警线；点击查看余额详情或充值`
@@ -147,6 +159,8 @@ export function formatHeaderEnginePill(
   if (billingKind === 'ollama-local') {
     return {
       text: `${baseText} · 离线免费`,
+      compactText: baseText,
+      detailBadge: '离线免费',
       tone: 'ok',
       tooltip: `当前使用本机离线模型（${baseText}），零外部计费`
     }
@@ -155,6 +169,8 @@ export function formatHeaderEnginePill(
   if (billingKind === 'cli-local') {
     return {
       text: `${baseText} · 订阅配额`,
+      compactText: baseText,
+      detailBadge: '订阅配额',
       tone: 'ok',
       tooltip: `当前使用本机 CLI 客户端（${baseText}），消耗已登录订阅账号配额；已完成 ${usageSummary?.today.translatedBlocks ?? 0} 块`
     }
@@ -162,8 +178,11 @@ export function formatHeaderEnginePill(
 
   const todayTokens = usageSummary?.today.totalTokens ?? 0
   if (todayTokens > 0) {
+    const compactTok = `今日 ${formatCompactTokens(todayTokens)} tok`
     return {
-      text: `${baseText} · 今日 ${formatCompactTokens(todayTokens)} tok`,
+      text: `${baseText} · ${compactTok}`,
+      compactText: baseText,
+      detailBadge: compactTok,
       tone: 'ok',
       tooltip: `当前引擎：${baseText}（无官方余额查询接口；今日实测累计 ${formatExactTokens(todayTokens)} tokens）`
     }
@@ -171,6 +190,8 @@ export function formatHeaderEnginePill(
 
   return {
     text: baseText,
+    compactText: baseText,
+    detailBadge: 'OpenAI 兼容 API',
     tone: 'ok',
     tooltip: `当前生效引擎：OpenAI 兼容 API · ${settings.openai.model}；点击查看用量与余额详情`
   }

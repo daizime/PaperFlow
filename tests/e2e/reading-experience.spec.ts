@@ -74,12 +74,47 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
     await page.getByRole('group', { name: '视图模式', exact: true }).getByRole('button', { name: '双栏', exact: true }).click()
     await waitForPageReady(page, 1)
 
-    // 1. 主题切换：明亮 -> 护眼（验证 PDF multiply 暖纸层） -> 深色
+    // 1. 主题切换：明亮 -> 护眼（验证 PDF multiply 暖纸层与主进程窗口着色联动） -> 深色
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light')
+    const measureHeaderLayout = () =>
+      page.evaluate(() => {
+        const header = document.querySelector('.app-header')?.getBoundingClientRect()
+        const left = document.querySelector('.app-header__left')?.getBoundingClientRect()
+        const center = document.querySelector('[data-testid="header-reading-tools"]')?.getBoundingClientRect()
+        const right = document.querySelector('.app-header__right')?.getBoundingClientRect()
+        if (!header || !left || !center || !right) return null
+        return {
+          height: header.height,
+          leftRightGap: center.left - left.right,
+          centerRightGap: right.left - center.right
+        }
+      })
+    const wideHeader = await measureHeaderLayout()
+    expect(wideHeader).not.toBeNull()
+    expect(Math.abs(wideHeader!.height - 40)).toBeLessThanOrEqual(1)
+    expect(wideHeader!.leftRightGap).toBeGreaterThan(8)
+    expect(wideHeader!.centerRightGap).toBeGreaterThan(8)
+
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1080, 720))
+    await expect.poll(() => page.evaluate(() => window.innerWidth <= 1120)).toBe(true)
+    const narrowHeader = await measureHeaderLayout()
+    expect(narrowHeader).not.toBeNull()
+    expect(narrowHeader!.leftRightGap).toBeGreaterThan(4)
+    expect(narrowHeader!.centerRightGap).toBeGreaterThan(4)
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
+    await expect.poll(() => page.evaluate(() => window.innerWidth >= 1400)).toBe(true)
+
     await page.getByTestId('theme-menu-trigger').click()
     const themeGroup = page.getByRole('group', { name: '阅读主题', exact: true })
     await themeGroup.getByRole('button', { name: '护眼', exact: true }).click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('sepia')
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) =>
+          (BrowserWindow.getAllWindows()[0]?.getBackgroundColor() ?? '').replace('#', '').slice(-6).toLowerCase()
+        )
+      )
+      .toBe('f2ead8')
     const sepiaBlend = await page.evaluate(() => {
       const pdfPage = document.querySelector('.pdf-page[data-page-number="1"]')
       return pdfPage ? getComputedStyle(pdfPage, '::after').mixBlendMode : ''
@@ -136,6 +171,13 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
     await page.getByTestId('theme-menu-trigger').click()
     await page.getByRole('group', { name: '阅读主题', exact: true }).getByRole('button', { name: '深色', exact: true }).click()
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) =>
+          (BrowserWindow.getAllWindows()[0]?.getBackgroundColor() ?? '').replace('#', '').slice(-6).toLowerCase()
+        )
+      )
+      .toBe('14171d')
     const darkPalette = await page.evaluate(() => ({
       colorScheme: getComputedStyle(document.documentElement).colorScheme,
       yellow: getComputedStyle(document.querySelector('.study-color-dot--yellow')!).backgroundColor,
@@ -245,6 +287,10 @@ test('方向二阅读体验：主题切换、收藏与标签、阅读进度、�
 
     await waitForPageReady(p2, 2)
     await expect.poll(() => p2.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+    const restartedBgHex = await running.app.evaluate(({ BrowserWindow }) =>
+      (BrowserWindow.getAllWindows()[0]?.getBackgroundColor() ?? '').replace('#', '').slice(-6).toLowerCase()
+    )
+    expect(restartedBgHex).toBe('14171d')
     const restartedCard = p2.locator('.document-entry').first()
     await expect(restartedCard.getByRole('button', { name: /^取消收藏 / })).toHaveAttribute('aria-pressed', 'true')
     await expect(restartedCard.locator('.document-tag-pill')).toContainText('#VLDB')

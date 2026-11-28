@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   alignBlockSentences,
   computeColumnLeftEdges,
+  computeColumnRightEdges,
   computeOverlayBlockIndent,
   getBlockTranslationSourceText,
   hitTestPageSentence,
@@ -869,5 +870,323 @@ describe('sentence-alignment: CJK/Latin sentence splitting, alignment, hit testi
     const gBelow = solved.get('b-below-spaced')!
     expect(gSpaced.maxSafeHeight).toBeGreaterThan(gSpaced.height)
     expect(gSpaced.top + gSpaced.maxSafeHeight).toBeLessThanOrEqual(gBelow.top - 3)
+  })
+
+  test('resolveOverlayBlockGeometries prevents diagonal/vertical overlap and cross-column intrusion across zoom scales (合成素材)', () => {
+    const mkBlock = (
+      id: string,
+      opts: {
+        kind: AnalyzedBlock['kind']
+        col: number
+        fontSize: number
+        rect: PageRect
+        text: string
+      }
+    ): AnalyzedBlock => ({
+      id,
+      pageNumber: 1,
+      order: 1,
+      kind: opts.kind,
+      columnIndex: opts.col,
+      fontSize: opts.fontSize,
+      isBold: opts.kind === 'heading',
+      bounds: opts.rect,
+      displayBounds: opts.rect,
+      sentences: [
+        {
+          id: `${id}-s1`,
+          pageNumber: 1,
+          order: 1,
+          blockId: id,
+          blockKind: opts.kind,
+          columnIndex: opts.col,
+          text: opts.text,
+          rects: [opts.rect],
+          displayRects: [opts.rect],
+          bounds: opts.rect,
+          displayBounds: opts.rect,
+          fragments: [],
+          crossColumn: false
+        }
+      ]
+    })
+
+    // 合成密集双栏页面：包含窄标题上方扩宽、紧凑段落链、高密度多小块及相邻右栏（合成素材）
+    const blocks: AnalyzedBlock[] = [
+      mkBlock('l-p1', {
+        kind: 'paragraph',
+        col: 1,
+        fontSize: 9,
+        rect: { x: 54, y: 160, width: 236, height: 34 },
+        text: 'ScaleStore combines low-latency RDMA with local DRAM caching.'
+      }),
+      mkBlock('l-head', {
+        kind: 'heading',
+        col: 1,
+        fontSize: 9.5,
+        rect: { x: 54, y: 196, width: 72, height: 11 },
+        text: '2.1 Design'
+      }),
+      mkBlock('l-p2', {
+        kind: 'paragraph',
+        col: 1,
+        fontSize: 9,
+        rect: { x: 54, y: 209, width: 236, height: 42 },
+        text: 'Page identifiers abstract whether pages live locally or on remote servers.'
+      }),
+      mkBlock('l-p3', {
+        kind: 'paragraph',
+        col: 1,
+        fontSize: 9,
+        rect: { x: 54, y: 253, width: 236, height: 30 },
+        text: 'Eviction removes cold pages when working sets exceed DRAM.'
+      }),
+      mkBlock('r-p1', {
+        kind: 'paragraph',
+        col: 2,
+        fontSize: 9,
+        rect: { x: 304, y: 160, width: 240, height: 32 },
+        text: 'Right column begins with distributed cache coherence analysis.'
+      }),
+      mkBlock('r-head', {
+        kind: 'heading',
+        col: 2,
+        fontSize: 9.5,
+        rect: { x: 304, y: 194, width: 112, height: 11 },
+        text: '2.2 Epoch GC'
+      }),
+      mkBlock('r-p2', {
+        kind: 'paragraph',
+        col: 2,
+        fontSize: 9,
+        rect: { x: 304, y: 207, width: 240, height: 48 },
+        text: 'Epoch-based reclamation ensures safe optimistic lock-free traversal.'
+      })
+    ]
+
+    const layout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 9,
+      hasText: true,
+      blocks,
+      sentences: blocks.flatMap(b => b.sentences),
+      filteredItems: []
+    }
+
+    const colLefts = computeColumnLeftEdges(layout.blocks)
+    const colRights = new Map<number, number>([
+      [1, 290],
+      [2, 544]
+    ])
+
+    for (const scale of [0.85, 1, 1.25, 1.5]) {
+      const solved = resolveOverlayBlockGeometries(layout, scale, colLefts, colRights)
+      expect(solved.size).toBe(blocks.length)
+
+      const rightColLeftPx = (colLefts.get(2) ?? 304) * scale
+      for (const col of [1, 2]) {
+        const colBoxes = blocks
+          .filter(b => b.columnIndex === col)
+          .map(b => solved.get(b.id)!)
+          .sort((a, b) => a.top - b.top)
+
+        for (let i = 0; i < colBoxes.length; i++) {
+          const cur = colBoxes[i]
+          if (col === 1) {
+            expect(cur.left + cur.maxSafeWidth).toBeLessThan(rightColLeftPx)
+          }
+          for (let j = i + 1; j < colBoxes.length; j++) {
+            const nxt = colBoxes[j]
+            const horizOverlap =
+              cur.left < nxt.left + nxt.maxSafeWidth - 0.5 && nxt.left < cur.left + cur.maxSafeWidth - 0.5
+            if (horizOverlap) {
+              expect(cur.top + cur.height).toBeLessThanOrEqual(nxt.top + 0.01)
+              expect(cur.top + cur.maxSafeHeight).toBeLessThanOrEqual(nxt.top + 0.01)
+            }
+          }
+        }
+      }
+    }
+  })
+
+  test('computeColumnLeftEdges / computeColumnRightEdges 与 resolveOverlayBlockGeometries 约束单栏与通栏右缘齐平不外溢 (合成素材)', () => {
+    const mkSingleBlock = (
+      id: string,
+      opts: {
+        kind: AnalyzedBlock['kind']
+        col: number
+        rect: PageRect
+        firstLineX?: number
+        text: string
+      }
+    ): AnalyzedBlock => ({
+      id,
+      pageNumber: 1,
+      order: 1,
+      kind: opts.kind,
+      columnIndex: opts.col,
+      fontSize: 10,
+      isBold: opts.kind === 'heading',
+      bounds: opts.rect,
+      displayBounds: opts.rect,
+      sentences: [
+        {
+          id: `${id}-s1`,
+          pageNumber: 1,
+          order: 1,
+          blockId: id,
+          blockKind: opts.kind,
+          columnIndex: opts.col,
+          text: opts.text,
+          rects: [opts.rect],
+          displayRects: [
+            opts.firstLineX !== undefined
+              ? { x: opts.firstLineX, y: opts.rect.y, width: opts.rect.width - (opts.firstLineX - opts.rect.x), height: 10 }
+              : opts.rect
+          ],
+          bounds: opts.rect,
+          displayBounds: opts.rect,
+          fragments: [],
+          crossColumn: false
+        }
+      ]
+    })
+
+    // 1. 典型 SIGMOD 单栏论文页（左右各有 72pt 宽外边距，正文区 x=72..540，合成素材）
+    const singleBlocks: AnalyzedBlock[] = [
+      mkSingleBlock('s-title', {
+        kind: 'heading',
+        col: 0,
+        rect: { x: 156, y: 60, width: 300, height: 18 },
+        text: 'Centered Single-Column Paper Title'
+      }),
+      mkSingleBlock('s-cap', {
+        kind: 'caption',
+        col: 0,
+        rect: { x: 72, y: 180, width: 468, height: 28 },
+        text: 'Fig. 1. Multi-line caption spanning exact content width.'
+      }),
+      mkSingleBlock('s-p1', {
+        kind: 'paragraph',
+        col: 0,
+        rect: { x: 72, y: 220, width: 456, height: 44 },
+        text: 'First multi-line paragraph wraps slightly before 540pt.'
+      }),
+      mkSingleBlock('s-p2', {
+        kind: 'paragraph',
+        col: 0,
+        rect: { x: 84, y: 276, width: 456, height: 11 },
+        text: 'Single-line indented paragraph in single-column paper.'
+      }),
+      mkSingleBlock('s-p3', {
+        kind: 'paragraph',
+        col: 0,
+        rect: { x: 72, y: 298, width: 468, height: 52 },
+        firstLineX: 84,
+        text: 'Multi-line indented paragraph aligns with full content margin.'
+      }),
+      mkSingleBlock('s-narrow', {
+        kind: 'paragraph',
+        col: 0,
+        rect: { x: 72, y: 362, width: 180, height: 24 },
+        text: 'Short narrow block should not falsely stretch baseWidth.'
+      })
+    ]
+
+    const singleLayout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 1,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: singleBlocks,
+      sentences: singleBlocks.flatMap(b => b.sentences),
+      filteredItems: []
+    }
+
+    const colLefts = computeColumnLeftEdges(singleLayout.blocks)
+    const colRights = computeColumnRightEdges(singleLayout.blocks, colLefts)
+    expect(colLefts.get(0)).toBe(72)
+    expect(colRights.get(0)).toBe(540)
+
+    for (const scale of [1, 1.25]) {
+      const solved = resolveOverlayBlockGeometries(singleLayout, scale, colLefts, colRights)
+      const contentRightEdgePx = 540 * scale + 2
+
+      for (const blk of singleBlocks) {
+        const g = solved.get(blk.id)!
+        // 严禁任意单栏块冲入右侧 72pt 留白区域
+        expect(g.left + g.maxSafeWidth).toBeLessThanOrEqual(contentRightEdgePx + 0.1)
+      }
+
+      const gCap = solved.get('s-cap')!
+      const gP1 = solved.get('s-p1')!
+      const gP2 = solved.get('s-p2')!
+      const gP3 = solved.get('s-p3')!
+      const gNarrow = solved.get('s-narrow')!
+
+      expect(gP2.firstLineIndentPx).toBeCloseTo(12 * scale, 1)
+      expect(gP2.left).toBeCloseTo(72 * scale - 1, 1)
+      expect(gP3.firstLineIndentPx).toBeCloseTo(12 * scale, 1)
+      expect(gP1.left + gP1.baseWidth).toBeCloseTo(gCap.left + gCap.baseWidth, 1)
+      expect(gP3.left + gP3.baseWidth).toBeCloseTo(gCap.left + gCap.baseWidth, 1)
+      expect(gNarrow.baseWidth).toBeCloseTo(180 * scale + 2, 1)
+    }
+
+    // 2. 双栏页顶部的通栏摘要/标题 (columnIndex = 0) 也不得越过右栏外边界（合成素材）
+    const mixedBlocks: AnalyzedBlock[] = [
+      mkSingleBlock('m-title', {
+        kind: 'heading',
+        col: 0,
+        rect: { x: 180, y: 60, width: 252, height: 16 },
+        text: 'Two-Column Paper Title'
+      }),
+      mkSingleBlock('m-abs', {
+        kind: 'paragraph',
+        col: 0,
+        rect: { x: 54, y: 92, width: 492, height: 36 },
+        text: 'Abstract paragraph spans full two-column content area cleanly.'
+      }),
+      mkSingleBlock('m-c1', {
+        kind: 'paragraph',
+        col: 1,
+        rect: { x: 54, y: 150, width: 231, height: 60 },
+        text: 'Left column body prose aligned cleanly before column gutter.'
+      }),
+      mkSingleBlock('m-c2', {
+        kind: 'paragraph',
+        col: 2,
+        rect: { x: 305, y: 150, width: 253, height: 60 },
+        text: 'Right column body prose defines page outer right boundary.'
+      })
+    ]
+    const mixedLayout: PageLayoutResult = {
+      pageNumber: 1,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks: mixedBlocks,
+      sentences: mixedBlocks.flatMap(b => b.sentences),
+      filteredItems: []
+    }
+    const mixedLefts = computeColumnLeftEdges(mixedLayout.blocks)
+    const mixedRights = computeColumnRightEdges(mixedLayout.blocks, mixedLefts)
+    expect(mixedRights.get(0)).toBe(558)
+    expect(mixedRights.get(1)).toBe(285)
+    expect(mixedRights.get(2)).toBe(558)
+
+    const mixedSolved = resolveOverlayBlockGeometries(mixedLayout, 1, mixedLefts, mixedRights)
+    const gAbs = mixedSolved.get('m-abs')!
+    const gC1 = mixedSolved.get('m-c1')!
+    const gC2 = mixedSolved.get('m-c2')!
+    expect(gAbs.left + gAbs.maxSafeWidth).toBeLessThanOrEqual(558 + 2.1)
+    expect(gAbs.left + gAbs.baseWidth).toBeCloseTo(gC2.left + gC2.baseWidth, 1)
+    expect(gC1.left + gC1.maxSafeWidth).toBeLessThan(305)
   })
 })

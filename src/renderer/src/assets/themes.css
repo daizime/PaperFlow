@@ -27,8 +27,45 @@ html[data-theme="sepia"] .app-header button.is-collapsed {
   color: #6b4210;
 }
 
-html[data-theme="sepia"] .app-header__divider {
-  background: #d8cba8;
+html[data-theme="sepia"] .app-header__nav-group,
+html[data-theme="sepia"] .app-header__center-group {
+  background: #efe4cb;
+  border-color: #d8c7a3;
+}
+
+html[data-theme="sepia"] .app-header .app-header__nav-group > button,
+html[data-theme="sepia"] .app-header .app-header__center-group > button {
+  background: transparent;
+  border-color: transparent;
+  color: #5b4d38;
+}
+
+html[data-theme="sepia"] .app-header .app-header__nav-group > button:hover:enabled,
+html[data-theme="sepia"] .app-header .app-header__center-group > button:hover:enabled {
+  background: rgba(140, 90, 24, 0.11);
+  border-color: transparent;
+  color: #3d3324;
+}
+
+html[data-theme="sepia"] .app-header .app-header__nav-group > button.is-collapsed,
+html[data-theme="sepia"] .app-header .app-header__center-group > button.is-active {
+  background: #fbf6eb;
+  border-color: #c9a667;
+  color: #5b380f;
+}
+
+html[data-theme="sepia"] .app-header .app-header__nav-group .app-header__onboarding-btn,
+html[data-theme="sepia"] .app-header .app-header__center-group .reader-glossary-scope-pill {
+  background: #e9d7b1;
+  border-color: transparent;
+  color: #5b380f;
+}
+
+html[data-theme="sepia"] .app-header .app-header__nav-group .app-header__onboarding-btn:hover:enabled,
+html[data-theme="sepia"] .app-header .app-header__center-group .reader-glossary-scope-pill:hover:enabled {
+  background: #e1ca98;
+  border-color: #c2a063;
+  color: #4a2d0b;
 }
 
 html[data-theme="sepia"] .brand-mark {
@@ -39,6 +76,7 @@ html[data-theme="sepia"] .brand-mark {
 html[data-theme="sepia"] .app-header__focus-pill,
 html[data-theme="sepia"] .study-companion-pane-badge {
   background: #efe0bf;
+  border-color: #c9a667;
   color: #6b4210;
 }
 
@@ -317,13 +355,51 @@ html[data-theme="dark"] .app-header button.is-collapsed {
   color: #b7d0ff;
 }
 
-html[data-theme="dark"] .app-header__divider {
-  background: #2e3748;
+html[data-theme="dark"] .app-header__nav-group,
+html[data-theme="dark"] .app-header__center-group {
+  background: #141921;
+  border-color: #2c3442;
+}
+
+html[data-theme="dark"] .app-header .app-header__nav-group > button:not(.study-color-dot),
+html[data-theme="dark"] .app-header .app-header__center-group > button:not(.study-color-dot) {
+  background: transparent;
+  border-color: transparent;
+  color: #cdd7e6;
+}
+
+html[data-theme="dark"] .app-header .app-header__nav-group > button:not(.study-color-dot):hover:enabled,
+html[data-theme="dark"] .app-header .app-header__center-group > button:not(.study-color-dot):hover:enabled {
+  background: rgba(92, 141, 240, 0.15);
+  border-color: transparent;
+  color: #edf2fb;
+}
+
+html[data-theme="dark"] .app-header .app-header__nav-group > button.is-collapsed,
+html[data-theme="dark"] .app-header .app-header__center-group > button.is-active {
+  background: #232c3b;
+  border-color: #4f77c4;
+  color: #c8dcff;
+}
+
+html[data-theme="dark"] .app-header .app-header__nav-group .app-header__onboarding-btn,
+html[data-theme="dark"] .app-header .app-header__center-group .reader-glossary-scope-pill {
+  background: #1f3150;
+  border-color: transparent;
+  color: #b7d0ff;
+}
+
+html[data-theme="dark"] .app-header .app-header__nav-group .app-header__onboarding-btn:hover:enabled,
+html[data-theme="dark"] .app-header .app-header__center-group .reader-glossary-scope-pill:hover:enabled {
+  background: #273e66;
+  border-color: #4b73bd;
+  color: #dbe8ff;
 }
 
 html[data-theme="dark"] .app-header__focus-pill,
 html[data-theme="dark"] .study-companion-pane-badge {
   background: #213455;
+  border-color: #43649e;
   color: #b7d0ff;
 }
 

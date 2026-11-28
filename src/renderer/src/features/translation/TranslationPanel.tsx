@@ -29,6 +29,7 @@ import { useTranslationViewport } from './useTranslationViewport'
 import {
   alignBlockSentences,
   computeColumnLeftEdges,
+  computeColumnRightEdges,
   getBlockTranslationSourceText,
   isTranslatableBlock,
   resolveMirrorDragSelection,
@@ -375,15 +376,8 @@ const OverlayPageContent = memo(function OverlayPageContent({
     setEditingBlock(null)
   }, [layout.pageNumber])
 
-  const columnRightByIndex = new Map<number, number>()
   const columnLeftByIndex = computeColumnLeftEdges(layout.blocks)
-  for (const b of layout.blocks) {
-    if (b.columnIndex > 0) {
-      const rightEdge = b.displayBounds.x + b.displayBounds.width
-      const prev = columnRightByIndex.get(b.columnIndex) ?? 0
-      if (rightEdge > prev) columnRightByIndex.set(b.columnIndex, rightEdge)
-    }
-  }
+  const columnRightByIndex = computeColumnRightEdges(layout.blocks, columnLeftByIndex)
   const overlayBoxGeometries = resolveOverlayBlockGeometries(
     layout,
     scale,
@@ -474,6 +468,8 @@ const OverlayPageContent = memo(function OverlayPageContent({
           if (textEl.scrollHeight >= getAvailableHeight() * 0.88) break
         }
       }
+      const fittedHeight = Math.max(baseHeightPx, Math.min(maxHeightPx, Math.ceil(textEl.scrollHeight + padY)))
+      blockEl.style.height = `${fittedHeight}px`
     }
   }, [layout, scale, translations, backdropBitmap])
 

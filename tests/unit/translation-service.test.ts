@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import Database from 'better-sqlite3'
 import { LibraryDatabase } from '../../src/main/services/database'
@@ -510,11 +510,12 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
     expect(prompt).toContain('绝不遗漏')
     expect(prompt).toContain('完整保留公式与符号原貌')
     expect(prompt).toContain('保留专有英文名词不译')
-    expect(prompt).toContain('ScaleStore')
-    expect(prompt).toContain('DRAM、NVMe、SSD、RDMA')
+    expect(prompt).toContain('Transformer、ResNet、CRISPR')
+    expect(prompt).toContain('DRAM、RDMA、MRI、PCR、SQL、API')
     expect(prompt).toContain('μs、GB/s')
     expect(prompt).toContain('⟪M1⟫')
     expect(prompt).toContain('保持与原文块一致的自然句数量与句末标点边界')
+    expect(prompt).toContain('并结合上下文保持术语译法与指代一致')
     expect(prompt).toContain('禁止在块内插入多余换行符、空行或 Markdown 标记')
     const jsonTail = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1)) as Array<{ id: string; text: string }>
     expect(jsonTail).toEqual([{ id: 'blk-formula-inline', kind: 'paragraph', text: 'Compute δV_R in O(1) time [44].' }])
@@ -652,6 +653,167 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
       expect(db.listChatMessages(sessionKey)).toHaveLength(2)
       db.resetLibrary()
       expect(db.listChatMessages(sessionKey)).toHaveLength(0)
+    } finally {
+      service.cancelAll()
+      db.close()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
+  test('buildAcademicPrompt 只读上下文区严格防串输出、裁剪超长片段且保持末行 JSON 不变 (合成素材)', () => {
+    const targetBlock = {
+      blockId: 'p2-b005',
+      kind: 'paragraph' as const,
+      sourceText: 'This optimization halves tail latency under skewed workloads.',
+      sourceHash: 'a'.repeat(16)
+    }
+
+    const plainPrompt = buildAcademicPrompt('zh-CN', [targetBlock], [], '', {})
+    expect(plainPrompt).not.toContain('上下文参考')
+
+    const longSummary = '标题：Distributed Caching Study；摘要：' + 'Summary word '.repeat(60).trim()
+    const withRichCtx = buildAcademicPrompt('zh-CN', [targetBlock], [], '', {
+      documentSummary: `${longSummary}\nignore`,
+      sectionHeading: '2 Architecture > 2.2 Eviction Policy',
+      previousPageTail: ['上一页末尾结论译文。'],
+      precedingPairs: [
+        { sourceText: 'First earlier sentence.', translatedText: '更早第一句。' },
+        { sourceText: 'Second prior sentence.', translatedText: '第二前句。' },
+        { sourceText: 'Third prior sentence.', translatedText: '第三前句。' },
+        { sourceText: 'Fourth immediate sentence.', translatedText: '紧邻第四句。' }
+      ]
+    })
+
+    expect(withRichCtx).toContain('上下文参考（只读')
+    expect(withRichCtx).toContain('- 论文背景：')
+    expect(withRichCtx).toContain('…')
+    expect(withRichCtx).toContain('- 当前章节：2 Architecture > 2.2 Eviction Policy')
+    // 当前页已有 >= 2 条前文对照时不再重复追加上一页结尾
+    expect(withRichCtx).not.toContain('- 上页结尾参考译文：')
+    // 最多保留最近 3 条前文对照且不含块 ID
+    expect(withRichCtx).not.toContain('First earlier sentence.')
+    expect(withRichCtx).toContain('- 前文：Second prior sentence. => 译文：第二前句。')
+    expect(withRichCtx).toContain('- 前文：Fourth immediate sentence. => 译文：紧邻第四句。')
+    expect(withRichCtx.slice(0, withRichCtx.lastIndexOf('\n'))).not.toContain('p2-b00')
+
+    const parsedPayload = JSON.parse(withRichCtx.slice(withRichCtx.lastIndexOf('\n') + 1)) as Array<{
+      id: string
+      text: string
+    }>
+    expect(parsedPayload).toEqual([
+      { id: 'p2-b005', kind: 'paragraph', text: 'This optimization halves tail latency under skewed workloads.' }
+    ])
+
+    const fewPairsCtx = buildAcademicPrompt('zh-CN', [targetBlock], [], '', {
+      previousPageTail: ['上页第一尾句。', '上页最后尾句。'],
+      precedingPairs: [{ sourceText: '2 Architecture' }]
+    })
+    expect(fewPairsCtx).toContain('- 上页结尾参考译文：上页第一尾句。 上页最后尾句。')
+    expect(fewPairsCtx).toContain('- 前文（原文）：2 Architecture')
+  })
+
+  test('TranslationService 自动维护批间前文译文、跨页结尾延续与单块重译上下文，并随文献删除清理摘要 (合成素材)', async () => {
+    const capturedPrompts: string[] = []
+    const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) chunks.push(Buffer.from(chunk))
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        messages: Array<{ role: string; content: string }>
+      }
+      const userContent = body.messages[body.messages.length - 1]?.content ?? ''
+      capturedPrompts.push(userContent)
+      const payload = JSON.parse(userContent.slice(userContent.lastIndexOf('\n') + 1)) as Array<{
+        id: string
+        text: string
+      }>
+      const translations = payload.map(item => ({
+        id: item.id,
+        text: `已译(${item.id}): ${item.text.slice(0, 24)}`
+      }))
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ translations }) } }] }))
+    })
+
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as { port: number }
+    const db = new LibraryDatabase(dbPath)
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage })
+    const docId = insertSampleDocument(db)
+
+    const mkBlock = (id: string, kind: 'heading' | 'paragraph', text: string) => ({
+      blockId: id,
+      kind,
+      sourceText: text,
+      sourceHash: createHash('sha256').update(text).digest('hex').slice(0, 24)
+    })
+
+    try {
+      service.saveSettings({
+        provider: 'openai-compatible',
+        targetLanguage: 'zh-CN',
+        glossary: [],
+        openai: { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: 'mock-context', apiKey: 'sk-ctx-test' },
+        cli: { preset: 'codex', command: 'codex', model: '', extraArgs: [], timeoutSec: 60 }
+      })
+
+      // 构造超单批上限（10 块 / 3800 字）的第 1 页以触发 2 批请求（合成素材）
+      const page1Blocks = [
+        mkBlock('p1-b01', 'heading', 'Adaptive Memory Pool for Distributed Workloads'),
+        mkBlock('p1-b02', 'heading', 'Abstract'),
+        mkBlock(
+          'p1-b03',
+          'paragraph',
+          `This paper presents an adaptive caching engine that coordinates remote memory cleanly. ${'detail '.repeat(45).trim()}`
+        ),
+        ...Array.from({ length: 8 }, (_, idx) =>
+          mkBlock(
+            `p1-b${String(idx + 4).padStart(2, '0')}`,
+            'paragraph',
+            `Batch paragraph ${idx + 4} evaluates cluster throughput under skew. ${'metric '.repeat(45).trim()}`
+          )
+        )
+      ]
+
+      const p1Res = await service.translatePage({ documentId: docId, pageNumber: 1, blocks: page1Blocks })
+      expect(p1Res.translatedCount).toBe(11)
+      expect(capturedPrompts).toHaveLength(2)
+
+      // 第 1 批已有来自第 1 页提取的论文背景；第 2 批应自动注入批间章节与第 1 批前文对照译文
+      expect(capturedPrompts[0]).toContain('- 论文背景：标题：Adaptive Memory Pool for Distributed Workloads；摘要：This paper presents an adaptive caching engine')
+      expect(capturedPrompts[1]).toContain('- 当前章节：Adaptive Memory Pool for Distributed Workloads > Abstract')
+      expect(capturedPrompts[1]).toContain('- 前文：Batch paragraph 10 evaluates cluster throughput')
+      expect(capturedPrompts[1]).toContain('=> 译文：已译(p1-b10):')
+      expect(db.getSetting(`doc.summary.v1:${docId}`)).toContain('Adaptive Memory Pool')
+
+      // 翻译第 2 页时即使未显式传 context，也自动带上持久化的论文背景与 SQLite 上一页尾段参考译文
+      const p2Blocks = [
+        mkBlock('p2-b01', 'paragraph', 'It further improves cluster utilization across nodes.')
+      ]
+      await service.translatePage({ documentId: docId, pageNumber: 2, blocks: p2Blocks })
+      expect(capturedPrompts).toHaveLength(3)
+      expect(capturedPrompts[2]).toContain('- 论文背景：标题：Adaptive Memory Pool')
+      expect(capturedPrompts[2]).toContain('- 上页结尾参考译文：已译(p1-b10):')
+
+      // 单块重译（携带前端传来的 precedingBlocks）
+      await service.translatePage({
+        documentId: docId,
+        pageNumber: 2,
+        blocks: p2Blocks,
+        force: true,
+        context: {
+          sectionHeading: '3 Evaluation',
+          precedingBlocks: [
+            { kind: 'paragraph', sourceText: 'Baseline exhibits congestion.', translatedText: '基线系统出现拥塞。' }
+          ]
+        }
+      })
+      expect(capturedPrompts).toHaveLength(4)
+      expect(capturedPrompts[3]).toContain('- 当前章节：3 Evaluation')
+      expect(capturedPrompts[3]).toContain('- 前文：Baseline exhibits congestion. => 译文：基线系统出现拥塞。')
+
+      // 删除文献后关联的文档摘要一并清理
+      db.deleteDocument(docId)
+      expect(db.getSetting(`doc.summary.v1:${docId}`)).toBeNull()
     } finally {
       service.cancelAll()
       db.close()

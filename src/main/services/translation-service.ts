@@ -43,7 +43,7 @@ import {
   updateBlockTranslationInputSchema
 } from '../../shared/schemas'
 import { buildAcademicSkillPrompt } from './academic-skills'
-import type { LibraryDatabase } from './database'
+import { DOC_SUMMARY_SETTING_PREFIX, type LibraryDatabase } from './database'
 import { formatSlideDeckMarkdown, parseSlideDeckJson } from './pptx-builder'
 import { readOpenAiStreamOrJsonWithUsage } from './openai-stream'
 import { resolveEffectiveTranslationScope } from './research-profile'
@@ -80,8 +80,8 @@ interface StoredTranslationConfig {
 }
 
 const SETTINGS_KEY = 'translation.config.v1'
-const BATCH_MAX_CHARS = 2400
-const BATCH_MAX_ITEMS = 8
+const BATCH_MAX_CHARS = 3800
+const BATCH_MAX_ITEMS = 10
 
 const DEFAULT_CONFIG: StoredTranslationConfig = {
   provider: 'openai-compatible',
@@ -673,11 +673,74 @@ export function hasAllExpectedFormulaPlaceholders(sourceText: string, translated
   return matchesFormulaPlaceholders(sourceText, translatedText)
 }
 
+export interface AcademicPromptContext {
+  documentSummary?: string
+  sectionHeading?: string
+  previousPageTail?: readonly string[]
+  precedingPairs?: ReadonlyArray<{ sourceText: string; translatedText?: string }>
+}
+
+function sanitizePromptSnippet(raw: string, maxChars: number): string {
+  let clean = ''
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i)
+    clean += code < 32 || code === 127 ? ' ' : raw[i]
+  }
+  const normalized = clean.replace(/\s+/g, ' ').trim()
+  if (!normalized || normalized.length <= maxChars) return normalized
+  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`
+}
+
+function buildReadOnlyContextLines(promptContext?: AcademicPromptContext): string[] {
+  if (!promptContext) return []
+  const items: string[] = []
+  const docSummary = sanitizePromptSnippet(promptContext.documentSummary ?? '', 500)
+  const secHeading = sanitizePromptSnippet(promptContext.sectionHeading ?? '', 180)
+  const prevTail = (promptContext.previousPageTail ?? [])
+    .map(t => sanitizePromptSnippet(t, 180))
+    .filter(Boolean)
+  const pairs = (promptContext.precedingPairs ?? [])
+    .map(p => ({
+      sourceText: sanitizePromptSnippet(p.sourceText, 240),
+      translatedText: p.translatedText ? sanitizePromptSnippet(p.translatedText, 240) : ''
+    }))
+    .filter(p => p.sourceText.length > 0)
+    .slice(-3)
+
+  if (docSummary) items.push(`- 论文背景：${docSummary}`)
+  if (secHeading) items.push(`- 当前章节：${secHeading}`)
+  if (prevTail.length > 0 && pairs.length < 2) {
+    const joinedTail = sanitizePromptSnippet(prevTail.slice(-2).join(' '), 360)
+    if (joinedTail) items.push(`- 上页结尾参考译文：${joinedTail}`)
+  }
+  if (pairs.length > 0) {
+    let budget = 900
+    const pairLines: string[] = []
+    for (let i = pairs.length - 1; i >= 0; i -= 1) {
+      const pair = pairs[i]
+      const formatted = pair.translatedText
+        ? `- 前文：${pair.sourceText} => 译文：${pair.translatedText}`
+        : `- 前文（原文）：${pair.sourceText}`
+      if (pairLines.length > 0 && formatted.length > budget) break
+      pairLines.unshift(formatted.length > budget ? `${formatted.slice(0, budget - 1)}…` : formatted)
+      budget -= formatted.length
+    }
+    items.push(...pairLines)
+  }
+
+  if (items.length === 0) return []
+  return [
+    '上下文参考（只读，用于理解代词指代、主题语境并保持术语译法前后一致；严禁翻译此区内容或将其输出到 translations 数组中）：',
+    ...items
+  ]
+}
+
 export function buildAcademicPrompt(
   targetLanguage: string,
   blocks: readonly TranslationBlockInput[],
   glossary: readonly GlossaryEntry[] = [],
-  researchContext = ''
+  researchContext = '',
+  promptContext?: AcademicPromptContext
 ): string {
   const targetName = languageLabel(targetLanguage)
   const payload = blocks.map(b => ({ id: b.blockId, kind: b.kind, text: b.sourceText }))
@@ -694,17 +757,19 @@ export function buildAcademicPrompt(
           ...glossary.slice(0, 200).map(item => `- ${item.source} => ${item.target}`)
         ]
       : []
+  const readOnlyContextLines = buildReadOnlyContextLines(promptContext)
   return [
     `你是一位学术论文翻译助手。请将输入 JSON 数组中的英文论文文本准确翻译为${targetName}。`,
     '翻译要求：',
     '1. 忠实严谨、绝不遗漏输入中的任何词句、编号、注脚或限定语，也不擅自扩写或删改。',
     '2. 完整保留公式与符号原貌：若原文包含 ⟪M1⟫、⟪M2⟫ 等行内公式占位符，必须在译文对应语序位置原样保留每一个占位符，严禁删除、合并或改写编号；其余未替换为占位符的所有行内公式、数学符号、变量记号、希腊字母（如 α、δ、Θ）、上下标、运算符、复杂度记号（如 O(n log n)）、计量单位与硬件规格（如 μs、GB/s、$/TB、4 KB、4×）、参考文献编号（如 [1]、(Smith et al., 2025)）及图表/章节编号（如 Fig. 1、Table 2、Sect. 4）必须直接保留原文写法，切勿汉化符号、展开单位或改写为 $...$ / LaTeX 代码。',
-    '3. 保留专有英文名词不译：除非下方参考术语表明确给出了对应译名，下列专有名称一律直接保留英文原文，禁止意译、音译或强行汉化——包括系统/框架/模型/算法/协议/数据集/基准测试/软硬件产品名称（如 ScaleStore、Microsoft Hekaton、FaRM、NAM-DB、Transformer、ResNet、ImageNet）、技术缩写与标准规范（如 DRAM、NVMe、SSD、RDMA、IB EDR 4x、OLTP、CPU、GPU、SQL、API）、作者人名与高校/研究机构名、会议与期刊名称（如 SIGMOD、VLDB、ACM、IEEE）、代码标识符/状态名/函数名以及 URL/DOI/邮箱。',
-    '4. 尽量保持与原文块一致的自然句数量与句末标点边界，不随意合句或拆句，便于逐句对照高亮。',
+    '3. 保留专有英文名词不译：除非参考术语表另有指定，系统/模型/算法/协议/数据集/软件/实验方法专名（如 Transformer、ResNet、CRISPR）、技术缩写与标准规范（如 DRAM、RDMA、MRI、PCR、SQL、API）、作者与机构名、会议期刊名（如 ACM、IEEE、Nature）、代码标识符以及 URL/DOI/邮箱一律保留英文原文，禁止意译或音译。',
+    '4. 尽量保持与原文块一致的自然句数量与句末标点边界，不随意合句或拆句，并结合上下文保持术语译法与指代一致，便于逐句对照高亮。',
     '5. 紧凑单段纯文本排版：每个译文块仅输出单段连续纯文本，禁止在块内插入多余换行符、空行或 Markdown 标记（如 **粗体**、`代码`、# 标题）。',
     '6. 仅返回严格合法的 JSON 对象，格式为 {"translations":[{"id":"原id","text":"译文"}]}，确保输入中的每个 id 都有对应译文，禁止附加解释或无关文字。',
     ...contextLines,
     ...glossaryLines,
+    ...readOnlyContextLines,
     '',
     JSON.stringify(payload)
   ].join('\n')
@@ -1798,6 +1863,106 @@ export class TranslationService {
       abort: () => controller.abort()
     })
 
+    const summaryKey = `${DOC_SUMMARY_SETTING_PREFIX}${validated.documentId}`
+    let documentSummary = sanitizePromptSnippet(validated.context?.documentSummary ?? '', 500)
+    if (documentSummary) {
+      this.database.setSetting(summaryKey, documentSummary)
+    } else {
+      documentSummary = sanitizePromptSnippet(this.database.getSetting(summaryKey) ?? '', 500)
+      if (!documentSummary && validated.pageNumber === 1) {
+        const p1Title =
+          validated.blocks.find(b => b.kind === 'heading')?.sourceText ?? validated.blocks[0]?.sourceText ?? ''
+        const p1AbstractIdx = validated.blocks.findIndex(
+          b => b.kind === 'heading' && /^abstract\b/i.test(b.sourceText.trim())
+        )
+        const p1Para =
+          (p1AbstractIdx >= 0
+            ? validated.blocks.slice(p1AbstractIdx + 1).find(b => b.kind === 'paragraph')
+            : undefined) ?? validated.blocks.find(b => b.kind === 'paragraph' && b.sourceText.length >= 40)
+        const summaryParts = [
+          p1Title ? `标题：${sanitizePromptSnippet(p1Title, 180)}` : '',
+          p1Para && p1Para.sourceText !== p1Title ? `摘要：${sanitizePromptSnippet(p1Para.sourceText, 280)}` : ''
+        ].filter(Boolean)
+        documentSummary = sanitizePromptSnippet(summaryParts.join('；'), 500)
+        if (documentSummary) {
+          this.database.setSetting(summaryKey, documentSummary)
+        }
+      }
+      if (!documentSummary) {
+        const docMeta = this.database.getDocument(validated.documentId)
+        if (docMeta?.displayTitle) {
+          documentSummary = `标题：${sanitizePromptSnippet(docMeta.displayTitle, 180)}`
+        }
+      }
+    }
+
+    let previousPageTail: string[] = []
+    if (
+      validated.pageNumber > 1 &&
+      !(validated.context?.precedingBlocks && validated.context.precedingBlocks.length > 0)
+    ) {
+      const prevRows = this.database.getPageTranslations(
+        validated.documentId,
+        validated.pageNumber - 1,
+        config.targetLanguage
+      )
+      const nonCaptionPrev = prevRows.filter(
+        r => r.translatedText.trim().length > 0 && !r.blockId.includes('-caption-')
+      )
+      const tailPool = nonCaptionPrev.length > 0 ? nonCaptionPrev : prevRows.filter(r => r.translatedText.trim().length > 0)
+      previousPageTail = tailPool
+        .slice(-2)
+        .map(r => sanitizePromptSnippet(r.translatedText, 180))
+        .filter(Boolean)
+    }
+
+    const knownTranslations = new Map<string, string>()
+    for (const row of existingRows) {
+      if (row.translatedText.trim()) {
+        knownTranslations.set(row.blockId, row.translatedText.trim())
+      }
+    }
+    const blockIndexById = new Map<string, number>()
+    validated.blocks.forEach((b, idx) => blockIndexById.set(b.blockId, idx))
+
+    const buildBatchPromptContext = (targetBatch: readonly TranslationBlockInput[]): AcademicPromptContext => {
+      const firstIdx = blockIndexById.get(targetBatch[0]?.blockId ?? '') ?? 0
+      const precedingAll = firstIdx > 0 ? validated.blocks.slice(0, firstIdx) : []
+      const inPageHeadings = precedingAll
+        .filter(b => b.kind === 'heading')
+        .map(b => sanitizePromptSnippet(b.sourceText, 120))
+        .filter(Boolean)
+      const sectionHeading =
+        inPageHeadings.length > 0
+          ? sanitizePromptSnippet(inPageHeadings.slice(-2).join(' > '), 180)
+          : sanitizePromptSnippet(validated.context?.sectionHeading ?? '', 180)
+
+      const nonCaptions = precedingAll.filter(b => b.kind !== 'caption')
+      const inPagePool = nonCaptions.length > 0 ? nonCaptions : precedingAll
+      let precedingPairs: Array<{ sourceText: string; translatedText?: string }> = inPagePool.slice(-3).map(b => ({
+        sourceText: b.sourceText,
+        translatedText: knownTranslations.get(b.blockId)
+      }))
+
+      if (
+        precedingPairs.length === 0 &&
+        validated.context?.precedingBlocks &&
+        validated.context.precedingBlocks.length > 0
+      ) {
+        precedingPairs = validated.context.precedingBlocks.slice(-3).map(entry => ({
+          sourceText: entry.sourceText,
+          translatedText: entry.translatedText
+        }))
+      }
+
+      return {
+        ...(documentSummary ? { documentSummary } : {}),
+        ...(sectionHeading ? { sectionHeading } : {}),
+        ...(previousPageTail.length > 0 ? { previousPageTail } : {}),
+        ...(precedingPairs.length > 0 ? { precedingPairs } : {})
+      }
+    }
+
     let translatedCount = 0
     let pageUsage: TokenUsageDelta | undefined
     let apiRequests = 0
@@ -1806,7 +1971,13 @@ export class TranslationService {
       for (const batch of batches) {
         if (controller.signal.aborted) throw new Error('翻译任务已取消。')
 
-        const prompt = buildAcademicPrompt(config.targetLanguage, batch, scope.glossary, scope.researchContext)
+        const prompt = buildAcademicPrompt(
+          config.targetLanguage,
+          batch,
+          scope.glossary,
+          scope.researchContext,
+          buildBatchPromptContext(batch)
+        )
         const { output, usage: batchUsage } = await this.runModelPrompt(config, apiKey, prompt, controller.signal)
         if (config.provider === 'openai-compatible') apiRequests += 1
         pageUsage = mergeTokenUsage(pageUsage, batchUsage)
@@ -1817,6 +1988,7 @@ export class TranslationService {
         for (const block of batch) {
           const text = mapped.get(block.blockId)
           if (text && hasAllExpectedFormulaPlaceholders(block.sourceText, text)) {
+            knownTranslations.set(block.blockId, text)
             completedBatch.push({ blockId: block.blockId, sourceHash: block.sourceHash, translatedText: text })
           } else {
             missing.push(block)
@@ -1830,7 +2002,8 @@ export class TranslationService {
             config.targetLanguage,
             [single],
             scope.glossary,
-            scope.researchContext
+            scope.researchContext,
+            buildBatchPromptContext([single])
           )
           const { output: singleOutput, usage: singleUsage } = await this.runModelPrompt(
             config,
@@ -1845,6 +2018,7 @@ export class TranslationService {
           if (!retriedText || !hasAllExpectedFormulaPlaceholders(single.sourceText, retriedText)) {
             throw new Error(`块 ${single.blockId} 译文解析失败或公式标记不完整，未保存该批译文。请重试或切换模型。`)
           }
+          knownTranslations.set(single.blockId, retriedText)
           completedBatch.push({
             blockId: single.blockId,
             sourceHash: single.sourceHash,

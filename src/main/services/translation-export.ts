@@ -172,6 +172,7 @@ export function buildTranslationExportHtml(
     font-weight: 700;
     color: #162235;
     margin: 10px 0 4px;
+    text-align: left;
   }
   .block--caption .zh {
     font-size: 9.2pt;
@@ -179,8 +180,11 @@ export function buildTranslationExportHtml(
   }
   .zh {
     margin: 0;
-    white-space: pre-wrap;
+    min-width: 0;
+    overflow-wrap: break-word;
+    white-space: normal;
     text-align: justify;
+    text-align-last: left;
   }
   .block.is-bilingual {
     display: grid;
@@ -195,7 +199,11 @@ export function buildTranslationExportHtml(
     font-size: 9pt;
     line-height: 1.52;
     color: #4b5b73;
+    min-width: 0;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
+    text-align: justify;
+    text-align-last: left;
   }
   .zh.is-pending {
     color: #8b98ab;

@@ -6,7 +6,7 @@ import {
   exportFolderPdfsArgsSchema, getDocumentTranslationScopeArgsSchema, importFolderArgsSchema,
   importPdfBytesArgsSchema, listChatMessagesArgsSchema, noArgsSchema, pageCountArgsSchema,
   readerStateSchema, renameDocumentArgsSchema, saveResearchProfileArgsSchema,
-  sendAiChatArgsSchema, updateDocumentMetaArgsSchema, updateFolderArgsSchema
+  sendAiChatArgsSchema, setWindowThemeArgsSchema, updateDocumentMetaArgsSchema, updateFolderArgsSchema
 } from '../../src/shared/schemas'
 
 describe('IPC 参数验证', () => {
@@ -229,5 +229,14 @@ describe('IPC 参数验证', () => {
         '2405.12345'
       )
     ).toBeNull()
+  })
+
+  it('窗口主题切换 IPC 参数校验合法主题并拒绝越界输入', () => {
+    for (const theme of ['light', 'sepia', 'dark']) {
+      expect(setWindowThemeArgsSchema.safeParse([theme]).success).toBe(true)
+    }
+    for (const bad of [[], ['midnight'], [1], ['dark', 'extra']]) {
+      expect(setWindowThemeArgsSchema.safeParse(bad).success).toBe(false)
+    }
   })
 })

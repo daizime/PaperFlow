@@ -780,39 +780,20 @@ export function LibraryPanel({
                 ★
               </span>
             ) : null}
-            {paneBadge ? <span className="library-tree-doc-pane">{paneBadge}</span> : null}
-            {translatingPagesByDocId?.[doc.id] ? (
-              <span
-                className="library-translating-pill"
-                data-testid={`library-doc-translating-${doc.id}`}
-                title={`正在后台翻译第 ${translatingPagesByDocId[doc.id]} 页`}
-              >
-                译中
-              </span>
-            ) : null}
           </button>
-          {onUpdateMeta ? (
-            (() => {
-              const currentStatus: ReadingStatus = doc.readingStatus ?? 'unread'
-              const info = READING_STATUS_META[currentStatus]
-              return (
-                <button
-                  type="button"
-                  className={`library-status-pill is-${currentStatus}`}
-                  data-testid={`doc-status-btn-${doc.id}`}
-                  data-reading-status={currentStatus}
-                  title={`阅读状态：${info.label}（点击切换为「${READING_STATUS_META[info.next].label}」）`}
-                  aria-label={`切换 ${doc.originalFilename} 阅读状态，当前 ${info.label}`}
-                  disabled={importing || isBusy}
-                  onClick={event => {
-                    event.stopPropagation()
-                    void onUpdateMeta({ documentId: doc.id, readingStatus: info.next })
-                  }}
+          {paneBadge || translatingPagesByDocId?.[doc.id] ? (
+            <div className="library-tree-doc-meta">
+              {paneBadge ? <span className="library-tree-doc-pane">{paneBadge}</span> : null}
+              {translatingPagesByDocId?.[doc.id] ? (
+                <span
+                  className="library-translating-pill"
+                  data-testid={`library-doc-translating-${doc.id}`}
+                  title={`正在后台翻译第 ${translatingPagesByDocId[doc.id]} 页`}
                 >
-                  {info.label}
-                </button>
-              )
-            })()
+                  译中
+                </span>
+              ) : null}
+            </div>
           ) : null}
           <div className="library-tree-doc-actions" role="group" aria-label="树中文献操作">
             {onOpenInSplit ? (
@@ -890,6 +871,29 @@ export function LibraryPanel({
               ×
             </button>
           </div>
+          {onUpdateMeta ? (
+            (() => {
+              const currentStatus: ReadingStatus = doc.readingStatus ?? 'unread'
+              const info = READING_STATUS_META[currentStatus]
+              return (
+                <button
+                  type="button"
+                  className={`library-status-pill is-${currentStatus}`}
+                  data-testid={`doc-status-btn-${doc.id}`}
+                  data-reading-status={currentStatus}
+                  title={`阅读状态：${info.label}（点击切换为「${READING_STATUS_META[info.next].label}」）`}
+                  aria-label={`切换 ${doc.originalFilename} 阅读状态，当前 ${info.label}`}
+                  disabled={importing || isBusy}
+                  onClick={event => {
+                    event.stopPropagation()
+                    void onUpdateMeta({ documentId: doc.id, readingStatus: info.next })
+                  }}
+                >
+                  {info.label}
+                </button>
+              )
+            })()
+          ) : null}
         </div>
         {isMoving ? renderMoveFolderPanel(doc, true) : null}
         {isConfirmingDelete ? (

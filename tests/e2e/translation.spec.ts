@@ -771,8 +771,14 @@ test('支持余额接口时翻译后自动刷新顶栏与 5 秒完成浮窗、�
     await expect(page.getByRole('dialog')).toHaveCount(0)
 
     const engineBtn = page.getByTestId('header-engine-btn')
-    await expect(engineBtn).toContainText('API · deepseek-chat · 余 ¥18.42')
+    await expect(engineBtn).toContainText('API · deepseek-chat')
+    await expect(engineBtn).not.toContainText('余 ¥18.42')
     await expect(engineBtn).toHaveAttribute('data-billing-tone', 'ok')
+    await engineBtn.hover()
+    const enginePopover = page.getByTestId('header-engine-popover')
+    await expect(enginePopover).toBeVisible()
+    await expect(enginePopover).toContainText('实时余额 ¥18.42')
+    await page.mouse.move(0, 0)
 
     await page.getByRole('button', { name: '翻译本页', exact: true }).click()
     const usageToast = page.getByTestId('translation-usage-toast')

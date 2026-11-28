@@ -119,6 +119,7 @@ import {
   hitTestPageSentence,
   matchSelectionRegionsToSentences
 } from './features/translation/sentence-alignment'
+import { buildPageTranslationContext } from './features/translation/translation-context'
 import {
   buildPageTranslationInputs,
   buildSingleBlockTranslationInput,
@@ -1331,6 +1332,7 @@ export default function App(): React.JSX.Element {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem(THEME_STORAGE_KEY, theme)
+    void window.paperflow?.setWindowTheme?.(theme).catch(() => {})
   }, [theme])
 
   const updateLocalProgress = library.updateLocalProgress
@@ -1442,11 +1444,17 @@ export default function App(): React.JSX.Element {
       setTranslationError(null)
       setDocTranslatingPage(targetDocumentId, pageNumber)
       try {
+        const context = buildPageTranslationContext(
+          layouts,
+          pageNumber,
+          translationsByPageRef.current
+        )
         const result = await window.paperflow.translatePage({
           documentId: targetDocumentId,
           pageNumber,
           blocks,
-          force
+          force,
+          ...(context ? { context } : {})
         })
         void handleTranslationCompleted(targetDocumentId, result)
         if (selectedDocumentIdRef.current !== targetDocumentId) return
@@ -1560,11 +1568,18 @@ export default function App(): React.JSX.Element {
         return next
       })
       try {
+        const context = buildPageTranslationContext(
+          layoutsRef.current,
+          pageNumber,
+          translationsByPageRef.current,
+          blockKey
+        )
         const result = await window.paperflow.translatePage({
           documentId: targetDocumentId,
           pageNumber,
           blocks: [input],
-          force: true
+          force: true,
+          ...(context ? { context } : {})
         })
         void handleTranslationCompleted(targetDocumentId, result)
         if (selectedDocumentIdRef.current !== targetDocumentId) return
@@ -1630,6 +1645,12 @@ export default function App(): React.JSX.Element {
       let skippedFromPage: number | null = null
       let bgPdfHandle: { promise: Promise<PDFDocumentProxy>; destroy(): Promise<void> } | null = null
       let bgPdfDoc: PDFDocumentProxy | null = null
+      const loopLayouts = new Map<number, PageLayoutResult>(
+        selectedDocumentIdRef.current === targetDocumentId ? layoutsRef.current : []
+      )
+      const loopTranslations = new Map<number, Map<string, TranslatedBlockRecord>>(
+        selectedDocumentIdRef.current === targetDocumentId ? translationsByPageRef.current : []
+      )
 
       try {
         for (let idx = 0; idx < pagePlan.length; idx += 1) {
@@ -1664,6 +1685,7 @@ export default function App(): React.JSX.Element {
               layout = analyzedBg
             }
           }
+          if (layout) loopLayouts.set(pageNumber, layout)
           if (token.aborted) break
 
           let allBlocks = buildPageTranslationInputs(layout)
@@ -1699,18 +1721,24 @@ export default function App(): React.JSX.Element {
               }
             }
           }
+          if (pageMap) loopTranslations.set(pageNumber, pageMap)
 
           const allCached = allBlocks.every(block =>
             isUsableTranslation(pageMap?.get(block.blockId), block.sourceHash, block.sourceText)
           )
           if (!allCached) {
             setDocTranslatingPage(targetDocumentId, pageNumber)
+            const context = buildPageTranslationContext(loopLayouts, pageNumber, loopTranslations)
             const result = await window.paperflow.translatePage({
               documentId: targetDocumentId,
               pageNumber,
               blocks: allBlocks,
-              force: false
+              force: false,
+              ...(context ? { context } : {})
             })
+            const updatedPageMap = new Map(loopTranslations.get(pageNumber) ?? [])
+            for (const row of result.items) updatedPageMap.set(row.blockId, row)
+            loopTranslations.set(pageNumber, updatedPageMap)
             if (result.translatedCount > 0) {
               batchTranslatedPages += 1
               batchTranslatedBlocks += result.translatedCount
@@ -1921,12 +1949,18 @@ export default function App(): React.JSX.Element {
         )
         if (allCached || cancelled || selectedDocumentIdRef.current !== selectedDocumentId) return
 
+        const context = buildPageTranslationContext(
+          layoutsRef.current,
+          nextPage,
+          translationsByPageRef.current
+        )
         const result = await window.paperflow
           .translatePage({
             documentId: selectedDocumentId,
             pageNumber: nextPage,
             blocks,
-            force: false
+            force: false,
+            ...(context ? { context } : {})
           })
           .catch(() => null)
         if (!result || cancelled || selectedDocumentIdRef.current !== selectedDocumentId) return
@@ -2086,6 +2120,14 @@ export default function App(): React.JSX.Element {
         let totalTokens = 0
         let latencyMs = 0
         let lastResult: TranslatePageResult | null = null
+        const preLayouts = new Map<number, PageLayoutResult>(
+          selectedDocumentIdRef.current === targetDocId ? layoutsRef.current : []
+        )
+        if (page1Layout) preLayouts.set(1, page1Layout)
+        if (page2Layout) preLayouts.set(2, page2Layout)
+        const preTranslations = new Map<number, Map<string, TranslatedBlockRecord>>(
+          selectedDocumentIdRef.current === targetDocId ? translationsByPageRef.current : []
+        )
 
         for (let idx = 0; idx < targetPages.length; idx += 1) {
           const pageNumber = targetPages[idx]
@@ -2121,6 +2163,7 @@ export default function App(): React.JSX.Element {
             layout = await analyzeStandalonePdfPage(bgPdfDoc, pageNumber)
           }
           if (ownedToken.aborted || !stillRequested() || !layout) continue
+          preLayouts.set(pageNumber, layout)
 
           const allBlocks = buildPageTranslationInputs(layout)
           if (allBlocks.length === 0) continue
@@ -2142,6 +2185,7 @@ export default function App(): React.JSX.Element {
               }
             }
           }
+          if (pageMap) preTranslations.set(pageNumber, pageMap)
 
           const allCached = allBlocks.every(block =>
             isUsableTranslation(pageMap?.get(block.blockId), block.sourceHash, block.sourceText)
@@ -2149,12 +2193,17 @@ export default function App(): React.JSX.Element {
           if (allCached || ownedToken.aborted || !stillRequested()) continue
 
           setDocTranslatingPage(targetDocId, pageNumber)
+          const context = buildPageTranslationContext(preLayouts, pageNumber, preTranslations)
           const result = await window.paperflow.translatePage({
             documentId: targetDocId,
             pageNumber,
             blocks: allBlocks,
-            force: false
+            force: false,
+            ...(context ? { context } : {})
           })
+          const updatedPreMap = new Map(preTranslations.get(pageNumber) ?? [])
+          for (const row of result.items) updatedPreMap.set(row.blockId, row)
+          preTranslations.set(pageNumber, updatedPreMap)
           if (result.translatedCount > 0) {
             translatedPages += 1
             translatedBlocks += result.translatedCount

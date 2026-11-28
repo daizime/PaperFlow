@@ -355,7 +355,7 @@ html[data-theme='dark'] .reader-glossary-scope-pill {
 }
 
 .translation-overlay-block.is-translated {
-  padding: 0 2px;
+  padding: 0 1px;
   background-color: var(--overlay-bg, #ffffff);
   color: #111827;
   font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
@@ -632,18 +632,21 @@ html[data-theme='dark'] .translation-overlay-block.is-translated ::selection {
   margin: 0;
   line-height: 1.36;
   overflow-wrap: break-word;
-  white-space: pre-wrap;
+  white-space: normal;
 }
 
 .translation-overlay-block--paragraph .translation-overlay-block__text,
-.translation-overlay-block--list-item .translation-overlay-block__text {
+.translation-overlay-block--list-item .translation-overlay-block__text,
+.translation-overlay-block--caption .translation-overlay-block__text {
   text-align: justify;
+  text-align-last: left;
   text-justify: inter-ideograph;
 }
 
 .translation-overlay-block--heading .translation-overlay-block__text {
   font-weight: 650;
   color: #111827;
+  text-align: left;
 }
 
 .translation-overlay-block--caption .translation-overlay-block__text {

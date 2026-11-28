@@ -42,6 +42,8 @@ import {
   updateFolderInputSchema
 } from '../../shared/schemas'
 
+export const DOC_SUMMARY_SETTING_PREFIX = 'doc.summary.v1:'
+
 export interface StoredDocumentRecord extends DocumentRecord {
   sha256: string
   storedFilename: string
@@ -498,9 +500,13 @@ export class LibraryDatabase {
 
   deleteDocument(id: string): StoredDocumentRecord {
     const document = this.requireDocument(id)
-    const result = this.database.prepare('DELETE FROM documents WHERE id = ?').run(document.id)
-    if (result.changes !== 1) throw new Error('文献不存在，请重新选择文献。')
-    return document
+    const tx = this.database.transaction((): StoredDocumentRecord => {
+      const result = this.database.prepare('DELETE FROM documents WHERE id = ?').run(document.id)
+      if (result.changes !== 1) throw new Error('文献不存在，请重新选择文献。')
+      this.database.prepare('DELETE FROM app_settings WHERE key = ?').run(`${DOC_SUMMARY_SETTING_PREFIX}${document.id}`)
+      return document
+    })
+    return tx()
   }
 
   getReaderState(id: string): ReaderState | null {
@@ -1193,6 +1199,7 @@ export class LibraryDatabase {
       this.database.prepare('DELETE FROM chat_messages').run()
       this.database.prepare('DELETE FROM documents').run()
       this.database.prepare('DELETE FROM folders').run()
+      this.database.prepare('DELETE FROM app_settings WHERE key LIKE ?').run(`${DOC_SUMMARY_SETTING_PREFIX}%`)
       return {
         deletedDocuments: docCountRow.count,
         deletedFolders: folderCountRow.count

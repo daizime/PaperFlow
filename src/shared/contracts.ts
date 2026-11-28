@@ -1,4 +1,5 @@
 export type ReadingStatus = 'unread' | 'reading' | 'done'
+export type ReadingTheme = 'light' | 'sepia' | 'dark'
 
 export interface DocumentRecord {
   id: string
@@ -128,11 +129,24 @@ export interface TranslationBlockInput {
   sourceHash: string
 }
 
+export interface TranslationContextEntry {
+  kind: TranslatableBlockKind
+  sourceText: string
+  translatedText?: string
+}
+
+export interface TranslationPageContext {
+  documentSummary?: string
+  sectionHeading?: string
+  precedingBlocks?: TranslationContextEntry[]
+}
+
 export interface TranslatePageInput {
   documentId: string
   pageNumber: number
   blocks: TranslationBlockInput[]
   force?: boolean
+  context?: TranslationPageContext
 }
 
 export interface TranslatedBlockRecord {
@@ -726,6 +740,7 @@ export interface PaperFlowAPI {
   copyImageDataUrl(dataUrl: string): Promise<void>
   getResearchProfile(): Promise<ResearchProfile | null>
   saveResearchProfile(input: SaveResearchProfileInput): Promise<ResearchProfile>
+  setWindowTheme(theme: ReadingTheme): Promise<void>
 }
 export const MAX_PDF_BYTES = 100 * 1024 * 1024
 
@@ -804,5 +819,6 @@ export const CHANNELS = {
   copyText: 'clipboard:write-text',
   copyImageDataUrl: 'clipboard:write-image',
   getResearchProfile: 'profile:get',
-  saveResearchProfile: 'profile:save'
+  saveResearchProfile: 'profile:save',
+  setWindowTheme: 'window:set-theme'
 } as const

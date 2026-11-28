@@ -17,6 +17,11 @@ import {
   DARK_PAPER_DEFAULT_BG,
   mapColorToDarkPaperFilter
 } from '../../src/renderer/src/features/translation/dark-paper-color'
+import {
+  buildDocumentSummaryFromLayout,
+  buildPageTranslationContext
+} from '../../src/renderer/src/features/translation/translation-context'
+import type { PageLayoutResult } from '../../src/renderer/src/features/reader/layout-analysis'
 
 const tempDirs: string[] = []
 
@@ -209,5 +214,144 @@ describe('轨道一：批量翻译范围解析、参考文献识别、单段手�
     expect(blueTint[1]).toBeGreaterThanOrEqual(blueTint[0])
 
     expect(mapColorToDarkPaperFilter('invalid-color')).toBe(DARK_PAPER_DEFAULT_BG)
+  })
+
+  it('buildDocumentSummaryFromLayout 与 buildPageTranslationContext 按阅读序提取标题摘要、章节与前序句段对照 (合成素材)', async () => {
+    const { computeStableTranslationBlockKey } = await import(
+      '../../src/renderer/src/features/reader/layout-analysis'
+    )
+
+    const mkLayoutBlock = (
+      id: string,
+      pageNumber: number,
+      kind: 'heading' | 'paragraph' | 'caption',
+      text: string,
+      y: number
+    ) => {
+      const rect = { x: 54, y, width: 220, height: 14 }
+      return {
+        id,
+        pageNumber,
+        order: 1,
+        kind,
+        columnIndex: 1,
+        fontSize: 10,
+        isBold: kind !== 'paragraph',
+        bounds: rect,
+        displayBounds: rect,
+        sentences: [
+          {
+            id: `${id}-s1`,
+            pageNumber,
+            order: 1,
+            blockId: id,
+            blockKind: kind,
+            columnIndex: 1,
+            text,
+            rects: [rect],
+            displayRects: [rect],
+            bounds: rect,
+            displayBounds: rect,
+            fragments: [],
+            crossColumn: false
+          }
+        ]
+      }
+    }
+
+    const p1Title = mkLayoutBlock('p1-b1', 1, 'heading', 'Federated Graph Compression', 60)
+    const p1AbsHead = mkLayoutBlock('p1-b2', 1, 'heading', 'Abstract', 90)
+    const p1AbsBody = mkLayoutBlock(
+      'p1-b3',
+      1,
+      'paragraph',
+      'We propose a lossless sparse compression layer that lowers inter-worker traffic across distributed clusters.',
+      110
+    )
+    const p1FigCap = mkLayoutBlock('p1-b4', 1, 'caption', 'Figure 1: System pipeline.', 200)
+
+    const p2Head = mkLayoutBlock('p2-b1', 2, 'heading', '2.1 Sparse Encoding', 60)
+    const p2Para1 = mkLayoutBlock('p2-b2', 2, 'paragraph', 'First paragraph builds block masks.', 90)
+    const p2Para2 = mkLayoutBlock('p2-b3', 2, 'paragraph', 'It then schedules asynchronous flushes.', 120)
+
+    const mkLayout = (pageNumber: number, blocks: ReturnType<typeof mkLayoutBlock>[]): PageLayoutResult => ({
+      pageNumber,
+      naturalWidth: 612,
+      naturalHeight: 792,
+      columnCount: 2,
+      bodyFontSize: 10,
+      hasText: true,
+      blocks,
+      sentences: blocks.flatMap(b => b.sentences),
+      filteredItems: []
+    })
+
+    const layouts = new Map<number, PageLayoutResult>([
+      [1, mkLayout(1, [p1Title, p1AbsHead, p1AbsBody, p1FigCap])],
+      [2, mkLayout(2, [p2Head, p2Para1, p2Para2])]
+    ])
+
+    const p1AbsBodyKey = computeStableTranslationBlockKey(p1AbsBody)
+    const p2Para1Key = computeStableTranslationBlockKey(p2Para1)
+    const p2Para2Key = computeStableTranslationBlockKey(p2Para2)
+
+    const translationsByPage = new Map([
+      [
+        1,
+        new Map([
+          [
+            p1AbsBodyKey,
+            {
+              blockId: p1AbsBodyKey,
+              sourceHash: '0123456789abcdef',
+              translatedText: '我们提出了一种降低跨节点流量的无损稀疏压缩层。',
+              providerSignature: 'sig',
+              updatedAt: '2026-11-28T00:00:00Z'
+            }
+          ]
+        ])
+      ],
+      [
+        2,
+        new Map([
+          [
+            p2Para1Key,
+            {
+              blockId: p2Para1Key,
+              sourceHash: '0123456789abcdef',
+              translatedText: '第一段构造了块级掩码。',
+              providerSignature: 'sig',
+              updatedAt: '2026-11-28T00:00:00Z'
+            }
+          ]
+        ])
+      ]
+    ])
+
+    const summary = buildDocumentSummaryFromLayout(layouts.get(1))
+    expect(summary).toContain('标题：Federated Graph Compression')
+    expect(summary).toContain('摘要：We propose a lossless sparse compression layer')
+
+    const fullPage2Ctx = buildPageTranslationContext(layouts, 2, translationsByPage)
+    expect(fullPage2Ctx?.documentSummary).toBe(summary)
+    expect(fullPage2Ctx?.sectionHeading).toBe('Federated Graph Compression > Abstract')
+    expect(fullPage2Ctx?.precedingBlocks).toEqual([
+      {
+        kind: 'paragraph',
+        sourceText: 'We propose a lossless sparse compression layer that lowers inter-worker traffic across distributed clusters.',
+        translatedText: '我们提出了一种降低跨节点流量的无损稀疏压缩层。'
+      }
+    ])
+
+    const singleBlockCtx = buildPageTranslationContext(layouts, 2, translationsByPage, p2Para2Key)
+    expect(singleBlockCtx?.sectionHeading).toBe('2.1 Sparse Encoding')
+    expect(singleBlockCtx?.precedingBlocks).toEqual([
+      { kind: 'heading', sourceText: '2.1 Sparse Encoding' },
+      {
+        kind: 'paragraph',
+        sourceText: 'First paragraph builds block masks.',
+        translatedText: '第一段构造了块级掩码。'
+      }
+    ])
   })
 })

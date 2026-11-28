@@ -835,201 +835,362 @@ interface GutterCandidate {
   rightCount: number
 }
 
-function findBestColumnGutter(lines: readonly LineSegment[], bodyFontSize: number): GutterCandidate | null {
-  if (lines.length < 4) return null
-  const minX = Math.min(...lines.map(l => l.logicalRect.x))
-  const maxX = Math.max(...lines.map(l => l.logicalRect.x + l.logicalRect.width))
-  const span = maxX - minX
-  if (span < Math.max(120, bodyFontSize * 10)) return null
+function quantileSorted(sortedAsc: readonly number[], q: number): number {
+  if (sortedAsc.length === 0) return 0
+  const pos = (sortedAsc.length - 1) * Math.max(0, Math.min(1, q))
+  const lo = Math.floor(pos)
+  const hi = Math.ceil(pos)
+  if (lo === hi) return sortedAsc[lo]
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (pos - lo)
+}
 
-  // 剔除明显跨栏宽行（例如跨双栏标题/全宽摘要/全宽表格）后再探测栏隙
-  const narrowLines = lines.filter(l => l.logicalRect.width <= span * 0.56)
-  if (narrowLines.length < 4) return null
-
-  const minGutterWidth = Math.max(9, bodyFontSize * 0.85)
-  const searchStart = minX + span * 0.2
-  const searchEnd = maxX - span * 0.2
-
-  // 收集窄行左右边界作为扫描分隔探测点
-  const boundaries = new Set<number>()
-  for (const line of narrowLines) {
-    boundaries.add(line.logicalRect.x)
-    boundaries.add(line.logicalRect.x + line.logicalRect.width)
-  }
-  const sortedX = [...boundaries].sort((a, b) => a - b)
-
-  let best: GutterCandidate | null = null
-  for (let i = 0; i < sortedX.length - 1; i += 1) {
-    const a = sortedX[i]
-    const b = sortedX[i + 1]
-    const gap = b - a
-    if (gap < minGutterWidth) continue
-    const mid = (a + b) / 2
-    if (mid < searchStart || mid > searchEnd) continue
-
-    const leftLines: LineSegment[] = []
-    const rightLines: LineSegment[] = []
-    let crossing = 0
-    for (const line of narrowLines) {
-      const r = line.logicalRect
-      if (r.x + r.width <= mid + 2) leftLines.push(line)
-      else if (r.x >= mid - 2) rightLines.push(line)
-      else crossing += 1
-    }
-    if (crossing > Math.floor(narrowLines.length * 0.1)) continue
-    if (leftLines.length < 2 || rightLines.length < 2) continue
-
-    const minShare = Math.max(2, narrowLines.length * 0.16)
-    if (leftLines.length < minShare || rightLines.length < minShare) continue
-
-    // 确认左右两栏在纵坐标上确有重叠区间（真正并排的多栏而非上下错落的短行）
-    const leftTop = Math.min(...leftLines.map(l => l.logicalRect.y))
-    const leftBottom = Math.max(...leftLines.map(l => l.logicalRect.y + l.logicalRect.height))
-    const rightTop = Math.min(...rightLines.map(l => l.logicalRect.y))
-    const rightBottom = Math.max(...rightLines.map(l => l.logicalRect.y + l.logicalRect.height))
-    const overlapY = Math.min(leftBottom, rightBottom) - Math.max(leftTop, rightTop)
-    if (overlapY <= bodyFontSize * 0.8) continue
-
-    const score = gap * Math.min(leftLines.length, rightLines.length)
-    const bestScore = best ? best.gutterWidth * Math.min(best.leftCount, best.rightCount) : -1
-    if (score > bestScore) {
-      best = {
-        splitX: mid,
-        gutterLeft: a,
-        gutterRight: b,
-        gutterWidth: gap,
-        leftCount: leftLines.length,
-        rightCount: rightLines.length
-      }
-    }
-  }
-
-  return best
+function medianNumber(values: readonly number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
 /**
- * 极窄栏隙兜底探测：当双栏排版齐行后的实际栏隙仅 8–12pt，致使初轮合并把多行 L+R 粘进同一 LineSegment 时，
- * 直接基于词元/Span 之间的水平间隙分布反推全局对齐的垂直栏隙。
+ * 基于视觉行与文本 Span 投影统一探测多栏栏隙，同时兼容「初轮已分开」与「窄栏隙粘连」两类行段：
+ * 1. 先剔除跨栏图表内部散落短标签、图表题注与跨栏大标题对栏隙扫描的干扰；
+ * 2. 对混合布局（跨栏图/摘要 + 下方双栏）按无跨线区域分组投票；
+ * 3. 对嵌入式 2 列表格/单栏长文启用双侧正文词密与宽度护栏，避免误拆单栏页。
  */
-function findBestGutterFromItemSpans(lines: readonly LineSegment[], bodyFontSize: number): GutterCandidate | null {
+function findBestColumnGutterByRows(
+  lines: readonly LineSegment[],
+  bodyFontSize: number,
+  logicalHints: PageGraphicHints | null = null
+): GutterCandidate | null {
   if (lines.length < 4) return null
-  const minX = Math.min(...lines.map(l => l.logicalRect.x))
-  const maxX = Math.max(...lines.map(l => l.logicalRect.x + l.logicalRect.width))
+
+  const graphicObstacles = logicalHints
+    ? [...logicalHints.imageRects, ...logicalHints.vectorDiagramRects, ...logicalHints.tableRuleRegions]
+    : []
+
+  const nonTitleNoCaption = lines.filter(line => {
+    const trimmed = line.text.trim()
+    if (!trimmed || CAPTION_RE.test(trimmed)) return false
+    if (line.em >= bodyFontSize * 1.35 && countProseWords(trimmed).total >= 2) return false
+    return true
+  })
+
+  const filteredByGraphics =
+    graphicObstacles.length > 0
+      ? nonTitleNoCaption.filter(line => {
+          const prose = countProseWords(line.text.trim())
+          if (prose.total >= 10) return true
+          return !graphicObstacles.some(reg => isRectInsideRegion(line.logicalRect, reg, 3))
+        })
+      : nonTitleNoCaption
+
+  const voteLines =
+    filteredByGraphics.length >= 4
+      ? filteredByGraphics
+      : nonTitleNoCaption.length >= 4
+        ? nonTitleNoCaption
+        : lines
+  if (voteLines.length < 4) return null
+
+  const minX = Math.min(...voteLines.map(l => l.logicalRect.x))
+  const maxX = Math.max(...voteLines.map(l => l.logicalRect.x + l.logicalRect.width))
   const span = maxX - minX
   if (span < Math.max(120, bodyFontSize * 10)) return null
 
-  const minGutterWidth = Math.max(bodyFontSize * 0.8, 7.5)
+  const minGutterWidth = Math.max(bodyFontSize * 0.76, 7.5)
   const searchStart = minX + span * 0.2
   const searchEnd = maxX - span * 0.2
+  const rows = buildVisualRows(voteLines)
+  if (rows.length < 2) return null
 
-  const candidateMidpoints: number[] = []
-  for (const line of lines) {
-    if (line.spans.length < 2) continue
-    for (let i = 0; i < line.spans.length - 1; i += 1) {
-      const a = line.spans[i].item.logicalRect.x + line.spans[i].item.logicalRect.width
-      const b = line.spans[i + 1].item.logicalRect.x
+  const rawMids: number[] = []
+  for (const row of rows) {
+    const rowSpans = row.segments.flatMap(seg => seg.spans).sort((a, b) => a.item.logicalRect.x - b.item.logicalRect.x)
+    for (let i = 0; i < rowSpans.length - 1; i += 1) {
+      const a = rowSpans[i].item.logicalRect.x + rowSpans[i].item.logicalRect.width
+      const b = rowSpans[i + 1].item.logicalRect.x
       if (b - a < minGutterWidth) continue
       const mid = (a + b) / 2
       if (mid >= searchStart && mid <= searchEnd) {
-        candidateMidpoints.push(mid)
+        rawMids.push(mid)
       }
     }
   }
-  if (candidateMidpoints.length === 0) return null
+  for (let x = searchStart; x <= searchEnd; x += 4) {
+    rawMids.push(x)
+  }
 
-  const sortedMids = [...candidateMidpoints].sort((a, b) => a - b)
+  rawMids.sort((a, b) => a - b)
   const uniqueMids: number[] = []
-  for (const mid of sortedMids) {
-    if (uniqueMids.length === 0 || mid - uniqueMids[uniqueMids.length - 1] >= 3) {
-      uniqueMids.push(mid)
+  for (const m of rawMids) {
+    if (uniqueMids.length === 0 || m - uniqueMids[uniqueMids.length - 1] >= 2) {
+      uniqueMids.push(m)
     }
   }
 
-  let best: GutterCandidate | null = null
+  interface EvaluatedRow {
+    kind: 'left' | 'right' | 'both' | 'crossing'
+    strongCrossing: boolean
+    top: number
+    bottom: number
+    leftMinX: number
+    leftMaxRight: number
+    rightMinX: number
+    rightMaxRight: number
+    leftWords: number
+    rightWords: number
+    gap: number
+  }
+
+  let bestCandidate: GutterCandidate | null = null
+  let bestScore = -1
+
   for (const mid of uniqueMids) {
-    let leftCount = 0
-    let rightCount = 0
-    let evaluatedRows = 0
-    let crossingRows = 0
-    let leftTop = Number.POSITIVE_INFINITY
-    let leftBottom = Number.NEGATIVE_INFINITY
-    let rightTop = Number.POSITIVE_INFINITY
-    let rightBottom = Number.NEGATIVE_INFINITY
-    const splitPairs: Array<{ leftRight: number; rightLeft: number; gap: number }> = []
+    const evaluated: EvaluatedRow[] = []
 
-    for (const line of lines) {
-      if (line.em >= bodyFontSize * 1.15) continue
-      evaluatedRows += 1
+    for (const row of rows) {
+      const spans = row.segments.flatMap(seg => seg.spans)
+      if (spans.length === 0) continue
 
-      const hasCrossingItem = line.spans.some(s => {
+      const hasCrossingItem = spans.some(s => {
         const ir = s.item.logicalRect
         return ir.x < mid - 3 && ir.x + ir.width > mid + 3
       })
+
+      const leftSpans: LineSpan[] = []
+      const rightSpans: LineSpan[] = []
+      for (const s of spans) {
+        const cx = s.item.logicalRect.x + s.item.logicalRect.width / 2
+        if (cx < mid) leftSpans.push(s)
+        else rightSpans.push(s)
+      }
+
+      const strongCrossing =
+        row.rect.x < mid - Math.max(bodyFontSize, 8) && row.rect.x + row.rect.width > mid + Math.max(bodyFontSize, 8)
+
       if (hasCrossingItem) {
-        crossingRows += 1
+        evaluated.push({
+          kind: 'crossing',
+          strongCrossing: true,
+          top: row.rect.y,
+          bottom: row.rect.y + row.rect.height,
+          leftMinX: row.rect.x,
+          leftMaxRight: row.rect.x + row.rect.width,
+          rightMinX: row.rect.x,
+          rightMaxRight: row.rect.x + row.rect.width,
+          leftWords: 0,
+          rightWords: 0,
+          gap: 0
+        })
         continue
       }
 
-      const leftItems: ProjectedTextItem[] = []
-      const rightItems: ProjectedTextItem[] = []
-      for (const s of line.spans) {
-        const cx = s.item.logicalRect.x + s.item.logicalRect.width / 2
-        if (cx < mid) leftItems.push(s.item)
-        else rightItems.push(s.item)
-      }
+      const leftMinX = leftSpans.length > 0 ? Math.min(...leftSpans.map(s => s.item.logicalRect.x)) : 0
+      const leftMaxRight =
+        leftSpans.length > 0 ? Math.max(...leftSpans.map(s => s.item.logicalRect.x + s.item.logicalRect.width)) : 0
+      const rightMinX = rightSpans.length > 0 ? Math.min(...rightSpans.map(s => s.item.logicalRect.x)) : 0
+      const rightMaxRight =
+        rightSpans.length > 0 ? Math.max(...rightSpans.map(s => s.item.logicalRect.x + s.item.logicalRect.width)) : 0
 
-      if (leftItems.length > 0 && rightItems.length === 0) {
-        leftCount += 1
-        leftTop = Math.min(leftTop, line.logicalRect.y)
-        leftBottom = Math.max(leftBottom, line.logicalRect.y + line.logicalRect.height)
-      } else if (rightItems.length > 0 && leftItems.length === 0) {
-        rightCount += 1
-        rightTop = Math.min(rightTop, line.logicalRect.y)
-        rightBottom = Math.max(rightBottom, line.logicalRect.y + line.logicalRect.height)
-      } else if (leftItems.length > 0 && rightItems.length > 0) {
-        const leftRight = Math.max(...leftItems.map(it => it.logicalRect.x + it.logicalRect.width))
-        const rightLeft = Math.min(...rightItems.map(it => it.logicalRect.x))
-        const gap = rightLeft - leftRight
-        if (gap >= minGutterWidth) {
-          leftCount += 1
-          rightCount += 1
-          leftTop = Math.min(leftTop, line.logicalRect.y)
-          leftBottom = Math.max(leftBottom, line.logicalRect.y + line.logicalRect.height)
-          rightTop = Math.min(rightTop, line.logicalRect.y)
-          rightBottom = Math.max(rightBottom, line.logicalRect.y + line.logicalRect.height)
-          splitPairs.push({ leftRight, rightLeft, gap })
+      if (leftSpans.length > 0 && rightSpans.length === 0) {
+        evaluated.push({
+          kind: 'left',
+          strongCrossing: false,
+          top: row.rect.y,
+          bottom: row.rect.y + row.rect.height,
+          leftMinX,
+          leftMaxRight,
+          rightMinX: 0,
+          rightMaxRight: 0,
+          leftWords: countProseWords(leftSpans.map(s => s.item.str).join(' ')).total,
+          rightWords: 0,
+          gap: 0
+        })
+      } else if (rightSpans.length > 0 && leftSpans.length === 0) {
+        evaluated.push({
+          kind: 'right',
+          strongCrossing: false,
+          top: row.rect.y,
+          bottom: row.rect.y + row.rect.height,
+          leftMinX: 0,
+          leftMaxRight: 0,
+          rightMinX,
+          rightMaxRight,
+          leftWords: 0,
+          rightWords: countProseWords(rightSpans.map(s => s.item.str).join(' ')).total,
+          gap: 0
+        })
+      } else if (leftSpans.length > 0 && rightSpans.length > 0) {
+        const gap = rightMinX - leftMaxRight
+        const splitClean = gap >= minGutterWidth && leftMaxRight <= mid + 2.5 && rightMinX >= mid - 2.5
+        if (splitClean) {
+          evaluated.push({
+            kind: 'both',
+            strongCrossing: false,
+            top: row.rect.y,
+            bottom: row.rect.y + row.rect.height,
+            leftMinX,
+            leftMaxRight,
+            rightMinX,
+            rightMaxRight,
+            leftWords: countProseWords(leftSpans.map(s => s.item.str).join(' ')).total,
+            rightWords: countProseWords(rightSpans.map(s => s.item.str).join(' ')).total,
+            gap
+          })
         } else {
-          crossingRows += 1
+          evaluated.push({
+            kind: 'crossing',
+            strongCrossing,
+            top: row.rect.y,
+            bottom: row.rect.y + row.rect.height,
+            leftMinX,
+            leftMaxRight,
+            rightMinX,
+            rightMaxRight,
+            leftWords: 0,
+            rightWords: 0,
+            gap: 0
+          })
         }
       }
     }
 
-    if (evaluatedRows < 4 || leftCount < 2 || rightCount < 2 || splitPairs.length === 0) continue
-    const minShare = Math.max(2, evaluatedRows * 0.16)
-    if (leftCount < minShare || rightCount < minShare) continue
-    if (crossingRows > Math.floor(evaluatedRows * 0.12)) continue
+    if (evaluated.length < 2) continue
 
-    const overlapY = Math.min(leftBottom, rightBottom) - Math.max(leftTop, rightTop)
-    if (overlapY <= bodyFontSize * 0.8) continue
+    const leftRowsAll = evaluated.filter(e => e.kind === 'left' || e.kind === 'both')
+    const rightRowsAll = evaluated.filter(e => e.kind === 'right' || e.kind === 'both')
+    const bothRowsAll = evaluated.filter(e => e.kind === 'both')
+    const crossingAll = evaluated.filter(e => e.kind === 'crossing')
+    if (leftRowsAll.length < 2 || rightRowsAll.length < 2) continue
+    if (
+      evaluated.length < 4 &&
+      (crossingAll.length > 0 ||
+        bothRowsAll.length < 2 ||
+        !bothRowsAll.every(
+          e => e.leftWords >= 4 && e.rightWords >= 4 && e.gap >= Math.max(minGutterWidth, bodyFontSize * 1.1)
+        ))
+    ) {
+      continue
+    }
 
-    const sortedPairs = [...splitPairs].sort((p, q) => p.gap - q.gap)
-    const refPair = sortedPairs[Math.min(sortedPairs.length - 1, Math.floor(sortedPairs.length * 0.25))]
-    const gutterWidth = refPair.gap
-    const score = gutterWidth * Math.min(leftCount, rightCount)
-    const bestScore = best ? best.gutterWidth * Math.min(best.leftCount, best.rightCount) : -1
+    // 将页面按强跨栏正文带拆分为连续垂直区域（支持「通栏图/标题/摘要 + 双栏正文」混排页）
+    const nonCrossBands: EvaluatedRow[][] = []
+    let curBand: EvaluatedRow[] = []
+    for (const e of evaluated) {
+      if (e.kind === 'crossing' && e.strongCrossing) {
+        if (curBand.length > 0) {
+          nonCrossBands.push(curBand)
+          curBand = []
+        }
+      } else if (e.kind !== 'crossing') {
+        curBand.push(e)
+      }
+    }
+    if (curBand.length > 0) nonCrossBands.push(curBand)
+
+    const validBandRows: EvaluatedRow[] = []
+    for (const band of nonCrossBands) {
+      const bLeft = band.filter(e => e.kind === 'left' || e.kind === 'both')
+      const bRight = band.filter(e => e.kind === 'right' || e.kind === 'both')
+      const bBoth = band.filter(e => e.kind === 'both')
+      if (bLeft.length < 2 || bRight.length < 2) continue
+
+      const bOverlapY =
+        Math.min(Math.max(...bLeft.map(e => e.bottom)), Math.max(...bRight.map(e => e.bottom))) -
+        Math.max(Math.min(...bLeft.map(e => e.top)), Math.min(...bRight.map(e => e.top)))
+      if (bOverlapY <= bodyFontSize * 0.8) continue
+
+      const bLeftSpan = Math.max(...bLeft.map(e => e.leftMaxRight)) - Math.min(...bLeft.map(e => e.leftMinX))
+      const bRightSpan = Math.max(...bRight.map(e => e.rightMaxRight)) - Math.min(...bRight.map(e => e.rightMinX))
+      if (bLeftSpan < span * 0.16 || bRightSpan < span * 0.16) continue
+
+      // 防止单栏长文内嵌一个 2 列表格被误识别为双栏（双栏带应有足够多行正文词密度）
+      const leftProseRows = bLeft.filter(e => e.leftWords >= 4).length
+      const rightProseRows = bRight.filter(e => e.rightWords >= 4).length
+      const medianLWords = medianNumber(bLeft.map(e => e.leftWords))
+      const medianRWords = medianNumber(bRight.map(e => e.rightWords))
+      const tabularOnly =
+        bBoth.length > 0 &&
+        (leftProseRows === 0 || rightProseRows === 0 || medianLWords < 3 || medianRWords < 3) &&
+        crossingAll.length > evaluated.length * 0.2
+
+      if (tabularOnly) continue
+      if (bBoth.length >= 2 || (bLeft.length >= 2 && bRight.length >= 2)) {
+        validBandRows.push(...band)
+      }
+    }
+
+    const globalOverlapY =
+      Math.min(Math.max(...leftRowsAll.map(e => e.bottom)), Math.max(...rightRowsAll.map(e => e.bottom))) -
+      Math.max(Math.min(...leftRowsAll.map(e => e.top)), Math.min(...rightRowsAll.map(e => e.top)))
+    const minShare = Math.max(2, evaluated.length * 0.16)
+    const passesGlobal =
+      crossingAll.length <= Math.floor(evaluated.length * 0.15) &&
+      leftRowsAll.length >= minShare &&
+      rightRowsAll.length >= minShare &&
+      globalOverlapY > bodyFontSize * 0.8
+
+    const validLeft = validBandRows.filter(e => e.kind === 'left' || e.kind === 'both')
+    const validRight = validBandRows.filter(e => e.kind === 'right' || e.kind === 'both')
+    const validBoth = validBandRows.filter(e => e.kind === 'both')
+    const validProseLeft = validLeft.filter(e => e.leftWords >= 4).length
+    const validProseRight = validRight.filter(e => e.rightWords >= 4).length
+    const passesMixedBands =
+      (validBoth.length >= 3 || Math.min(validLeft.length, validRight.length) >= 4) &&
+      validProseLeft >= 2 &&
+      validProseRight >= 2
+
+    if (!passesGlobal && !passesMixedBands) continue
+
+    const activeLeft = validLeft.length >= 2 ? validLeft : leftRowsAll
+    const activeRight = validRight.length >= 2 ? validRight : rightRowsAll
+    const activeBoth = validBoth.length > 0 ? validBoth : evaluated.filter(e => e.kind === 'both')
+
+    const activeLeftSpan = Math.max(...activeLeft.map(e => e.leftMaxRight)) - Math.min(...activeLeft.map(e => e.leftMinX))
+    const activeRightSpan = Math.max(...activeRight.map(e => e.rightMaxRight)) - Math.min(...activeRight.map(e => e.rightMinX))
+    if (activeLeftSpan < span * 0.18 || activeRightSpan < span * 0.18) continue
+
+    const sortedLeftRights = activeLeft.map(e => e.leftMaxRight).sort((a, b) => a - b)
+    const sortedRightLefts = activeRight.map(e => e.rightMinX).sort((a, b) => a - b)
+    let gutterLeft = quantileSorted(sortedLeftRights, 0.85)
+    let gutterRight = quantileSorted(sortedRightLefts, 0.15)
+
+    if (gutterRight - gutterLeft < minGutterWidth * 0.8) {
+      if (activeBoth.length > 0) {
+        const gapsSorted = [...activeBoth].sort((a, b) => a.gap - b.gap)
+        const ref = gapsSorted[Math.floor(gapsSorted.length * 0.25)]
+        gutterLeft = ref.leftMaxRight
+        gutterRight = ref.rightMinX
+      } else {
+        gutterLeft = Math.max(...activeLeft.map(e => e.leftMaxRight))
+        gutterRight = Math.min(...activeRight.map(e => e.rightMinX))
+      }
+    }
+    const gutterWidth = gutterRight - gutterLeft
+    if (gutterWidth < minGutterWidth * 0.75) continue
+
+    const splitX = (gutterLeft + gutterRight) / 2
+    const effectiveWidth = Math.min(gutterWidth, Math.max(24, bodyFontSize * 3.2))
+    const pairWeight = Math.min(activeLeft.length, activeRight.length) + activeBoth.length * 1.5
+    const proseBalanceBonus = Math.min(validProseLeft, validProseRight) * 0.75
+    const score =
+      (pairWeight + proseBalanceBonus) * effectiveWidth -
+      crossingAll.filter(e => e.strongCrossing).length * effectiveWidth * 0.35
+
     if (score > bestScore) {
-      best = {
-        splitX: (refPair.leftRight + refPair.rightLeft) / 2,
-        gutterLeft: refPair.leftRight,
-        gutterRight: refPair.rightLeft,
+      bestScore = score
+      bestCandidate = {
+        splitX,
+        gutterLeft,
+        gutterRight,
         gutterWidth,
-        leftCount,
-        rightCount
+        leftCount: activeLeft.length,
+        rightCount: activeRight.length
       }
     }
   }
 
-  return best
+  return bestCandidate
 }
 
 function isValidSecondaryColumnSplit(subsetLines: readonly LineSegment[], candidate: GutterCandidate): boolean {
@@ -1068,8 +1229,12 @@ function isValidSecondaryColumnSplit(subsetLines: readonly LineSegment[], candid
   return crossingCount <= Math.floor(nonCaptionCount * 0.2)
 }
 
-function detectColumnGutters(lines: readonly LineSegment[], bodyFontSize: number): GutterCandidate[] {
-  const firstSplit = findBestColumnGutter(lines, bodyFontSize) ?? findBestGutterFromItemSpans(lines, bodyFontSize)
+function detectColumnGutters(
+  lines: readonly LineSegment[],
+  bodyFontSize: number,
+  logicalHints: PageGraphicHints | null = null
+): GutterCandidate[] {
+  const firstSplit = findBestColumnGutterByRows(lines, bodyFontSize, logicalHints)
   if (!firstSplit) return []
 
   const gutters = [firstSplit]
@@ -1077,7 +1242,7 @@ function detectColumnGutters(lines: readonly LineSegment[], bodyFontSize: number
   const rightSubset = lines.filter(l => l.logicalRect.x >= firstSplit.splitX - 2)
 
   // 最多支持 3 栏检测（在左右任意一侧若宽度仍够且出现清晰副栏隙，可继续细分，同时拒绝栏内表格伪栏隙）
-  const leftSecond = findBestColumnGutter(leftSubset, bodyFontSize) ?? findBestGutterFromItemSpans(leftSubset, bodyFontSize)
+  const leftSecond = findBestColumnGutterByRows(leftSubset, bodyFontSize, logicalHints)
   if (
     leftSecond &&
     Math.abs(leftSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6) &&
@@ -1085,8 +1250,7 @@ function detectColumnGutters(lines: readonly LineSegment[], bodyFontSize: number
   ) {
     gutters.push(leftSecond)
   } else {
-    const rightSecond =
-      findBestColumnGutter(rightSubset, bodyFontSize) ?? findBestGutterFromItemSpans(rightSubset, bodyFontSize)
+    const rightSecond = findBestColumnGutterByRows(rightSubset, bodyFontSize, logicalHints)
     if (
       rightSecond &&
       Math.abs(rightSecond.splitX - firstSplit.splitX) >= Math.max(80, bodyFontSize * 6) &&
@@ -1122,7 +1286,7 @@ function splitLinesAtColumnGutters(lines: LineSegment[], gutters: readonly Gutte
 
     const hasCrossingItem = line.spans.some(s => {
       const r = s.item.logicalRect
-      return r.x < g.gutterLeft - 1 && r.x + r.width > g.gutterRight + 1
+      return r.x < g.splitX - 3 && r.x + r.width > g.splitX + 3
     })
     if (hasCrossingItem) {
       splitRecursive(line, gutterIdx + 1)
@@ -1144,7 +1308,7 @@ function splitLinesAtColumnGutters(lines: LineSegment[], gutters: readonly Gutte
     const leftMaxRight = Math.max(...leftItems.map(it => it.logicalRect.x + it.logicalRect.width))
     const rightMinX = Math.min(...rightItems.map(it => it.logicalRect.x))
     const actualGap = rightMinX - leftMaxRight
-    const minGap = Math.max(0.75 * line.em, g.gutterWidth * 0.55, 6.5)
+    const minGap = Math.max(0.72 * line.em, Math.min(g.gutterWidth * 0.5, 9), 6.2)
 
     if (actualGap < minGap) {
       splitRecursive(line, gutterIdx + 1)
@@ -1436,7 +1600,37 @@ function buildReadingBands(lines: LineSegment[], splits: readonly number[], body
   }
   flushColumnBand()
 
-  return { bands, columnCount: totalColumns }
+  // 将夹在页首/通栏带与非图表通栏正文带（如 Abstract 标题 + 通栏摘要正文）之间的孤立单栏短行合并为通栏带，
+  // 防止全宽摘要前的左对齐标题误归入第 1 栏。
+  const normalizedBands: LayoutBand[] = []
+  for (let i = 0; i < bands.length; i += 1) {
+    const band = bands[i]
+    const prev = normalizedBands[normalizedBands.length - 1]
+    const next = bands[i + 1]
+    if (
+      band.kind === 'columns' &&
+      band.linesByColumn.size === 1 &&
+      (!prev || prev.kind === 'spanning') &&
+      next?.kind === 'spanning'
+    ) {
+      const bandLines = [...band.linesByColumn.values()][0] ?? []
+      const nextSpanLines = next.linesByColumn.get(0) ?? []
+      const nextIsProseSpanning =
+        nextSpanLines.length > 0 && nextSpanLines.every(l => !l.preClassifiedKind)
+      if (bandLines.length > 0 && bandLines.length <= 3 && nextIsProseSpanning) {
+        for (const bl of bandLines) bl.columnIndex = 0
+        normalizedBands.push({
+          kind: 'spanning',
+          columnCount: totalColumns,
+          linesByColumn: new Map([[0, bandLines]])
+        })
+        continue
+      }
+    }
+    normalizedBands.push(band)
+  }
+
+  return { bands: normalizedBands, columnCount: totalColumns }
 }
 
 function stripControlCharsAndWhitespace(text: string): string {
@@ -1872,6 +2066,92 @@ function refineColumnDraftBlocks(
   return merged
 }
 
+function estimateColumnBodyMargins(
+  visualRows: readonly VisualRow[],
+  bodyFontSize: number
+): { bodyColLeft: number; bodyColRight: number; bodyColWidth: number } {
+  const candidates = visualRows.filter(
+    r =>
+      r.preKind !== 'table' &&
+      r.preKind !== 'figure' &&
+      r.preKind !== 'formula' &&
+      !r.hasTrailingEquationTag &&
+      Math.abs(r.em - bodyFontSize) <= bodyFontSize * 0.25
+  )
+  const pool = candidates.length >= 2 ? candidates : visualRows
+  const bucketSize = 1.5
+  const buckets = new Map<number, number[]>()
+
+  for (const r of pool) {
+    const key = Math.round(r.rect.x / bucketSize)
+    const list = buckets.get(key)
+    if (list) list.push(r.rect.x)
+    else buckets.set(key, [r.rect.x])
+  }
+
+  const minBucketCount = Math.max(2, Math.floor(pool.length * 0.14))
+  let bodyColLeft: number | null = null
+  const sortedKeys = [...buckets.keys()].sort((a, b) => a - b)
+  for (const k of sortedKeys) {
+    const xs = buckets.get(k)!
+    if (xs.length >= minBucketCount) {
+      bodyColLeft = xs.reduce((s, v) => s + v, 0) / xs.length
+      break
+    }
+  }
+  if (bodyColLeft === null) {
+    bodyColLeft = Math.min(...pool.map(r => r.rect.x))
+  }
+
+  const rightEdges = pool.map(r => r.rect.x + r.rect.width).sort((a, b) => a - b)
+  const bodyColRight =
+    rightEdges.length >= 8 ? quantileSorted(rightEdges, 0.85) : rightEdges[rightEdges.length - 1]
+  const bodyColWidth = Math.max(1, bodyColRight - bodyColLeft)
+  return { bodyColLeft, bodyColRight, bodyColWidth }
+}
+
+/** 识别 LaTeX \paragraph{...} / 论文粗体引导段首（如 `ScaleStore.` / `Challenges.` 后接常规非粗体正文）。 */
+function startsWithBoldRunInHeading(line: LineSegment): boolean {
+  if (line.spans.length < 2) return false
+  const fullTrimmed = line.text.trim()
+  if (!fullTrimmed || CAPTION_RE.test(fullTrimmed) || NUMBERED_HEADING_RE.test(fullTrimmed)) return false
+
+  let boldChars = ''
+  let boldEndIdx = -1
+  for (let i = 0; i < line.spans.length; i += 1) {
+    const sp = line.spans[i]
+    const sText = sp.item.str
+    if (!sp.item.isBold) break
+    boldChars += (boldChars && !boldChars.endsWith(' ') && !sText.startsWith(' ') ? ' ' : '') + sText.trim()
+    boldEndIdx = i
+    if (boldChars.length > 64) return false
+  }
+  if (boldEndIdx < 0 || boldEndIdx >= line.spans.length - 1) return false
+
+  let leadRun = boldChars.trim()
+  let restStart = boldEndIdx + 1
+  if (!/[.:]$/.test(leadRun) && restStart < line.spans.length) {
+    const punctSpan = line.spans[restStart].item.str.trim()
+    if (punctSpan === '.' || punctSpan === ':') {
+      leadRun += punctSpan
+      restStart += 1
+    }
+  }
+  if (!/[.:]$/.test(leadRun)) return false
+
+  const leadLower = leadRun.toLowerCase()
+  if (ABBREVIATIONS.has(leadLower)) return false
+  const leadWords = leadRun.replace(/[.:]+$/, '').trim().split(/\s+/).filter(Boolean)
+  if (leadWords.length === 0 || leadWords.length > 8) return false
+
+  const restText = line.spans
+    .slice(restStart)
+    .map(s => s.item.str)
+    .join(' ')
+    .trim()
+  return countProseWords(restText).total >= 2
+}
+
 function groupLinesIntoBlocks(
   lines: readonly LineSegment[],
   columnIndex: number,
@@ -1892,11 +2172,14 @@ function groupLinesIntoBlocks(
 
   const colLeft = Math.min(...lines.map(l => l.logicalRect.x))
   const colRight = Math.max(...lines.map(l => l.logicalRect.x + l.logicalRect.width))
-  const colWidth = Math.max(1, colRight - colLeft)
+  const initialColWidth = Math.max(1, colRight - colLeft)
   const fractionBars = logicalHints?.fractionBars ?? []
   const horizontalRules = logicalHints?.horizontalRules ?? []
 
-  classifyVisualRows(visualRows, colWidth, typicalStep, bodyFontSize, bodyFontName, logicalHints)
+  classifyVisualRows(visualRows, initialColWidth, typicalStep, bodyFontSize, bodyFontName, logicalHints)
+
+  const { bodyColLeft, bodyColRight, bodyColWidth } = estimateColumnBodyMargins(visualRows, bodyFontSize)
+  const colWidth = bodyColWidth
 
   const groupUnits: VisualRow[] = []
   for (const row of visualRows) {
@@ -1907,6 +2190,19 @@ function groupLinesIntoBlocks(
       row.segments.length <= 1
     ) {
       groupUnits.push(row)
+      continue
+    }
+    if (
+      row.segments.length === 2 &&
+      (row.isBold || row.em >= bodyFontSize * 1.05) &&
+      /^(?:\d+(?:\.\d+)*\.?|[IVXLCDM]+\.)$/.test(row.segments[0].text.trim()) &&
+      row.segments[1].logicalRect.x - (row.segments[0].logicalRect.x + row.segments[0].logicalRect.width) <=
+        Math.max(row.em * 3, 28)
+    ) {
+      groupUnits.push({
+        ...row,
+        segments: [buildLineSegment(row.segments.flatMap(s => s.spans.map(sp => sp.item)))]
+      })
       continue
     }
     for (const seg of row.segments) {
@@ -1997,20 +2293,55 @@ function groupLinesIntoBlocks(
     const largeVerticalGap = bothFormula
       ? step > Math.max(typicalStep * 2.1, bodyFontSize * 2.6)
       : step > Math.max(typicalStep * 1.38, Math.max(prevRow.em, nextRow.em) * 1.72)
+    const moderateParagraphGap =
+      lineGaps.length >= 2 &&
+      prevKindHint === 'paragraph' &&
+      !nextIsFormula &&
+      SENTENCE_TERMINAL_RE.test(prevRow.text.trim()) &&
+      step > Math.max(typicalStep * 1.24, Math.max(prevRow.em, nextRow.em) * 1.44)
+    const captionToBodyBreak =
+      prevKindHint === 'caption' &&
+      !nextIsCaption &&
+      SENTENCE_TERMINAL_RE.test(prevRow.text.trim()) &&
+      step > Math.max(typicalStep * 1.15, prevRow.em * 1.35)
     const boldSwitch =
       (prevRow.isBold !== nextRow.isBold && (prevKindHint === 'heading' || nextIsHeading)) ||
       (prevKindHint === 'caption' && prevRow.isBold && !nextRow.isBold && SENTENCE_TERMINAL_RE.test(prevRow.text.trim()))
     const ruleBreak = hasHorizontalRuleBetweenRows(prevRow, nextRow, horizontalRules, colLeft, colRight)
+    const indentOffset = nextRow.rect.x - bodyColLeft
     const indentedStart =
-      prevKindHint === 'paragraph' &&
-      nextRow.rect.x - colLeft >= bodyFontSize * 0.85 &&
-      (prevRow.rect.x + prevRow.rect.width < colRight - colWidth * 0.16 || SENTENCE_TERMINAL_RE.test(prevRow.text.trim()))
+      (prevKindHint === 'paragraph' || prevKindHint === 'list-item') &&
+      !nextIsFormula &&
+      indentOffset >= Math.max(bodyFontSize * 0.65, 5.5) &&
+      indentOffset <= Math.min(36, bodyFontSize * 3.5) &&
+      (prevRow.rect.x + prevRow.rect.width < bodyColRight - colWidth * 0.14 || SENTENCE_TERMINAL_RE.test(prevRow.text.trim()))
+    const boldRunInStart =
+      (prevKindHint === 'paragraph' || prevKindHint === 'list-item') &&
+      !nextIsFormula &&
+      !nextIsHeading &&
+      startsWithBoldRunInHeading(nextSeg) &&
+      (SENTENCE_TERMINAL_RE.test(prevRow.text.trim()) ||
+        prevRow.rect.x + prevRow.rect.width < bodyColRight - colWidth * 0.12 ||
+        step >= typicalStep * 1.08)
     const shortLineBreak =
       prevKindHint === 'paragraph' &&
       prevRow.rect.width < colWidth * 0.72 &&
       SENTENCE_TERMINAL_RE.test(prevRow.text.trim()) &&
       !nextIsFormula &&
       /^[A-Z\u4e00-\u9fff0-9"(\[]/.test(nextTrimmed)
+
+    const horizOverlapOnSameRow =
+      Math.min(prevRow.rect.x + prevRow.rect.width, nextRow.rect.x + nextRow.rect.width) -
+      Math.max(prevRow.rect.x, nextRow.rect.x)
+    const horizGapOnSameRow = Math.max(
+      0,
+      nextRow.rect.x - (prevRow.rect.x + prevRow.rect.width),
+      prevRow.rect.x - (nextRow.rect.x + nextRow.rect.width)
+    )
+    const sameBaselineHorizSplit =
+      Math.abs(step) <= Math.min(prevRow.em, nextRow.em) * 0.45 &&
+      horizOverlapOnSameRow <= 0 &&
+      horizGapOnSameRow > Math.max(bodyFontSize * 1.2, 10)
 
     const prevIsHeading = prevKindHint === 'heading'
     const nextStartsDistinctHeading =
@@ -2020,8 +2351,11 @@ function groupLinesIntoBlocks(
         (prevIsHeading && Math.abs(nextRow.em - prevRow.em) >= Math.max(prevRow.em, nextRow.em) * 0.1))
 
     const shouldBreak =
+      sameBaselineHorizSplit ||
       fontJump ||
       largeVerticalGap ||
+      moderateParagraphGap ||
+      captionToBodyBreak ||
       boldSwitch ||
       ruleBreak ||
       nextIsCaption ||
@@ -2030,6 +2364,7 @@ function groupLinesIntoBlocks(
       nextIsHeading !== prevIsHeading ||
       nextStartsDistinctHeading ||
       indentedStart ||
+      boldRunInStart ||
       shortLineBreak
 
     if (shouldBreak) flush()
@@ -3056,7 +3391,7 @@ export function analyzePageLayout(
   const edgeFilter = filterSinglePageEdgeItems(rawLines, logicalHeight, bodyFontSize)
   filteredItems.push(...edgeFilter.filtered)
 
-  const gutters = detectColumnGutters(edgeFilter.bodyLines, bodyFontSize)
+  const gutters = detectColumnGutters(edgeFilter.bodyLines, bodyFontSize, logicalHints)
   const gutterSplitLines =
     gutters.length > 0
       ? splitEquationTagIfNotFormula(splitLinesAtColumnGutters(edgeFilter.bodyLines, gutters), bodyFontSize, bodyFontName, fractionBars)

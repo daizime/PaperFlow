@@ -22,6 +22,7 @@ import {
   scrollOppositePaneToActiveLink,
   type ActiveSentenceLink
 } from './pane-translation-helpers'
+import { buildPageTranslationContext } from './translation-context'
 import { hitTestPageSentence, matchSelectionRegionsToSentences } from './sentence-alignment'
 import { countTranslatedBlocks, type TargetSentenceSelection } from './TranslationPanel'
 import { useDualScrollSync } from './useDualScrollSync'
@@ -72,6 +73,8 @@ export function usePaneTranslation({
   const backdropMapRef = useRef<Map<number, PageBackdropSnapshot>>(new Map())
   const queriedCachePagesRef = useRef<Set<number>>(new Set())
   const layoutsRef = useRef<Map<number, PageLayoutResult>>(new Map())
+  const translationsByPageRef = useRef<Map<number, Map<string, TranslatedBlockRecord>>>(new Map())
+  translationsByPageRef.current = translationsByPage
 
   const clearAllBackdrops = useCallback((): void => {
     for (const snap of backdropMapRef.current.values()) {
@@ -191,11 +194,17 @@ export function usePaneTranslation({
       setLocalTranslatingPage(pageNumber)
       onTranslatingPageChange?.(targetDocId, pageNumber)
       try {
+        const context = buildPageTranslationContext(
+          layoutsRef.current,
+          pageNumber,
+          translationsByPageRef.current
+        )
         const result = await window.paperflow.translatePage({
           documentId: targetDocId,
           pageNumber,
           blocks,
-          force
+          force,
+          ...(context ? { context } : {})
         })
         onTranslationComplete?.(targetDocId, result)
         if (documentIdRef.current !== targetDocId) return
@@ -235,11 +244,18 @@ export function usePaneTranslation({
         return next
       })
       try {
+        const context = buildPageTranslationContext(
+          layoutsRef.current,
+          pageNumber,
+          translationsByPageRef.current,
+          blockKey
+        )
         const result = await window.paperflow.translatePage({
           documentId: targetDocId,
           pageNumber,
           blocks: [input],
-          force: true
+          force: true,
+          ...(context ? { context } : {})
         })
         onTranslationComplete?.(targetDocId, result)
         if (documentIdRef.current !== targetDocId) return

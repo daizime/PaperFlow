@@ -968,6 +968,7 @@ html[data-theme='dark'] .document-tag-suggestions button {
   border: 1px solid transparent;
   padding-right: 4px;
   min-height: 26px;
+  overflow: hidden;
 }
 
 .library-folder-row:hover {
@@ -1001,6 +1002,7 @@ html[data-theme='dark'] .document-tag-suggestions button {
 .library-folder-btn {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   border: none;
   background: transparent;
   padding: 3px 2px;
@@ -1051,6 +1053,7 @@ html[data-theme='dark'] .document-tag-suggestions button {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
   opacity: 0;
 }
 
@@ -1761,6 +1764,7 @@ html[data-theme='dark'] .library-batch-toggle.is-active {
   padding-right: 4px;
   border-radius: 5px;
   border: 1px solid transparent;
+  overflow: hidden;
 }
 
 .library-tree-doc:hover {
@@ -1784,6 +1788,7 @@ html[data-theme='dark'] .library-batch-toggle.is-active {
 .library-tree-doc-btn {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   border: none;
   background: transparent;
   padding: 2px 2px;
@@ -1823,6 +1828,13 @@ html[data-theme='dark'] .library-batch-toggle.is-active {
   color: #c77c14;
 }
 
+.library-tree-doc-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
 .library-tree-doc-pane {
   flex-shrink: 0;
   font-size: 9.5px;
@@ -1853,8 +1865,15 @@ html[data-theme='dark'] .library-batch-toggle.is-active {
   flex-shrink: 0;
 }
 
+.library-tree-doc:hover .library-tree-doc-meta,
+.library-tree-doc:has(:focus-visible) .library-tree-doc-meta,
+.library-tree-doc:has(.library-tree-doc-actions:focus-within) .library-tree-doc-meta {
+  display: none;
+}
+
 .library-tree-doc:hover .library-tree-doc-actions,
-.library-tree-doc:focus-within .library-tree-doc-actions {
+.library-tree-doc:has(:focus-visible) .library-tree-doc-actions,
+.library-tree-doc:has(.library-tree-doc-actions:focus-within) .library-tree-doc-actions {
   display: inline-flex;
 }
 
@@ -1953,11 +1972,6 @@ html[data-theme='dark'] .library-tree-doc-badge {
 html[data-theme='dark'] .library-tree-doc-pane {
   background: #2b4470;
   color: #dce9ff;
-}
-
-html[data-theme='dark'] .library-tree-doc-actions {
-  background: #1d2431;
-  border-color: #364154;
 }
 
 html[data-theme='dark'] .library-reset-confirm-bar {

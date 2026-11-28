@@ -797,4 +797,297 @@ describe('layout-analysis: multi-column reading order, hyphenation, cross-column
     expect(tokens).toContain('p < 0.05')
     expect(tokens.some(t => t.includes('for every tuple'))).toBe(false)
   })
+
+  test('detects narrow-gutter 2-column body beneath wide Figure 1 + caption and splits bold run-in paragraphs, both with and without graphicHints (合成素材)', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport = page1.getViewport({ scale: 1 })
+    page1.cleanup()
+    const geometry: PageGeometry = { pageNumber: 1, viewport, outputScale: { x: 1, y: 1 } }
+    const mk = (str: string, x: number, pdfY: number, width: number, size = 9, fontName = 'F1') => ({
+      str,
+      dir: 'ltr',
+      width,
+      height: size,
+      transform: [size, 0, 0, size, x, pdfY] as [number, number, number, number, number, number],
+      fontName,
+      hasEOL: false
+    })
+
+    // 顶部通栏 Figure 1 架构图（标签跨越页面中线）+ 通栏图注 + 下方 12pt 窄栏距双栏正文（含首行缩进、粗体行首段标题与章节标题）（合成素材）
+    const items = [
+      // Figure 1 顶部矢量框内文字（含跨越中线 x=285..340 的标签）
+      mk('Node 0', 140, 728, 34, 8),
+      mk('P1', 292, 718, 12, 8),
+      mk('Transfer page', 284, 702, 54, 7.5),
+      mk('Memory', 112, 714, 34, 8),
+      mk('SSD', 114, 690, 20, 8),
+      mk('Node 1', 436, 728, 34, 8),
+      mk('(a) Logical B-Tree and placement', 124, 676, 130, 8),
+      mk('(b) ScaleStore Main Components', 378, 676, 135, 8),
+
+      // 通栏粗体 2 行图注
+      mk(
+        'Figure 1: Overview of ScaleStore using a distributed B-Tree. (a) B-tree pages spread',
+        54,
+        654,
+        496,
+        9,
+        'F_BOLD'
+      ),
+      mk('across local and remote memory. (b) ScaleStore main architecture components.', 54, 643, 350, 9, 'F_BOLD'),
+
+      // 左栏 (x = 54..298, width = 244), 栏距 12pt (298..310)
+      mk('provide high performance even for latency-sensitive OLTP work-', 54, 624, 244, 9),
+      mk('loads. However, such distributed in-memory DBMS designs still', 54, 613.5, 244, 9),
+      mk('require that all data reside in memory even when the hot set fits.', 54, 603, 224, 9),
+
+      // 粗体行首分段: ScaleStore. (与正文同一基线分项)
+      mk('ScaleStore.', 54, 589.5, 46, 9, 'F_BOLD'),
+      mk('Given the two directions, we propose a novel', 103, 589.5, 195, 9),
+      mk('distributed storage engine called ScaleStore that provides', 54, 579, 244, 9),
+      mk('low-latency access to aggregated memory across all nodes.', 54, 568.5, 226, 9),
+
+      // 粗体行首分段: Challenges.
+      mk('Challenges.', 54, 555, 48, 9, 'F_BOLD'),
+      mk('While combining distributed memory with SSDs', 105, 555, 193, 9),
+      mk('appears intuitive, it triggers several non-trivial design questions.', 54, 544.5, 238, 9),
+
+      // 缩进起始新段
+      mk('Distributed cache protocol. To address these challenges, we', 64, 531, 234, 9),
+      mk('implement a distributed caching protocol operating on fixed pages.', 54, 520.5, 244, 9),
+
+      // 右栏 (x = 310..558, width = 248)
+      mk('concurrent modifications even when multiple copies are cached by', 310, 624, 248, 9),
+      mk('several nodes across the entire distributed cluster.', 310, 613.5, 190, 9),
+
+      // 粗体行首分段: High performance eviction.
+      mk('High performance eviction.', 310, 600, 102, 9, 'F_BOLD'),
+      mk('Because ScaleStore caches pages', 415, 600, 143, 9),
+      mk('and handles workload shifts, the local DRAM buffer fills rapidly', 310, 589.5, 248, 9),
+      mk('so unused cold pages must be evicted efficiently from memory.', 310, 579, 240, 9),
+
+      // 章节标题 2 SYSTEM OVERVIEW
+      mk('2 SYSTEM OVERVIEW', 310, 559, 122, 10.5, 'F_BOLD'),
+      mk('In this section, we illustrate the main concept behind our system', 310, 544, 248, 9),
+      mk('using a motivating example and introduce the main components.', 310, 533.5, 242, 9),
+
+      // 小节标题 2.1 A Motivating Example
+      mk('2.1 A Motivating Example', 310, 514, 118, 9.5, 'F_BOLD'),
+      mk('In ScaleStore, page access is transparent across cluster nodes', 310, 499, 248, 9),
+      mk('via a unified page identifier without manual placement.', 310, 488.5, 224, 9)
+    ]
+
+    const graphicHints = extractPageGraphicHints(
+      {
+        fnArray: [74, 91, 91, 91, 75],
+        argsArray: [
+          [[1, 0, 0, 1, 50, 666], [0, 0, 512, 76]],
+          [20, [], [10, 10, 180, 60]],
+          [20, [], [200, 10, 340, 60]],
+          [20, [], [360, 10, 500, 60]],
+          []
+        ]
+      },
+      geometry
+    )
+
+    const textContent: PageTextContent = {
+      items,
+      styles: {
+        F1: { fontFamily: 'Times New Roman', ascent: 0.72, descent: -0.22, vertical: false },
+        F_BOLD: { fontFamily: 'Times Bold', ascent: 0.72, descent: -0.22, vertical: false }
+      },
+      lang: null
+    }
+
+    for (const withHints of [true, false]) {
+      const layout = analyzePageLayout(
+        textContent,
+        geometry,
+        withHints ? { graphicHints } : undefined
+      )
+
+      expect(layout.columnCount).toBe(2)
+
+      const captionBlock = layout.blocks.find(b => b.kind === 'caption')
+      expect(captionBlock?.columnIndex).toBe(0)
+      expect(captionBlock?.sentences.map(s => s.text).join(' ')).toContain('Figure 1: Overview of ScaleStore')
+
+      const scaleStorePara = layout.blocks.find(b => b.sentences.some(s => s.text.startsWith('ScaleStore.')))
+      const challengesPara = layout.blocks.find(b => b.sentences.some(s => s.text.startsWith('Challenges.')))
+      const cachePara = layout.blocks.find(b => b.sentences.some(s => s.text.includes('Distributed cache protocol.')))
+      const evictionPara = layout.blocks.find(b =>
+        b.sentences.some(s => s.text.startsWith('High performance eviction.'))
+      )
+      const secHeading = layout.blocks.find(b => b.sentences.some(s => s.text === '2 SYSTEM OVERVIEW'))
+      const subHeading = layout.blocks.find(b => b.sentences.some(s => s.text === '2.1 A Motivating Example'))
+
+      expect(scaleStorePara?.columnIndex).toBe(1)
+      expect(challengesPara?.columnIndex).toBe(1)
+      expect(cachePara?.columnIndex).toBe(1)
+      expect(evictionPara?.columnIndex).toBe(2)
+      expect(secHeading?.kind).toBe('heading')
+      expect(secHeading?.columnIndex).toBe(2)
+      expect(subHeading?.kind).toBe('heading')
+      expect(subHeading?.columnIndex).toBe(2)
+
+      // 各自然段保持完整多句/多行，不被拆碎且不互相粘连
+      expect(scaleStorePara?.id).not.toBe(challengesPara?.id)
+      expect(challengesPara?.id).not.toBe(cachePara?.id)
+      expect(scaleStorePara?.sentences.map(s => s.text).join(' ')).toContain(
+        'low-latency access to aggregated memory across all nodes.'
+      )
+      expect(evictionPara?.sentences.map(s => s.text).join(' ')).toContain(
+        'so unused cold pages must be evicted efficiently from memory.'
+      )
+    }
+  })
+
+  test('preserves full-width top title and abstract while splitting lower 2-column body (合成素材)', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport = page1.getViewport({ scale: 1 })
+    page1.cleanup()
+    const geometry: PageGeometry = { pageNumber: 1, viewport, outputScale: { x: 1, y: 1 } }
+    const mk = (str: string, x: number, pdfY: number, width: number, size = 10, fontName = 'F1') => ({
+      str,
+      dir: 'ltr',
+      width,
+      height: size,
+      transform: [size, 0, 0, size, x, pdfY] as [number, number, number, number, number, number],
+      fontName,
+      hasEOL: false
+    })
+
+    // 合成混合首页面布局：上半部分 ~40% 为通栏标题/作者/摘要，下半部分为双栏引言与背景（合成素材）
+    const items = [
+      mk('A Synthetic Study on Mixed-Column Academic Page Layouts', 92, 732, 428, 15, 'F_BOLD'),
+      mk('Alice Smith, Bob Chen, Carol Wang', 216, 706, 180, 10.5),
+      mk('Abstract', 54, 676, 48, 11, 'F_BOLD'),
+      mk('Modern research papers frequently combine single-column front matter with dense', 54, 658, 504, 10),
+      mk('two-column body prose on the opening page. Layout segmentation must recognize', 54, 644, 504, 10),
+      mk('the full-width abstract cleanly while preserving left-then-right reading order', 54, 630, 504, 10),
+      mk('across both lower columns without interleaving opposing baselines across the', 54, 616, 504, 10),
+      mk('center column gutter during bilingual side-by-side translation.', 54, 602, 340, 10),
+
+      // 左栏正文
+      mk('1 Introduction', 54, 566, 90, 11.5, 'F_BOLD'),
+      mk('Distributed transaction engines require low latency across', 54, 546, 240, 9.5),
+      mk('thousands of concurrent cores. Prior designs relied on coarse', 54, 533, 240, 9.5),
+      mk('locking schemes that bottlenecked on shared metadata tables.', 54, 520, 232, 9.5),
+      mk('In contrast, partitioned storage keeps hot tuples local to', 64, 503, 230, 9.5),
+      mk('each NUMA socket while bounding cross-node traffic tightly.', 54, 490, 234, 9.5),
+
+      // 右栏正文
+      mk('2 Background and Motivation', 316, 566, 152, 11.5, 'F_BOLD'),
+      mk('Recent hardware advances provide high-bandwidth RDMA fabrics', 316, 546, 242, 9.5),
+      mk('that reduce remote memory access latency to single microseconds.', 316, 533, 242, 9.5),
+      mk('However, naive remote dereferencing still incurs round trips.', 316, 520, 238, 9.5),
+      mk('Caching hot tree pages locally closes this performance gap', 326, 503, 232, 9.5),
+      mk('when invalidation protocols amortize coherence overhead.', 316, 490, 228, 9.5)
+    ]
+
+    const layout = analyzePageLayout(
+      {
+        items,
+        styles: {
+          F1: { fontFamily: 'Times New Roman', ascent: 0.72, descent: -0.22, vertical: false },
+          F_BOLD: { fontFamily: 'Times Bold', ascent: 0.72, descent: -0.22, vertical: false }
+        },
+        lang: null
+      },
+      geometry
+    )
+
+    expect(layout.columnCount).toBe(2)
+
+    const titleBlock = layout.blocks.find(b => b.sentences.some(s => s.text.includes('A Synthetic Study')))
+    const abstractHeading = layout.blocks.find(b => b.sentences.some(s => s.text === 'Abstract'))
+    const abstractBody = layout.blocks.find(b =>
+      b.sentences.some(s => s.text.includes('Modern research papers frequently'))
+    )
+    const introHeading = layout.blocks.find(b => b.sentences.some(s => s.text === '1 Introduction'))
+    const bgHeading = layout.blocks.find(b => b.sentences.some(s => s.text === '2 Background and Motivation'))
+
+    expect(titleBlock?.columnIndex).toBe(0)
+    expect(abstractHeading?.columnIndex).toBe(0)
+    expect(abstractBody?.columnIndex).toBe(0)
+    expect(introHeading?.columnIndex).toBe(1)
+    expect(bgHeading?.columnIndex).toBe(2)
+  })
+
+  test('keeps single-column layout intact despite compact 2-column table and preserves parskip / bold run-in paragraphs (合成素材)', async () => {
+    const page1 = await academicPdf.getPage(1)
+    const viewport = page1.getViewport({ scale: 1 })
+    page1.cleanup()
+    const geometry: PageGeometry = { pageNumber: 1, viewport, outputScale: { x: 1, y: 1 } }
+    const mk = (str: string, x: number, pdfY: number, width: number, size = 10, fontName = 'F1') => ({
+      str,
+      dir: 'ltr',
+      width,
+      height: size,
+      transform: [size, 0, 0, size, x, pdfY] as [number, number, number, number, number, number],
+      fontName,
+      hasEOL: false
+    })
+
+    // 合成纯单栏论文：通栏多段正文 + parskip 段距 + 粗体行首段落 + 嵌入式紧凑双列对照表（合成素材）
+    const items = [
+      // 第 1 段
+      mk('Single-column technical reports rely on consistent margins across the full page', 72, 710, 468, 10),
+      mk('width while mixing paragraphs, bold run-in headings, and summary tables.', 72, 696, 440, 10),
+
+      // 第 2 段（利用中等 parskip 约 20pt 步距 vs 14pt 行距自然分段）
+      mk('Even when an inline benchmark table appears mid-page with two aligned', 72, 676, 468, 10),
+      mk('columns of metrics, the document itself remains strictly single-column.', 72, 662, 435, 10),
+
+      // 第 3 段（紧接其后的粗体行首段标题）
+      mk('Design Principle.', 72, 643, 82, 10, 'F_BOLD'),
+      mk('Every storage request routes through a lock-free queue so', 158, 643, 382, 10),
+      mk('tail latency stays bounded across multiple processor sockets.', 72, 629, 360, 10),
+
+      // 嵌入式 2 列表格（5 行短单元项，左右两列位于 x=120 与 x=340）
+      mk('Metric', 120, 588, 36, 9, 'F_BOLD'),
+      mk('Baseline', 340, 588, 44, 9, 'F_BOLD'),
+      mk('Throughput', 120, 574, 58, 9),
+      mk('12.4 Mops/s', 340, 574, 58, 9),
+      mk('P99 Latency', 120, 560, 60, 9),
+      mk('4.2 us', 340, 560, 34, 9),
+      mk('DRAM Footprint', 120, 546, 78, 9),
+      mk('64.0 GB', 340, 546, 42, 9),
+      mk('Cache Hit Rate', 120, 532, 74, 9),
+      mk('98.5%', 340, 532, 32, 9),
+
+      // 表格下方恢复单栏通栏正文
+      mk('As summarized above, deterministic layout rules preserve natural reading flow', 72, 496, 468, 10),
+      mk('and classify embedded metric tables as non-translatable structural regions.', 72, 482, 452, 10)
+    ]
+
+    const layout = analyzePageLayout(
+      {
+        items,
+        styles: {
+          F1: { fontFamily: 'Times New Roman', ascent: 0.72, descent: -0.22, vertical: false },
+          F_BOLD: { fontFamily: 'Times Bold', ascent: 0.72, descent: -0.22, vertical: false }
+        },
+        lang: null
+      },
+      geometry
+    )
+
+    expect(layout.columnCount).toBe(1)
+
+    const paragraphs = layout.blocks.filter(b => b.kind === 'paragraph')
+    expect(paragraphs.length).toBeGreaterThanOrEqual(4)
+    for (const p of paragraphs) {
+      expect(p.columnIndex).toBe(0)
+    }
+
+    const designBlock = paragraphs.find(b => b.sentences.some(s => s.text.startsWith('Design Principle.')))
+    expect(designBlock).toBeDefined()
+    expect(designBlock?.sentences.map(s => s.text).join(' ')).not.toContain('Even when an inline benchmark')
+
+    const tableBlocks = layout.blocks.filter(b => b.kind === 'table')
+    expect(tableBlocks.length).toBe(1)
+    expect(isTranslatableBlock(tableBlocks[0])).toBe(false)
+  })
 })

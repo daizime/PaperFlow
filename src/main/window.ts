@@ -1,6 +1,42 @@
 import { BrowserWindow, Menu, screen, session, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'node:path'
+import type { ReadingTheme } from '../shared/contracts'
 import { APP_URL, DEV_ORIGIN, contentSecurityPolicy, developmentUrl } from './services/app-protocol'
+
+export const WINDOW_THEME_SETTING_KEY = 'ui:theme'
+// 比 40px 的 .app-header 少 1px，避免原生窗口控件叠加层盖住顶栏底部的 1px 分隔线
+export const TITLEBAR_OVERLAY_HEIGHT = 39
+
+const WINDOW_THEME_CHROME: Record<ReadingTheme, { backgroundColor: string; overlayColor: string; symbolColor: string }> = {
+  light: { backgroundColor: '#eceef2', overlayColor: '#fdfdfd', symbolColor: '#4a5468' },
+  sepia: { backgroundColor: '#f2ead8', overlayColor: '#f7f1e3', symbolColor: '#5b4d38' },
+  dark: { backgroundColor: '#14171d', overlayColor: '#1b2029', symbolColor: '#cdd7e6' }
+}
+
+export function normalizeReadingTheme(value: string | null | undefined): ReadingTheme {
+  return value === 'sepia' || value === 'dark' ? value : 'light'
+}
+
+export function applyWindowThemeChrome(window: BrowserWindow, theme: ReadingTheme): void {
+  if (window.isDestroyed()) return
+  const palette = WINDOW_THEME_CHROME[normalizeReadingTheme(theme)]
+  try {
+    window.setBackgroundColor(palette.backgroundColor)
+  } catch {
+    // 窗口正在销毁或部分 Linux 合成器不支持动态修改背景色时安全忽略
+  }
+  if ((process.platform === 'win32' || process.platform === 'linux') && typeof window.setTitleBarOverlay === 'function') {
+    try {
+      window.setTitleBarOverlay({
+        color: palette.overlayColor,
+        symbolColor: palette.symbolColor,
+        height: TITLEBAR_OVERLAY_HEIGHT
+      })
+    } catch {
+      // 某些无 WCO 原生叠加层支持的 Linux 窗口管理器下静默降级
+    }
+  }
+}
 
 let appMenuInstalled = false
 
@@ -57,9 +93,26 @@ export function installSessionSecurity(): void {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [contentSecurityPolicy(true)] } })
   })
 }
-export async function createWindow(onCreated?: (window: BrowserWindow) => void): Promise<BrowserWindow> {
+export async function createWindow(
+  onCreated?: (window: BrowserWindow) => void,
+  initialTheme: ReadingTheme = 'light'
+): Promise<BrowserWindow> {
   const dev = developmentUrl() !== null
   installApplicationMenu(dev)
+  const palette = WINDOW_THEME_CHROME[normalizeReadingTheme(initialTheme)]
+  const titleBarOptions =
+    process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : process.platform === 'win32' || process.platform === 'linux'
+        ? {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: {
+              color: palette.overlayColor,
+              symbolColor: palette.symbolColor,
+              height: TITLEBAR_OVERLAY_HEIGHT
+            }
+          }
+        : {}
   const workArea = screen.getPrimaryDisplay().workAreaSize
   const minWidth = Math.min(1080, Math.max(640, Math.floor(workArea.width * 0.7)))
   const minHeight = Math.min(680, Math.max(440, Math.floor(workArea.height * 0.7)))
@@ -67,7 +120,8 @@ export async function createWindow(onCreated?: (window: BrowserWindow) => void):
   const height = Math.min(900, Math.max(minHeight, Math.floor(workArea.height * 0.92)))
   const window = new BrowserWindow({
     title: 'Foliopair', width, height, minWidth, minHeight, resizable: true, maximizable: true,
-    show: false, autoHideMenuBar: true, backgroundColor: '#f5f6f8',
+    show: false, autoHideMenuBar: true, backgroundColor: palette.backgroundColor,
+    ...titleBarOptions,
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'), nodeIntegration: false,

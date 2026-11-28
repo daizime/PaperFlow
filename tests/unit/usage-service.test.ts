@@ -343,15 +343,18 @@ describe('UsageService 与余额检测逻辑', () => {
       note: 'ok'
     }
     expect(isLowBalance(okBalance, summary.preferences)).toBe(false)
-    expect(formatHeaderEnginePill(settings, 'deepseek-chat', okBalance, summary).text).toBe(
-      'API · deepseek-chat · 余 ¥18.42'
-    )
+    const okPill = formatHeaderEnginePill(settings, 'deepseek-chat', okBalance, summary)
+    expect(okPill.text).toBe('API · deepseek-chat · 余 ¥18.42')
+    expect(okPill.compactText).toBe('API · deepseek-chat')
+    expect(okPill.detailBadge).toBe('实时余额 ¥18.42')
 
     const lowBalance: ProviderBalanceSnapshot = { ...okBalance, totalBalance: 1.2 }
     expect(isLowBalance(lowBalance, summary.preferences)).toBe(true)
     const lowPill = formatHeaderEnginePill(settings, 'deepseek-chat', lowBalance, summary)
     expect(lowPill.tone).toBe('warn')
     expect(lowPill.text).toContain('余 ¥1.20 ⚠')
+    expect(lowPill.compactText).toBe('API · deepseek-chat · 余 ¥1.20 ⚠')
+    expect(lowPill.detailBadge).toContain('低于预警线')
 
     const est = estimateReferenceCost({ promptTokens: 1120, completionTokens: 720, totalTokens: 1840 }, summary.preferences)
     expect(est?.text).toBe('≈ ¥0.0026')
@@ -379,12 +382,16 @@ describe('UsageService 与余额检测逻辑', () => {
       ...settings,
       openai: { ...settings.openai, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' }
     }
-    expect(formatHeaderEnginePill(genericSettings, 'gpt-4o-mini', null, summary).text).toBe(
-      'API · gpt-4o-mini · 今日 12.4k tok'
-    )
+    const genericPill = formatHeaderEnginePill(genericSettings, 'gpt-4o-mini', null, summary)
+    expect(genericPill.text).toBe('API · gpt-4o-mini · 今日 12.4k tok')
+    expect(genericPill.compactText).toBe('API · gpt-4o-mini')
+    expect(genericPill.detailBadge).toBe('今日 12.4k tok')
 
     const cliSettings: TranslationSettings = { ...settings, provider: 'cli' }
-    expect(formatHeaderEnginePill(cliSettings, 'Codex CLI', null, summary).text).toBe('CLI · Codex CLI · 订阅配额')
+    const cliPill = formatHeaderEnginePill(cliSettings, 'Codex CLI', null, summary)
+    expect(cliPill.text).toBe('CLI · Codex CLI · 订阅配额')
+    expect(cliPill.compactText).toBe('CLI · Codex CLI')
+    expect(cliPill.detailBadge).toBe('订阅配额')
 
     // 草稿页签切换推理不串台
     expect(

@@ -227,6 +227,47 @@ test('导入本地文件夹、批注同步导出、乱码标题识别、排序�
     // 验证多开标签页与两篇 PDF 同屏并排对照，且文件夹列表仍保持充足高度；折叠底部「当前查看」后树高进一步增大
     await page.getByTestId('pdf-tab-strip').waitFor({ state: 'visible' })
     await page.getByTestId(`tree-doc-${alphaDocId}`).hover()
+
+    // 校验激活行与悬停行内各控件水平零重叠且保留清晰标题宽度
+    const treeRowGeometry = await page.evaluate(
+      ({ activeId, hoveredId }) => {
+        const measureRow = (id: string) => {
+          const row = document.querySelector<HTMLElement>(`[data-testid="tree-doc-${id}"]`)!
+          const btn = row.querySelector<HTMLElement>('.library-tree-doc-btn')!
+          const title = row.querySelector<HTMLElement>('.library-tree-doc-title')!
+          const meta = row.querySelector<HTMLElement>('.library-tree-doc-meta')
+          const actions = row.querySelector<HTMLElement>('.library-tree-doc-actions')!
+          const status = row.querySelector<HTMLElement>('.library-status-pill')!
+          return {
+            titleWidth: title.getBoundingClientRect().width,
+            btnRect: btn.getBoundingClientRect(),
+            metaDisplay: meta ? getComputedStyle(meta).display : null,
+            metaRect: meta ? meta.getBoundingClientRect() : null,
+            actionsDisplay: getComputedStyle(actions).display,
+            actionsRect: actions.getBoundingClientRect(),
+            statusRect: status.getBoundingClientRect()
+          }
+        }
+        return {
+          active: measureRow(activeId),
+          hovered: measureRow(hoveredId)
+        }
+      },
+      { activeId: messyDocId, hoveredId: alphaDocId }
+    )
+    expect(treeRowGeometry.active.titleWidth).toBeGreaterThan(20)
+    expect(treeRowGeometry.active.metaDisplay).not.toBe('none')
+    expect(treeRowGeometry.active.metaRect!.width).toBeGreaterThan(0)
+    expect(treeRowGeometry.active.actionsDisplay).toBe('none')
+    expect(treeRowGeometry.active.btnRect.right).toBeLessThanOrEqual(treeRowGeometry.active.metaRect!.left + 0.5)
+    expect(treeRowGeometry.active.metaRect!.right).toBeLessThanOrEqual(treeRowGeometry.active.statusRect.left + 0.5)
+
+    expect(treeRowGeometry.hovered.titleWidth).toBeGreaterThan(20)
+    expect(treeRowGeometry.hovered.actionsDisplay).not.toBe('none')
+    expect(treeRowGeometry.hovered.actionsRect.width).toBeGreaterThan(0)
+    expect(treeRowGeometry.hovered.btnRect.right).toBeLessThanOrEqual(treeRowGeometry.hovered.actionsRect.left + 0.5)
+    expect(treeRowGeometry.hovered.actionsRect.right).toBeLessThanOrEqual(treeRowGeometry.hovered.statusRect.left + 0.5)
+
     await page.getByTestId(`tree-doc-split-${alphaDocId}`).click()
     await expect(page.getByTestId('split-pane-primary')).toBeVisible()
     await expect(page.getByTestId('split-pane-secondary')).toBeVisible()

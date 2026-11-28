@@ -919,13 +919,15 @@ export function splitTextWithInlineFormulas(
 }
 
 /**
- * 统计各正文栏的基准左边缘坐标（排除极窄片段与公式块，避免公式缩进拉偏整栏基准）。
+ * 统计各正文栏的基准左边缘坐标（排除极窄片段与公式块，避免公式缩进拉偏整栏基准）；
+ * `columnIndex === 0` 时仅统计非标题宽块，避免居中大标题拉偏单栏/通栏正文左边界。
  */
 export function computeColumnLeftEdges(blocks: readonly AnalyzedBlock[]): Map<number, number> {
   const columnLeftByIndex = new Map<number, number>()
   for (const block of blocks) {
-    if (block.columnIndex <= 0 || !isTranslatableBlock(block)) continue
+    if (!isTranslatableBlock(block)) continue
     if (block.displayBounds.width < 60) continue
+    if (block.columnIndex === 0 && block.kind === 'heading') continue
     const leftEdge = block.displayBounds.x
     const prev = columnLeftByIndex.get(block.columnIndex)
     if (prev === undefined || leftEdge < prev) {
@@ -933,6 +935,57 @@ export function computeColumnLeftEdges(blocks: readonly AnalyzedBlock[]): Map<nu
     }
   }
   return columnLeftByIndex
+}
+
+/**
+ * 统计各正文栏及单栏/通栏（columnIndex === 0）的安全右边界坐标：
+ * - 多栏（columnIndex > 0）：取同栏宽块的右边缘最大值，并避免越过右邻栏左边界；
+ * - 单栏/通栏（columnIndex === 0）：取整页宽正文块的统一内容右边缘，防止单栏段落在空白处外溢导致右侧参差不齐。
+ */
+export function computeColumnRightEdges(
+  blocks: readonly AnalyzedBlock[],
+  columnLeftByIndex?: ReadonlyMap<number, number>
+): Map<number, number> {
+  const columnRightByIndex = new Map<number, number>()
+  let wideContentRight: number | null = null
+  let fallbackContentRight: number | null = null
+
+  for (const block of blocks) {
+    if (!isTranslatableBlock(block)) continue
+    const w = block.displayBounds.width
+    const rightEdge = block.displayBounds.x + w
+    if (w >= 60) {
+      if (wideContentRight === null || rightEdge > wideContentRight) {
+        wideContentRight = rightEdge
+      }
+    }
+    if (w >= 40) {
+      if (fallbackContentRight === null || rightEdge > fallbackContentRight) {
+        fallbackContentRight = rightEdge
+      }
+      if (block.columnIndex > 0) {
+        const prev = columnRightByIndex.get(block.columnIndex) ?? 0
+        if (rightEdge > prev) columnRightByIndex.set(block.columnIndex, rightEdge)
+      }
+    }
+  }
+
+  if (columnLeftByIndex) {
+    for (const [col, right] of columnRightByIndex.entries()) {
+      const nextColLeft = columnLeftByIndex.get(col + 1)
+      if (nextColLeft !== undefined && right > nextColLeft - 4) {
+        const curColLeft = columnLeftByIndex.get(col) ?? 0
+        columnRightByIndex.set(col, Math.max(curColLeft + 40, nextColLeft - 4))
+      }
+    }
+  }
+
+  const contentRight = wideContentRight ?? fallbackContentRight
+  if (contentRight !== null) {
+    columnRightByIndex.set(0, contentRight)
+  }
+
+  return columnRightByIndex
 }
 
 /**
@@ -964,7 +1017,7 @@ export function computeOverlayBlockIndent(
     }
   }
 
-  if (block.kind === 'paragraph' && block.columnIndex > 0) {
+  if (block.kind === 'paragraph' && block.columnIndex >= 0) {
     const colLeft = columnLeftByIndex.get(block.columnIndex)
     if (colLeft !== undefined) {
       const offsetFromCol = block.displayBounds.x - colLeft
@@ -1020,12 +1073,16 @@ function roundPxTenths(value: number): number {
   return Math.round(value * 10) / 10
 }
 
+function rangesOverlapHorizontally(aLeft: number, aRight: number, bLeft: number, bRight: number): boolean {
+  return Math.min(aRight, bRight) - Math.max(aLeft, bLeft) > 2
+}
+
 function entriesOverlapHorizontally(a: InternalOverlayBoxEntry, b: InternalOverlayBoxEntry): boolean {
-  return Math.min(a.left + a.baseWidth, b.left + b.baseWidth) - Math.max(a.left, b.left) > 2
+  return rangesOverlapHorizontally(a.left, a.left + a.baseWidth, b.left, b.left + b.baseWidth)
 }
 
 /**
- * 统一求解整页译文覆盖框的安全边界，消除上下邻接块互相遮挡并预留不可译障碍物安全间距。
+ * 统一求解整页译文覆盖框的安全边界，消除上下/对角邻接块互相遮挡并预留不可译障碍物安全间距。
  */
 export function resolveOverlayBlockGeometries(
   layout: PageLayoutResult,
@@ -1074,10 +1131,12 @@ export function resolveOverlayBlockGeometries(
       top = Math.max(0, rawTop - 1)
       bottom = Math.min(pageHeightPx, Math.max(top + 4, rawBottom + 1))
     } else if (role === 'translatable') {
+      const bottomPad = Math.min(2.5, Math.max(1.5, block.fontSize * scale * 0.18))
+      const minSingleLineH = Math.min(14, Math.max(8, block.fontSize * scale * 1.18))
       left = Math.max(0, rawLeft - 1)
       baseWidth = Math.max(24, rawRight - rawLeft + 2)
-      top = Math.max(0, rawTop - 1)
-      bottom = Math.min(pageHeightPx, Math.max(top + 15, rawBottom + 3))
+      top = Math.max(0, rawTop - 1.5)
+      bottom = Math.min(pageHeightPx, Math.max(top + minSingleLineH, rawBottom + bottomPad))
     }
 
     const firstLineIndentPx =
@@ -1102,12 +1161,11 @@ export function resolveOverlayBlockGeometries(
 
   entries.sort((a, b) => a.rawTop - b.rawTop || a.rawBottom - b.rawBottom || a.left - b.left)
 
-  // 1. 纵向碰撞消解：在相邻两块水平有交集时，阻止上方扩高或下方上探越界覆盖
+  // 1. 纵向碰撞消解：在相邻两块水平有交集时，保证零叠压且不推低原块顶边露字
   for (let i = 0; i < entries.length; i += 1) {
     const a = entries[i]
     for (let j = i + 1; j < entries.length; j += 1) {
       const b = entries[j]
-      if (b.rawCenterY <= a.rawCenterY + 1) continue
       if (!entriesOverlapHorizontally(a, b)) continue
       if (a.bottom <= b.top) continue
 
@@ -1118,16 +1176,22 @@ export function resolveOverlayBlockGeometries(
         a.bottom = Math.max(a.top + 4, Math.min(a.bottom, Math.floor(b.top)))
         a.tightBottom = true
       } else if (a.role !== 'obstacle' && b.role !== 'obstacle') {
-        const splitY = Math.round((a.rawBottom + b.rawTop) / 2)
-        const minSplit = Math.ceil(a.top + 4)
-        const maxSplit = Math.floor(b.bottom - 4)
-        if (minSplit <= maxSplit) {
-          const safeSplitY = Math.max(minSplit, Math.min(maxSplit, splitY))
-          a.bottom = Math.min(a.bottom, safeSplitY)
-          b.top = Math.max(b.top, safeSplitY)
-          a.tightBottom = true
-          b.tightTop = true
+        if (b.rawTop >= a.rawBottom) {
+          const rawMid = (a.rawBottom + b.rawTop) / 2
+          a.bottom = Math.min(a.bottom, Math.max(a.rawBottom, Math.floor(rawMid)))
+          b.top = Math.max(b.top, Math.min(b.rawTop, Math.ceil(rawMid)))
+        } else {
+          const splitY = Math.round((a.rawBottom + b.rawTop) / 2)
+          const minSplit = Math.ceil(a.top + 4)
+          const maxSplit = Math.floor(b.bottom - 4)
+          if (minSplit <= maxSplit) {
+            const safeSplitY = Math.max(minSplit, Math.min(maxSplit, splitY))
+            a.bottom = Math.min(a.bottom, safeSplitY)
+            b.top = Math.max(b.top, safeSplitY)
+          }
         }
+        a.tightBottom = true
+        b.tightTop = true
       }
     }
   }
@@ -1137,79 +1201,109 @@ export function resolveOverlayBlockGeometries(
     const a = entries[i]
     for (let j = i + 1; j < entries.length; j += 1) {
       const b = entries[j]
-      if (b.rawCenterY <= a.rawCenterY + 1) continue
       if (!entriesOverlapHorizontally(a, b)) continue
-      if (b.top - a.bottom <= 2.5) {
+      if (b.top - a.bottom <= 2.5 && b.bottom >= a.top) {
         if (a.role !== 'obstacle') a.tightBottom = true
         if (b.role !== 'obstacle') b.tightTop = true
       }
     }
   }
 
-  // 3. 计算最终宽高、安全扩高与安全扩宽上限
-  const finalizedTopHeight = new Map<string, { top: number; height: number }>()
+  // 3A. 固化基础坐标盒
+  const finalizedTopHeight = new Map<string, { left: number; baseWidth: number; top: number; height: number }>()
   for (const e of entries) {
+    const left = roundPxTenths(e.left)
+    const baseWidth = roundPxTenths(e.baseWidth)
     const top = roundPxTenths(e.top)
     const height = Math.max(4, Math.floor((e.bottom - top + 1e-6) * 10) / 10)
-    finalizedTopHeight.set(e.id, { top, height })
+    finalizedTopHeight.set(e.id, { left, baseWidth, top, height })
   }
 
+  // 3B. 先求解每块所属栏（含单栏/通栏 columnIndex === 0）及右侧无碰撞的安全扩宽上限 maxSafeWidth
+  const derivedColRights = computeColumnRightEdges(layout.blocks, columnLeftByIndex)
+  const maxWidthById = new Map<string, number>()
   for (const a of entries) {
     if (a.role === 'obstacle') continue
     const geom = finalizedTopHeight.get(a.id)!
-    const top = geom.top
-    const height = geom.height
-    const aLeft = roundPxTenths(a.left)
-    const aBaseWidth = roundPxTenths(a.baseWidth)
+    const pageSafeWidth = Math.max(geom.baseWidth, pageWidthPx - 16 - geom.left)
+    const colRightPt =
+      columnRightByIndex.get(a.block.columnIndex) ??
+      (a.block.columnIndex === 0 ? derivedColRights.get(0) : undefined)
+    const symmetricFallbackWidth = Math.max(
+      geom.baseWidth,
+      pageWidthPx - Math.max(16, Math.min(geom.left, pageWidthPx * 0.25)) - geom.left
+    )
+    let maxSafeWidth =
+      colRightPt !== undefined
+        ? Math.max(geom.baseWidth, colRightPt * scale + 2 - geom.left)
+        : symmetricFallbackWidth
+    maxSafeWidth = Math.min(pageSafeWidth, maxSafeWidth)
 
-    let maxSafeHeight = height
+    const estimatedMaxBottom = geom.top + geom.height + Math.round(Math.max(4, a.block.fontSize * scale * 0.85))
+    for (const o of entries) {
+      if (o.id === a.id) continue
+      const oGeom = finalizedTopHeight.get(o.id)!
+      if (oGeom.left <= geom.left + 4) continue
+      if (oGeom.top + oGeom.height >= geom.top - 1 && oGeom.top <= estimatedMaxBottom + 1) {
+        maxSafeWidth = Math.min(maxSafeWidth, Math.max(geom.baseWidth, oGeom.left - 4 - geom.left))
+      }
+    }
+    const roundedMaxWidth = roundPxTenths(maxSafeWidth)
+    maxWidthById.set(a.id, roundedMaxWidth)
+
+    // 多行满栏正文/列表/图注若右缘原本即贴近同栏统一右边界，将 baseWidth 齐平贴靠，避免相邻段右缘参差
+    if (
+      a.role === 'translatable' &&
+      colRightPt !== undefined &&
+      (a.block.kind === 'paragraph' || a.block.kind === 'list-item' || a.block.kind === 'caption') &&
+      a.rawBottom - a.rawTop > a.block.fontSize * scale * 1.6 &&
+      roundedMaxWidth > geom.baseWidth
+    ) {
+      const colLeftPt = columnLeftByIndex.get(a.block.columnIndex) ?? a.block.displayBounds.x
+      const colWidthPx = Math.max(1, (colRightPt - colLeftPt) * scale)
+      const colRightPx = colRightPt * scale
+      const rawBlockRightPx = (a.block.displayBounds.x + a.block.displayBounds.width) * scale
+      const nearRightEdgeGap = colRightPx - rawBlockRightPx
+      if (nearRightEdgeGap >= -2 && nearRightEdgeGap <= Math.max(colWidthPx * 0.14, 24 * scale)) {
+        geom.baseWidth = roundedMaxWidth
+      }
+    }
+  }
+
+  // 3C. 再按扩宽后的水平区间 [left, left + maxSafeWidth] 扫描下方最近块求解安全扩高 maxSafeHeight，杜绝对角遮挡
+  for (const a of entries) {
+    if (a.role === 'obstacle') continue
+    const geom = finalizedTopHeight.get(a.id)!
+    const aMaxWidth = maxWidthById.get(a.id) ?? geom.baseWidth
+    const aMaxRight = geom.left + aMaxWidth
+
+    let maxSafeHeight = geom.height
     if (a.role === 'translatable') {
       let nearestBelowTop = pageHeightPx
       for (const b of entries) {
         if (b.id === a.id) continue
-        if (b.rawCenterY <= a.rawCenterY + 1) continue
-        if (!entriesOverlapHorizontally(a, b)) continue
-        const bTop = finalizedTopHeight.get(b.id)!.top
-        if (bTop >= a.bottom - 0.5 && bTop < nearestBelowTop) {
-          nearestBelowTop = bTop
+        const bGeom = finalizedTopHeight.get(b.id)!
+        if (b.rawCenterY <= a.rawCenterY + 0.5 && bGeom.top < geom.top + geom.height - 0.5) continue
+        const bMaxWidth = maxWidthById.get(b.id) ?? bGeom.baseWidth
+        if (!rangesOverlapHorizontally(geom.left, aMaxRight, bGeom.left, bGeom.left + bMaxWidth)) continue
+        if (bGeom.top >= geom.top + geom.height - 0.5 && bGeom.top < nearestBelowTop) {
+          nearestBelowTop = bGeom.top
         }
       }
 
-      if (!a.tightBottom && nearestBelowTop - a.bottom > 3) {
-        const freeBelow = Math.max(0, Math.floor(nearestBelowTop - 3) - (top + height))
+      if (!a.tightBottom && nearestBelowTop - (geom.top + geom.height) > 3) {
+        const freeBelow = Math.max(0, Math.floor(nearestBelowTop - 3) - (geom.top + geom.height))
         const maxGrow = Math.min(freeBelow, Math.round(Math.max(4, a.block.fontSize * scale * 0.75)))
-        maxSafeHeight = roundPxTenths(height + maxGrow)
-      }
-    }
-
-    const pageSafeWidth = Math.max(aBaseWidth, pageWidthPx - 16 - a.left)
-    let maxSafeWidth =
-      a.block.columnIndex > 0
-        ? Math.max(
-            aBaseWidth,
-            (columnRightByIndex.get(a.block.columnIndex) ?? a.block.displayBounds.x + a.block.displayBounds.width) *
-              scale +
-              2 -
-              a.left
-          )
-        : pageSafeWidth
-    maxSafeWidth = Math.min(pageSafeWidth, maxSafeWidth)
-
-    for (const o of entries) {
-      if (o.id === a.id) continue
-      if (o.left <= a.left + 4) continue
-      const oGeom = finalizedTopHeight.get(o.id)!
-      if (o.bottom >= top - 1 && oGeom.top <= top + maxSafeHeight + 1) {
-        maxSafeWidth = Math.min(maxSafeWidth, Math.max(aBaseWidth, o.left - 4 - a.left))
+        maxSafeHeight = roundPxTenths(geom.height + maxGrow)
       }
     }
 
     result.set(a.id, {
-      left: aLeft,
-      top,
-      baseWidth: aBaseWidth,
-      maxSafeWidth: roundPxTenths(maxSafeWidth),
-      height,
+      left: geom.left,
+      top: geom.top,
+      baseWidth: geom.baseWidth,
+      maxSafeWidth: aMaxWidth,
+      height: geom.height,
       maxSafeHeight,
       firstLineIndentPx: a.firstLineIndentPx,
       tightBottom: a.tightBottom,

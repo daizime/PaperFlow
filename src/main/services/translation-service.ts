@@ -1335,6 +1335,8 @@ export class TranslationService {
           })
         })
 
+        // 子进程未读完 stdin 即退出时，写入失败只以异步 error 事件上报。
+        child.stdin?.on('error', () => {})
         try {
           child.stdin?.write(prompt, 'utf8')
           child.stdin?.end()

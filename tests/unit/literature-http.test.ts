@@ -67,6 +67,15 @@ describe('学术链接的公网访问边界（合成 DNS）', () => {
       .rejects.toThrow(/拒绝访问/)
   })
 
+  it('DNS 查询本身失败时给出中文提示，不外泄系统原始错误文本', async () => {
+    const resolve = vi.fn<PublicAddressResolver>().mockRejectedValue(
+      Object.assign(new Error('getaddrinfo ENOTFOUND ' + syntheticHost), { code: 'ENOTFOUND' })
+    )
+    const expected = '未能解析学术链接域名「' + syntheticHost + '」，请检查网络连接后重试。'
+    await expect(resolveForConnection(resolve, { all: true })).rejects.toThrow(expected)
+    await expect(validateExternalBrowserUrl('https://' + syntheticHost, resolve)).rejects.toThrow(expected)
+  })
+
   it('真实 HTTPS 请求的 socket lookup 拒绝合成的内网解析结果，仅调用一次 DNS', async () => {
     resolveDns.mockClear().mockResolvedValue([{ address: '192.168.1.2', family: 4 }])
     await expect(requestLiteratureResponse(

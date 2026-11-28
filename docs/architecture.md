@@ -64,7 +64,7 @@ flowchart LR
 
 ## 安全边界
 
-主窗口与校验窗口均启用 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`、`webSecurity: true`；不以关闭 Chromium 安全机制修复加载。译文排版 PDF 导出所用的隐藏窗口同样启用上述配置并关闭 JavaScript，运行于独立 `session` 分区，仅放行导出 HTML 自身的 `file://` URL，渲染完成后立即销毁并清理临时目录。Preload 使用 electron-vite 独立入口构建为 CJS 单文件，依赖完整打包，运行时只依赖沙盒允许的 Electron 模块。
+主窗口与校验窗口均启用 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`、`webSecurity: true`；不以关闭 Chromium 安全机制修复加载。译文排版 PDF 导出所用的隐藏窗口同样启用上述配置并关闭 JavaScript，运行于固定的独立 `session` 分区（导出串行执行，避免每次导出常驻一份浏览器上下文），仅放行导出 HTML 自身的 `file://` URL，渲染完成后立即销毁并清理临时目录。Preload 使用 electron-vite 独立入口构建为 CJS 单文件，依赖完整打包，运行时只依赖沙盒允许的 Electron 模块。
 
 生产入口为 `app://bundle/index.html`，校验器为 `app://bundle/validation.html`。协议在 ready 前注册为 standard/secure，支持本地 fetch，不设置 `bypassCSP`。handler 只服务启动时枚举的构建资源，校验 host、方法、路径和查询串；文献库与任意磁盘文件不在资源清单中。开发入口只接受固定 `http://127.0.0.1:5173`，生产忽略开发服务器环境变量。
 
@@ -72,7 +72,7 @@ flowchart LR
 
 业务 handler 每次校验调用者 `webContents` 身份、`senderFrame === mainFrame` 和精确受信 URL，而非 URL 前缀。参数由 Zod 校验，校验失败统一返回「请求参数无效。」；renderer 无法指定任意 IPC channel 或任意系统 Shell 命令。除用户在系统文件/目录对话框中亲手选定的路径（`pickCliExecutable` 返回的可执行文件路径、目录导入/导出的目录路径）外，渲染层不获得本机路径，也不获得库内存储文件名与原始 API 密钥。
 
-**OpenAI 兼容 HTTP 翻译（限定 `http:`/`https:` URL）与本机 AI CLI 进程唤醒均由主进程 `TranslationService` 受控执行**：CLI 命令须通过纯文件系统 `PATH` 解析（`resolveCliExecutable`）并结合 Zod 严格拦截 Shell 注入元字符（`[&|<>^%!\r\n`$;]`），提示词通过 `stdin` 管道传入空隔离临时目录并在超时/取消时终止进程树。凭据与外部访问的约束如下：
+**OpenAI 兼容 HTTP 翻译（限定 `http:`/`https:` URL）与本机 AI CLI 进程唤醒均由主进程 `TranslationService` 受控执行**：CLI 命令须通过纯文件系统 `PATH` 解析（`resolveCliExecutable`）并结合 Zod 严格拦截 Shell 注入元字符（`[&|<>^%!\r\n`$;]`），提示词通过 `stdin` 管道传入空隔离临时目录并在超时/取消时终止进程树；子进程未读完 `stdin` 即退出时，写入失败按该次 CLI 调用失败处理，不产生主进程未捕获异常。凭据与外部访问的约束如下：
 
 - **API Key 按完整 Base URL 绑定**（`translation-credentials.ts`）：密钥经 Electron `safeStorage` 加密存于 `app_settings` 的 `translation.openaiCredentials.v2`，仅向前端暴露 `hasApiKey` 与 `apiKeyPreview`。保存设置时省略 `apiKey` 只能复用绑定至同一 Base URL 的密钥；更换地址后旧密钥不可见也不可用，需重新录入。旧版未绑定地址的 `translation.openaiApiKey.v1` 仅用于迁移。
 - **本机 CLI 系统授权**（`translation-cli-authorization.ts`）：首次使用某程序或变更程序 / 参数时，`saveTranslationSettings` 与 `testTranslationConnection` 先经 `authorizeCli` 弹出系统对话框列明程序、参数与最长运行时间；用户拒绝则整个请求失败。已确认的程序与参数记录于 `translation.cliAuthorizations.v1`。
@@ -192,7 +192,7 @@ flowchart LR
 | API | channel | 校验与行为 |
 | --- | --- | --- |
 | `exportBackup()` | `backup:export` | 无参数；系统保存框后将整库打包为单个 `.zip`（不含加密 API Key） |
-| `importBackup()` | `backup:import` | 无参数；系统文件框选择 `.zip`，写入前校验 512 MiB 体积上限后幂等恢复 |
+| `importBackup()` | `backup:import` | 无参数；系统文件框选择 `.zip`，读取后校验 512 MiB 体积上限，并在写入任何文献与分类前核对清单引用的全部 PDF 条目存在且文件头、大小合法，随后幂等恢复；单个 PDF 解析失败仍会留下可重试的半恢复状态 |
 | `openExternalUrl(url)` | `system:open-external` | ≤1500 字符链接，初始地址经主进程 HTTPS 和公网地址校验后交由系统浏览器打开 |
 | `copyText(text)` | `clipboard:write-text` | 1–200,000 字符文本；写入系统剪贴板 |
 | `copyImageDataUrl(dataUrl)` | `clipboard:write-image` | ≤12 MiB 的 `data:image/png;base64,` URL；转码为 PNG 后写入系统剪贴板 |

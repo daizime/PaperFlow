@@ -242,4 +242,29 @@ describe('合成文献的备份往返、旧包兼容和恢复幂等', () => {
     await targetBackup.importBackupArchive(archive)
     expect(target.listFolders()).toHaveLength(2)
   })
+
+  it('清单引用的 PDF 缺失或无效时，在写入任何文献与分类前整体失败', async () => {
+    await addDocument('first')
+    await addDocument('second')
+    source.createFolder({ name: '合成分类', contextSummary: '合成语境' })
+    const entries = readZipBuffer((await sourceBackup.exportBackupArchive()).zipBuffer)
+    const manifest = JSON.parse(entries.get('paperflow-backup.json')!.toString('utf8')) as BackupManifest
+    const secondPdfPath = manifest.documents[1].pdfPath
+    const secondPdf = entries.get(secondPdfPath)!
+    const rebuild = () => createZipBuffer([...entries].map(([name, data]) => ({ name, data })))
+
+    entries.delete(secondPdfPath)
+    await expect(targetBackup.importBackupArchive(rebuild())).rejects.toThrow('缺少 PDF 文件')
+    expect(target.listDocuments()).toHaveLength(0)
+    expect(target.listFolders()).toHaveLength(0)
+
+    entries.set(secondPdfPath, Buffer.from('synthetic payload without a PDF header'))
+    await expect(targetBackup.importBackupArchive(rebuild())).rejects.toThrow('PDF 无效')
+    expect(target.listDocuments()).toHaveLength(0)
+    expect(target.listFolders()).toHaveLength(0)
+
+    entries.set(secondPdfPath, secondPdf)
+    expect((await targetBackup.importBackupArchive(rebuild())).importedDocuments).toBe(2)
+    expect(target.listFolders()).toHaveLength(1)
+  })
 })

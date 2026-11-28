@@ -80,7 +80,13 @@ export function validateExternalHttpsUrl(rawUrl: string, allowInsecureTestBase?:
 }
 
 async function getPublicAddresses(hostname: string, resolve: PublicAddressResolver): Promise<LookupAddress[]> {
-  const addresses = await resolve(hostname)
+  let addresses: LookupAddress[]
+  try {
+    addresses = await resolve(hostname)
+  } catch {
+    // 系统解析错误（如 ENOTFOUND / EAI_AGAIN）是英文原始文本，统一换成可读提示。
+    throw new Error(`未能解析学术链接域名「${hostname}」，请检查网络连接后重试。`)
+  }
   if (addresses.length === 0) throw new Error('未能解析学术链接域名。')
   if (addresses.some(({ address, family }) => family !== isIP(address) || !isPublicAddress(address))) {
     throw new Error(DENIED_ADDRESS)

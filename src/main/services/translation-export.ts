@@ -225,15 +225,24 @@ export function buildTranslationExportHtml(
 </html>`
 }
 
+// Electron 不回收已创建的 session 分区；固定分区并串行导出，避免每次导出常驻一份浏览器上下文。
+const PDF_EXPORT_PARTITION = 'paperflow-pdf-export'
+let exportQueue: Promise<unknown> = Promise.resolve()
+
 /**
  * 在隔离沙盒隐藏窗口（禁用 JS）中将排版 HTML 渲染为 A4 PDF Buffer，不依赖任何外部工具或 Python 运行时。
  */
-export async function renderTranslationHtmlToPdfBuffer(html: string): Promise<Buffer> {
+export function renderTranslationHtmlToPdfBuffer(html: string): Promise<Buffer> {
+  const operation = exportQueue.then(() => renderHtmlToPdf(html))
+  exportQueue = operation.then(() => undefined, () => undefined)
+  return operation
+}
+
+async function renderHtmlToPdf(html: string): Promise<Buffer> {
   const tempDir = mkdtempSync(join(tmpdir(), 'paperflow-pdf-export-'))
   const htmlPath = join(tempDir, 'export.html')
   const allowedUrl = pathToFileURL(htmlPath).href
-  const partition = `paperflow-pdf-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const exportSession = session.fromPartition(partition)
+  const exportSession = session.fromPartition(PDF_EXPORT_PARTITION)
   exportSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   exportSession.setPermissionCheckHandler(() => false)
   exportSession.webRequest.onBeforeRequest((details, callback) => {
@@ -248,7 +257,7 @@ export async function renderTranslationHtmlToPdfBuffer(html: string): Promise<Bu
       width: 900,
       height: 1200,
       webPreferences: {
-        partition,
+        partition: PDF_EXPORT_PARTITION,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,

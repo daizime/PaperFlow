@@ -104,7 +104,7 @@ pnpm dev
 
 ### 安全隔离约定
 - 强制启用 `sandbox: true`、`contextIsolation: true`、`webSecurity: true`，禁用 `nodeIntegration`、外部页面导航、弹窗与渲染层权限请求；
-- Preload 仅暴露 67 个冻结的 `window.paperflow` 业务方法；主进程 IPC 逐一校验窗口来源、主 frame、精确协议 URL（`app://bundle`）与 Zod 入参（含剪贴板、URL 协议、私有网段防 SSRF 与 CLI 参数元字符拦截）；
+- Preload 仅暴露 67 个冻结的 `window.paperflow` 成员（65 个 invoke 方法 + 2 个事件订阅）；主进程 IPC 逐一校验窗口来源、主 frame、精确协议 URL（`app://bundle`）与 Zod 入参（含剪贴板、URL 协议、私有网段防 SSRF 与 CLI 参数元字符拦截）；
 - PDF 解析与渲染使用本地打包的 PDF.js Worker、CMaps 与 WASM，不加载任何外部 CDN，不执行 PDF 外部链接或表单脚本；外部翻译 API、余额/学术检索请求与本机 CLI 均仅在主进程服务内受控执行。
 
 ---

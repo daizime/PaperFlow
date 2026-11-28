@@ -24,7 +24,7 @@ import {
 } from '../../shared/schemas'
 import { formatAnnotationsMarkdown } from './annotation-export'
 import type { LibraryDatabase } from './database'
-import type { DocumentService } from './document-service'
+import { validatePdfHeader, validatePdfSize, type DocumentService } from './document-service'
 import {
   RESEARCH_PROFILE_SETTINGS_KEY,
   TRANSLATION_SETTINGS_KEY,
@@ -522,6 +522,14 @@ export class BackupService {
       throw new Error('备份清单 paperflow-backup.json 解析失败。')
     }
     const manifest = backupManifestSchema.parse(parsedJson)
+    // 写入任何文献或分类前先核对清单引用的全部 PDF，避免中途失败留下半恢复状态。
+    for (const doc of manifest.documents) {
+      const pdfEntry = entries.get(doc.pdfPath)
+      if (!pdfEntry) throw new Error(`备份包缺少 PDF 文件：${doc.pdfPath}`)
+      if (!validatePdfSize(pdfEntry.byteLength) || !validatePdfHeader(pdfEntry)) {
+        throw new Error(`备份包中的 PDF 无效或超出大小限制：${doc.pdfPath}`)
+      }
+    }
 
     const folderIdMap = restoreFoldersFromBackup(this.database, manifest.folders)
 

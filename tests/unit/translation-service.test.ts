@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { LibraryDatabase } from '../../src/main/services/database'
 import {
@@ -341,6 +341,43 @@ describe('TranslationService 双引擎翻译与密钥保护', () => {
       expect(draftCliTest.testedProvider).toBe('cli')
       expect(service.getSettings().provider).toBe('openai-compatible')
     } finally {
+      service.cancelAll()
+      db.close()
+    }
+  })
+
+  test('CLI 未读完 stdin 即退出时，超长提示词的写入失败不会成为未捕获异常', async () => {
+    const stubScript = join(workRoot, 'cli-exit-before-reading.mjs')
+    await writeFile(stubScript, 'process.exit(3)', 'utf8')
+    const db = new LibraryDatabase(dbPath)
+    const service = new TranslationService({ database: db, safeStorage: fakeSafeStorage, authorizeCli: async () => true })
+    const docId = insertSampleDocument(db)
+    const uncaught = vi.fn()
+    process.on('uncaughtException', uncaught)
+    try {
+      service.saveSettings({
+        provider: 'cli',
+        targetLanguage: 'zh-CN',
+        openai: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        cli: {
+          preset: 'custom',
+          command: process.execPath,
+          model: '',
+          extraArgs: [stubScript],
+          timeoutSec: 30
+        }
+      })
+      await authorizeCurrentSyntheticCli(service)
+      // 合成摘录合计超过管道缓冲区，子进程退出时仍留有未完成的写入。
+      await expect(service.chat({
+        sessionKey: 'synthetic-stdin',
+        question: '合成提问',
+        scope: 'all-open',
+        contexts: Array.from({ length: 6 }, () => ({ documentId: docId, title: 'sample', excerpt: 'a'.repeat(16000) }))
+      })).rejects.toThrow('CLI 退出码 3')
+      expect(uncaught).not.toHaveBeenCalled()
+    } finally {
+      process.off('uncaughtException', uncaught)
       service.cancelAll()
       db.close()
     }

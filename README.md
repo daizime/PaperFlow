@@ -6,7 +6,7 @@ Foliopair（原 PaperFlow）基于 **Electron 44 + React 19 + TypeScript + PDF.j
 
 - 文献库存储、多级学科分类整理、PDF 版面解析、自动大纲、图表裁剪速览、引用提取与便携备份全部运行在**本地且不依赖大模型**；
 - 双语翻译、划句 AI 伴读、AI 论文对话、学术技能与摘要速览通过 Electron 主进程受控代理接入 **OpenAI 兼容 API**（DeepSeek / OpenAI / 本机 Ollama 等）或 **本机 AI CLI**（Codex CLI / Gemini CLI / 自定义 CLI），译文与对话记录持久化缓存于本地 SQLite，API Key 按完整 Base URL 绑定并经系统安全模块 `safeStorage` 加密保存；
-- 外部学术检索（arXiv / Semantic Scholar / OpenAlex）与 DOI 引用补全同样由主进程受控执行并拦截私有网络与非 HTTPS 跳转；渲染层始终保持零外网直连权限，严格启用 `sandbox` / `contextIsolation` / `webSecurity`，不引入 OCR 或 Python 翻译运行时依赖。
+- 主进程通过 OpenAlex 和 arXiv 检索文献，通过 OpenAlex 补全 DOI 引用。学术检索、引用补全和 PDF 下载逐跳检查 HTTPS 与公网地址，连接使用已经校验的地址。渲染层保持无外网直连权限，启用 `sandbox` / `contextIsolation` / `webSecurity`，不引入 OCR 或 Python 翻译运行时依赖。
 
 ![Foliopair 主界面预览（原创合成样本 PDF，双语译文由本地测试桩生成）](docs/foliopair-reader.png)
 
@@ -17,7 +17,7 @@ Foliopair（原 PaperFlow）基于 **Electron 44 + React 19 + TypeScript + PDF.j
 ### 1. 文献库管理、Zotero 风格多级分类与科研向导
 - **安全本地入库**：支持按钮选择、拖拽 `.pdf` 批量导入或整目录结构导入（单文件上限 100 MiB，主进程 SHA-256 去重与隐藏沙盒校验，渲染层不接触本机真实路径）。
 - **多级分类、专属词库与状态管理**：支持最多 4 级树状分类文件夹，每个分类可独立配置学科语境与专属术语表（支持隔离或继承全局词库）；文件行布局自适应窄侧栏不重叠，卡片悬停展示快捷栏（星标收藏、阅读状态 `未读/在读/已读`、自定义 `#标签`、内联重命名与删除），支持批量移动、批量打标、一键导出分类 PDF 与批注。
-- **跨库检索与 AI 学术发现**：本地单框同步检索文献标题、标签、批注笔记与已缓存译文；另可在文献库/对话内按需检索 **arXiv / Semantic Scholar / OpenAlex**，支持摘要 AI 速览与一键校验下载入库。
+- **跨库检索与 AI 学术发现**。本地单框同步检索文献标题、标签、批注笔记与已缓存译文。文献库和对话内可按需检索 **OpenAlex 和 arXiv**，并一键校验下载入库。摘要速览由已配置的 AI 引擎生成。
 - **研究生科研向导**：首次启动或点击顶栏「科研向导」即可按学历、学科方向与研究范式初始化预设标签与学科词库模板。
 
 ### 2. 三视图对照、融合标题栏、多篇并排与护眼/深色主题

@@ -62,7 +62,8 @@ import { APP_URL, developmentUrl } from '../services/app-protocol'
 import type { BackupService } from '../services/backup-service'
 import type { LibraryDatabase } from '../services/database'
 import type { DocumentService } from '../services/document-service'
-import { validateExternalHttpsUrl, type LiteratureSearchService } from '../services/literature-search-service'
+import { validateExternalBrowserUrl } from '../services/literature-http'
+import type { LiteratureSearchService } from '../services/literature-search-service'
 import { buildAcademicPptxBuffer } from '../services/pptx-builder'
 import { readResearchProfile, saveResearchProfile } from '../services/research-profile'
 import { deleteCustomAiSkill, listCustomAiSkills, saveCustomAiSkill } from '../services/custom-skills'
@@ -417,7 +418,7 @@ export function registerIpc(
 
   handle(CHANNELS.openExternalUrl, async (_window, args) => {
     const [rawUrl] = openExternalUrlArgsSchema.parse(args)
-    const validated = validateExternalHttpsUrl(rawUrl, process.env.PAPERFLOW_TEST_LITERATURE_BASE?.trim() || undefined)
+    const validated = await validateExternalBrowserUrl(rawUrl)
     await shell.openExternal(validated.toString())
   })
 

@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { LibraryDatabase } from '../../src/main/services/database'
 import { DocumentService } from '../../src/main/services/document-service'
+import { validateExternalHttpsUrl } from '../../src/main/services/literature-http'
 import {
   LiteratureSearchService,
   parseArxivAtomFeed,
-  reconstructOpenAlexAbstract,
-  validateExternalHttpsUrl
+  reconstructOpenAlexAbstract
 } from '../../src/main/services/literature-search-service'
 import {
   buildAcademicPptxBuffer,
@@ -138,6 +138,39 @@ describe('LiteratureSearchService & OpenAlex/arXiv helpers', () => {
     } finally {
       db.close()
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('学术检索逐跳处理重定向，拒绝非 HTTPS 目标并保留另一数据源', async () => {
+    const db = new LibraryDatabase(':memory:')
+    const requests: string[] = []
+    const service = new LiteratureSearchService({
+      database: db,
+      documents: new DocumentService(db, join(tmpdir(), 'paperflow-lit-redirect-unit'), async () => 1),
+      fetchImpl: async (input, init) => {
+        expect(init?.redirect).toBe('manual')
+        const url = new URL(String(input))
+        requests.push(url.origin + url.pathname)
+        if (url.hostname === 'api.openalex.org') {
+          return Response.redirect('http://invalid.example/works', 302)
+        }
+        if (url.pathname === '/api/query') {
+          return new Response(null, { status: 307, headers: { location: '/api/relocated' } })
+        }
+        return new Response('<feed></feed>')
+      }
+    })
+    try {
+      const result = await service.search({ query: 'synthetic fixture', useAiAssist: false })
+      expect(result.sourcesQueried).toEqual(['arxiv'])
+      expect(result.warnings[0]).toContain('HTTPS')
+      expect(requests).toEqual([
+        'https://api.openalex.org/works',
+        'https://export.arxiv.org/api/query',
+        'https://export.arxiv.org/api/relocated'
+      ])
+    } finally {
+      db.close()
     }
   })
 })

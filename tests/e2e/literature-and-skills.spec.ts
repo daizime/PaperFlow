@@ -13,6 +13,7 @@ test('主动 AI 搜文献、按标签发现并一键导入 PDF，以及 AI 对�
   )
   const searchQueries: string[] = []
   const skillPrompts: string[] = []
+  const pdfHops: string[] = []
 
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url || '/', 'http://127.0.0.1')
@@ -70,6 +71,14 @@ test('主动 AI 搜文献、按标签发现并一键导入 PDF，以及 AI 对�
     }
 
     if (reqUrl.pathname === '/pdfs/oa-sample.pdf') {
+      pdfHops.push(reqUrl.pathname)
+      res.writeHead(302, { Location: '/pdfs/oa-sample-body.pdf' })
+      res.end()
+      return
+    }
+
+    if (reqUrl.pathname === '/pdfs/oa-sample-body.pdf') {
+      pdfHops.push(reqUrl.pathname)
       res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': String(samplePdfBytes.length) })
       res.end(samplePdfBytes)
       return
@@ -206,6 +215,7 @@ test('主动 AI 搜文献、按标签发现并一键导入 PDF，以及 AI 对�
 
     await page.getByTestId('literature-import-pdf-btn').first().click()
     await expect(page.getByTestId('literature-open-imported-btn')).toBeVisible({ timeout: 15000 })
+    expect(pdfHops).toEqual(['/pdfs/oa-sample.pdf', '/pdfs/oa-sample-body.pdf'])
     await page.getByTestId('literature-open-imported-btn').click()
     await expect(searchModal).toHaveCount(0)
     await expect(page.locator('.pdf-page[data-page-number="1"]')).toHaveAttribute('data-rendered', 'true', {

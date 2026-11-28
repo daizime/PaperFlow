@@ -1,4 +1,3 @@
-import { isIP } from 'node:net'
 import {
   MAX_PDF_BYTES,
   type EnrichCitationInput,
@@ -19,6 +18,7 @@ import {
 } from '../../shared/schemas'
 import type { LibraryDatabase } from './database'
 import type { DocumentService } from './document-service'
+import { requestLiteratureResponse, validateExternalHttpsUrl } from './literature-http'
 import type { TranslationService } from './translation-service'
 
 const DEFAULT_OPENALEX_BASE = 'https://api.openalex.org'
@@ -27,70 +27,7 @@ const LITERATURE_USER_AGENT = 'Foliopair (Academic Reader)'
 const SEARCH_TIMEOUT_MS = 12_000
 const DOWNLOAD_TIMEOUT_MS = 30_000
 const MAX_REDIRECT_HOPS = 5
-
-function isPrivateOrLoopbackIp(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/g, '').split('%')[0].toLowerCase()
-  const ipVer = isIP(bare)
-  if (ipVer === 4) {
-    const parts = bare.split('.').map(n => Number.parseInt(n, 10))
-    if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return true
-    const [a, b] = parts
-    if (a === 10 || a === 127 || a === 0) return true
-    if (a === 169 && b === 254) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a === 100 && b >= 64 && b <= 127) return true
-    return false
-  }
-  if (ipVer === 6) {
-    if (bare === '::1' || bare === '::') return true
-    if (bare.startsWith('fc') || bare.startsWith('fd') || bare.startsWith('fe80')) return true
-    if (bare.startsWith('::ffff:')) {
-      return isPrivateOrLoopbackIp(bare.slice('::ffff:'.length))
-    }
-  }
-  return false
-}
-
-/**
- * 校验外部学术链接或 PDF 下载链接：生产环境仅允许公网 HTTPS，防止 SSRF 与本地内网探测；
- * 仅当显式传入测试环回基址（allowInsecureTestBase）时放行该测试服务同源请求。
- */
-export function validateExternalHttpsUrl(rawUrl: string, allowInsecureTestBase?: string): URL {
-  let parsed: URL
-  try {
-    parsed = new URL(rawUrl.trim())
-  } catch {
-    throw new Error('外部链接格式无效。')
-  }
-  if (allowInsecureTestBase) {
-    try {
-      const testOrigin = new URL(allowInsecureTestBase).origin
-      if (parsed.origin === testOrigin && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
-        return parsed
-      }
-    } catch {
-      // 忽略无效测试基址
-    }
-  }
-  if (parsed.protocol !== 'https:') {
-    throw new Error('仅支持访问 HTTPS 安全学术链接。')
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error('外部链接不允许携带内嵌凭据。')
-  }
-  const hostname = parsed.hostname.toLowerCase()
-  if (
-    !hostname ||
-    hostname === 'localhost' ||
-    hostname.endsWith('.localhost') ||
-    hostname.endsWith('.local') ||
-    isPrivateOrLoopbackIp(hostname)
-  ) {
-    throw new Error('拒绝访问本机或内网地址。')
-  }
-  return parsed
-}
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 export function reconstructOpenAlexAbstract(
   invertedIndex: Record<string, number[]> | null | undefined
@@ -383,7 +320,7 @@ export class LiteratureSearchService {
   private readonly database: LibraryDatabase
   private readonly documents: DocumentService
   private readonly translations?: TranslationService
-  private readonly fetchImpl: typeof fetch
+  private readonly fetchImpl?: typeof fetch
   private readonly openAlexBaseUrl: string
   private readonly arxivBaseUrl: string
   private readonly allowInsecureTestBase?: string
@@ -392,20 +329,29 @@ export class LiteratureSearchService {
     this.database = options.database
     this.documents = options.documents
     this.translations = options.translations
-    this.fetchImpl = options.fetchImpl ?? fetch
+    this.fetchImpl = options.fetchImpl
     this.openAlexBaseUrl = (options.openAlexBaseUrl ?? DEFAULT_OPENALEX_BASE).replace(/\/+$/, '')
     this.arxivBaseUrl = (options.arxivBaseUrl ?? DEFAULT_ARXIV_BASE).replace(/\/+$/, '')
     this.allowInsecureTestBase = options.allowInsecureTestBase
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new Error('TIMEOUT')), timeoutMs)
-    try {
-      return await this.fetchImpl(url, { ...init, signal: controller.signal })
-    } finally {
-      clearTimeout(timer)
+  private async getLiteratureResponse(rawUrl: string, headers: Record<string, string>, timeoutMs: number): Promise<Response> {
+    const signal = AbortSignal.timeout(timeoutMs)
+    let currentUrl = validateExternalHttpsUrl(rawUrl, this.allowInsecureTestBase)
+
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+      const response = this.fetchImpl
+        ? await this.fetchImpl(currentUrl.toString(), { headers, redirect: 'manual', signal })
+        : await requestLiteratureResponse(currentUrl, headers, signal, this.allowInsecureTestBase)
+      if (!REDIRECT_STATUSES.has(response.status)) return response
+
+      const location = response.headers.get('location')
+      await response.body?.cancel().catch(() => {})
+      if (!location) throw new Error('学术请求收到缺少目标地址的重定向。')
+      if (hop === MAX_REDIRECT_HOPS) break
+      currentUrl = validateExternalHttpsUrl(new URL(location, currentUrl).toString(), this.allowInsecureTestBase)
     }
+    throw new Error('学术请求重定向次数过多。')
   }
 
   private async expandQueryWithAi(query: string, tags: readonly string[]): Promise<string[]> {
@@ -495,17 +441,23 @@ export class LiteratureSearchService {
     }
 
     const [oaSettled, arxivSettled] = await Promise.allSettled([
-      this.fetchWithTimeout(oaRequestUrl, { headers }, SEARCH_TIMEOUT_MS).then(async res => {
-        if (oaSingleWork && res.status === 404) return []
-        if (!res.ok) throw new Error(`OpenAlex HTTP ${res.status}`)
+      this.getLiteratureResponse(oaRequestUrl, headers, SEARCH_TIMEOUT_MS).then(async res => {
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {})
+          if (oaSingleWork && res.status === 404) return []
+          throw new Error(`OpenAlex HTTP ${res.status}`)
+        }
         const data = (await res.json()) as { results?: OpenAlexWork[] } & OpenAlexWork
         if (oaSingleWork) {
           return Array.isArray(data.results) ? parseOpenAlexWorks(data.results) : parseOpenAlexWorks([data])
         }
         return parseOpenAlexWorks(Array.isArray(data.results) ? data.results : [])
       }),
-      this.fetchWithTimeout(arxivRequestUrl, { headers }, SEARCH_TIMEOUT_MS).then(async res => {
-        if (!res.ok) throw new Error(`arXiv HTTP ${res.status}`)
+      this.getLiteratureResponse(arxivRequestUrl, headers, SEARCH_TIMEOUT_MS).then(async res => {
+        if (!res.ok) {
+          await res.body?.cancel().catch(() => {})
+          throw new Error(`arXiv HTTP ${res.status}`)
+        }
         const xml = await res.text()
         return parseArxivAtomFeed(xml)
       })
@@ -578,43 +530,18 @@ export class LiteratureSearchService {
 
   async importPaperPdf(input: ImportLiteraturePdfInput): Promise<ImportResult> {
     const validated = importLiteraturePdfInputSchema.parse(input)
-    let currentUrl = validateExternalHttpsUrl(validated.pdfUrl, this.allowInsecureTestBase)
-    let response: Response | null = null
-
-    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
-      const res = await this.fetchWithTimeout(
-        currentUrl.toString(),
-        {
-          redirect: 'manual',
-          headers: {
-            'User-Agent': LITERATURE_USER_AGENT,
-            Accept: 'application/pdf,*/*;q=0.8'
-          }
-        },
-        DOWNLOAD_TIMEOUT_MS
-      )
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('location')
-        if (!location) {
-          throw new Error('下载开放获取 PDF 时收到无效重定向响应。')
-        }
-        const resolvedNext = new URL(location, currentUrl).toString()
-        currentUrl = validateExternalHttpsUrl(resolvedNext, this.allowInsecureTestBase)
-        continue
-      }
-      response = res
-      break
-    }
-
-    if (!response) {
-      throw new Error('下载开放获取 PDF 时重定向次数过多。')
-    }
+    const response = await this.getLiteratureResponse(validated.pdfUrl, {
+      'User-Agent': LITERATURE_USER_AGENT,
+      Accept: 'application/pdf,*/*;q=0.8'
+    }, DOWNLOAD_TIMEOUT_MS)
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {})
       throw new Error(`下载开放获取 PDF 失败（HTTP ${response.status}），建议改为“浏览器打开”后手动保存导入。`)
     }
 
     const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10)
     if (Number.isFinite(contentLength) && contentLength > MAX_PDF_BYTES) {
+      await response.body?.cancel().catch(() => {})
       throw new Error('远端 PDF 超过 100 MiB 大小限制。')
     }
 
@@ -709,7 +636,7 @@ export class LiteratureSearchService {
       try {
         const encodedDoiPath = cleanDoi.split('/').map(encodeURIComponent).join('/')
         const doiUrl = `${this.openAlexBaseUrl}/works/https://doi.org/${encodedDoiPath}`
-        const res = await this.fetchWithTimeout(doiUrl, { headers }, SEARCH_TIMEOUT_MS)
+        const res = await this.getLiteratureResponse(doiUrl, headers, SEARCH_TIMEOUT_MS)
         if (res.ok) {
           const data = (await res.json()) as { results?: OpenAlexWork[] } & OpenAlexWork
           const items = Array.isArray(data.results) ? parseOpenAlexWorks(data.results) : parseOpenAlexWorks([data])
@@ -729,7 +656,7 @@ export class LiteratureSearchService {
               message: '已通过 OpenAlex 按 DOI 精确校对文献元数据。'
             }
           }
-        }
+        } else await res.body?.cancel().catch(() => {})
       } catch {
         // DOI 精确查询失败时继续尝试标题检索，或诚实返回未命中
       }
@@ -740,7 +667,7 @@ export class LiteratureSearchService {
         const oaUrl = new URL(`${this.openAlexBaseUrl}/works`)
         oaUrl.searchParams.set('search', rawTitle)
         oaUrl.searchParams.set('per-page', '5')
-        const res = await this.fetchWithTimeout(oaUrl.toString(), { headers }, SEARCH_TIMEOUT_MS)
+        const res = await this.getLiteratureResponse(oaUrl.toString(), headers, SEARCH_TIMEOUT_MS)
         if (res.ok) {
           const data = (await res.json()) as { results?: OpenAlexWork[] }
           const candidates = parseOpenAlexWorks(Array.isArray(data.results) ? data.results : [])
@@ -798,6 +725,7 @@ export class LiteratureSearchService {
             }
           }
         } else {
+          await res.body?.cancel().catch(() => {})
           return {
             matched: false,
             source: null,

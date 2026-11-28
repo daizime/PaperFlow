@@ -472,7 +472,7 @@ async function main(): Promise<void> {
     throw new Error(`electron-builder 失败，退出码: ${result.status ?? 'null'}`)
   }
 
-  const artifactRel = `release/PaperFlow-${pkg.version}-linux-x64.tar.gz`
+  const artifactRel = `release/Foliopair-${pkg.version}-linux-x64.tar.gz`
   const artifactPath = resolve(artifactRel)
   const artifactInfo = await stat(artifactPath)
   if (!artifactInfo.isFile()) {

@@ -21,7 +21,7 @@ win:
     - target: nsis
       arch: [x64]
 nsis:
-  artifactName: PaperFlow-${version}-win-${arch}-setup.${ext}
+  artifactName: Foliopair-${version}-win-${arch}-setup.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -31,7 +31,7 @@ linux:
   executableName: paperflow
   icon: build/icon.png
   category: Office;Education;Science
-  artifactName: PaperFlow-${version}-linux-${arch}.${ext}
+  artifactName: Foliopair-${version}-linux-${arch}.${ext}
   target:
     - target: tar.gz
       arch: [x64]

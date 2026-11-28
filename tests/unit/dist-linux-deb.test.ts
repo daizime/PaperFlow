@@ -15,8 +15,8 @@ import {
 describe('scripts/dist-linux-deb 辅助逻辑', () => {
   it('parseDebCliArgs 返回默认路径并支持自定义参数与 --help', () => {
     expect(parseDebCliArgs([], '0.1.0')).toEqual({
-      fromTar: 'release/PaperFlow-0.1.0-linux-x64.tar.gz',
-      output: 'release/PaperFlow-0.1.0-linux-x64.deb',
+      fromTar: 'release/Foliopair-0.1.0-linux-x64.tar.gz',
+      output: 'release/Foliopair-0.1.0-linux-x64.deb',
       icon: 'build/icon.png',
       help: false
     })
@@ -52,6 +52,7 @@ describe('scripts/dist-linux-deb 辅助逻辑', () => {
     }
 
     expect(buildWrapperScript()).toBe('#!/bin/sh\nexec /opt/PaperFlow/paperflow "$@"\n')
+    expect(buildDesktopEntry()).toContain('Name=Foliopair\n')
     expect(buildDesktopEntry()).toContain('Exec=/opt/PaperFlow/paperflow %U\n')
     expect(buildDesktopEntry()).toContain('MimeType=application/pdf;\n')
 

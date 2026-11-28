@@ -1,10 +1,41 @@
 # Changelog
 
-本文档记录 PaperFlow 的正式版本变更与可复核验证基线；所有日期均以发布时区为准。
+本文档记录 **Foliopair**（原名 **PaperFlow**）的正式版本变更与可复核验证基线；所有日期均以发布时区为准。
 
 ## [Unreleased]
 
 （暂无未发布条目）
+
+## [0.2.1] - 2026-11-28
+
+围绕「**Foliopair 品牌重塑与界面精修、单/双栏版面保真分段翻译与右边界对齐、跨页语义上下文连贯及安全加固**」的稳定升级版本（底层沿用 `PaperFlow` 数据目录、`user_version = 7` SQLite 数据库与 `window.paperflow` 契约，支持 `v0.2.0` / `v0.1.x` 老用户无缝升级）。
+
+### 新增与重塑
+
+- **Foliopair 品牌重塑、三套语义主题与融合式标题栏**：
+  - 应用展示名、窗口标题、桌面快捷方式、`.desktop` 条目、科研向导及 `.pptx` 预览品牌标识全面升级为 **Foliopair**，同步重绘双页几何品牌图标与三套「纸墨档案 / 暖棉纸 / 石墨暗桌」语义设计令牌（[tokens.css](src/renderer/src/assets/tokens.css)）；
+  - 新增 Preload 受控 API `setWindowTheme`（共 **67** 个冻结 API），支持将主题色同步到 Windows / Linux 原生无框标题栏叠加层，顶部操作栏重构为「左导航 + 中阅读工具 + 右紧凑引擎胶囊弹层」。
+- **跨批/跨页翻译语义上下文连贯与快捷键自定义**：
+  - 新增 [translation-context.ts](src/renderer/src/features/translation/translation-context.ts) 与 `doc.summary.v1:*` 文档摘要持久化，翻译请求可按批/跨页注入当前文档滚动摘要、章节标题与前序至多 6 块已译语义上下文；
+  - 新增快捷键管理模块与设置弹窗自定义快捷键绑定支持，并支持主动切换「双栏」时对未译非中文文献预译前两页（普通打开与恢复视图仍保持本地零外发）。
+
+### 优化与修复
+
+- **单/双栏版面识别、右边界对齐与零上下遮挡**：
+  - 强化 [layout-analysis.ts](src/renderer/src/features/reader/layout-analysis.ts) 与 [sentence-alignment.ts](src/renderer/src/features/translation/sentence-alignment.ts) 的栏位切分、跨栏标题识别及视觉保留区跳过，译文段落按栏宽与右边界吸附排版并纵向无遮挡重排，同步修复 Markdown / PDF 导出（[translation-export.ts](src/main/services/translation-export.ts)）在单栏与跨栏区域的对齐表现。
+- **文献库窄侧栏控件防重叠、安全凭据隔离与备份加固**：
+  - 修复文献库树形条目在同时展示「当前」与阅读状态标签时的右溢出/遮挡问题（`LibraryPanel` / `library.css`）；
+  - 加固 OpenAI 兼容 API Key 按完整 Base URL 绑定存储、首次或变更本机 AI CLI 命令行参数前的系统授权弹窗确认、以及 ZIP 备份/恢复体积（512 MiB / 5,000 条目 / 1 GiB 解包）硬上限保护，并在删除/重置文献库时联动清理 `doc.summary.v1:*` 缓存键。
+
+### 打包与验证摘要
+
+- **发布产物（安装包更名为 `Foliopair-0.2.1-*`，两端 `app.asar` SHA-256 逐字节一致：`3ce191831fe30289cffddabe54442c8b9bb057748f1eb523c50a342023a4cbdf`）**：
+  - `Foliopair-0.2.1-win-x64-setup.exe`（`123,345,270` B，Windows x64 NSIS，未签名 `NotSigned`）
+  - `Foliopair-0.2.1-linux-x64.tar.gz`（`142,059,762` B，Linux x64 便携包）
+  - `Foliopair-0.2.1-linux-x64.deb`（`102,271,920` B，在远程 Ubuntu x86_64 基于同源 `.tar.gz` 经 `dpkg-deb` 封装，Debian 包名保留 `paperflow` 以便升级替代 `[0.1.0]`/`[0.2.0]`）
+- **实测记录与边界**：
+  - Windows x64：`tsc --noEmit`（node/web/test 0 错误）、`eslint . --max-warnings=0`（0 警告）、Vitest **33 文件 / 256 项单元测试全部通过**、Playwright 开发态端到端 **14 文件 / 23 项全部通过**（`layout-sync.spec.ts:35:5` 首轮批跑曾出现 1 次同步滚动解锁断言超时，单独复测 `3/3` 与完整重跑全量 `23/23` 均通过）、打包 `PaperFlow.exe` 核心冒烟端到端 **7 文件 / 14 项全部通过**。
+  - Ubuntu x86_64：`Foliopair-0.2.1-linux-x64.deb` 完成 `dpkg-deb --info` / `--contents` 与 `apt-get -s install` 模拟升级依赖解析校验；`.exe`/`.deb`/`.tar.gz` 安装包在目标纯净桌面系统上的交互式实机安装启动仍待补充。
 
 ## [0.2.0] - 2026-11-27
 

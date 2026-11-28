@@ -50,8 +50,8 @@ const EXPECTED_DEB_MEMBERS = [
 /** 解析 `.deb` 打包命令行参数；`--from-tar`/`--output`/`--icon` 可省略，默认使用当前版本发行归档路径。 */
 export function parseDebCliArgs(argv: readonly string[], version: string): DebCliOptions {
   const options: DebCliOptions = {
-    fromTar: `release/PaperFlow-${version}-linux-x64.tar.gz`,
-    output: `release/PaperFlow-${version}-linux-x64.deb`,
+    fromTar: `release/Foliopair-${version}-linux-x64.tar.gz`,
+    output: `release/Foliopair-${version}-linux-x64.deb`,
     icon: 'build/icon.png',
     help: false
   }
@@ -89,7 +89,7 @@ export function buildDesktopEntry(): string {
   return [
     '[Desktop Entry]',
     'Name=Foliopair',
-    'Comment=面向科研论文的本地 PDF 阅读器',
+    'Comment=面向科研论文的本地双语 PDF 阅读器',
     'GenericName=PDF Reader',
     'Exec=/opt/PaperFlow/paperflow %U',
     'Terminal=false',
@@ -119,10 +119,10 @@ export function buildControlFile(version: string, installedSizeKiB: number): str
     'Priority: optional',
     'Architecture: amd64',
     `Installed-Size: ${installedSizeKiB}`,
-    'Maintainer: PaperFlow contributors <noreply@paperflow.local>',
+    'Maintainer: Foliopair contributors <noreply@foliopair.local>',
     `Depends: ${LINUX_DEB_DEPENDS}`,
-    'Description: PaperFlow local academic PDF reader',
-    ' Offline local desktop PDF reader for scientific papers.',
+    'Description: Foliopair (formerly PaperFlow) local academic PDF reader',
+    ' Local-first bilingual desktop PDF reader for scientific papers.',
     ''
   ].join('\n')
 }
@@ -228,8 +228,8 @@ function printHelp(version: string): void {
       '基于同源 Linux .tar.gz 构建产物封装 Ubuntu/Debian amd64 .deb 安装包（不自动发布）。',
       '',
       '选项:',
-      `  --from-tar <path>  输入 tar.gz 路径（默认: release/PaperFlow-${version}-linux-x64.tar.gz）`,
-      `  --output <path>    输出 .deb 路径（默认: release/PaperFlow-${version}-linux-x64.deb）`,
+      `  --from-tar <path>  输入 tar.gz 路径（默认: release/Foliopair-${version}-linux-x64.tar.gz）`,
+      `  --output <path>    输出 .deb 路径（默认: release/Foliopair-${version}-linux-x64.deb）`,
       '  --icon <path>      256×256 PNG 图标路径（默认: build/icon.png）',
       '  -h, --help         显示本帮助并退出'
     ].join('\n')
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
 
   if (process.platform !== 'linux') {
     throw new Error(
-      `dist-linux-deb 仅支持在 Ubuntu/Debian Linux 环境运行（当前平台: ${process.platform}）。请先在本地运行 pnpm dist:linux 生成 tar.gz，再将其传至 Ubuntu/Debian 后执行: tsx scripts/dist-linux-deb.ts --from-tar release/PaperFlow-${pkg.version}-linux-x64.tar.gz`
+      `dist-linux-deb 仅支持在 Ubuntu/Debian Linux 环境运行（当前平台: ${process.platform}）。请先在本地运行 pnpm dist:linux 生成 tar.gz，再将其传至 Ubuntu/Debian 后执行: tsx scripts/dist-linux-deb.ts --from-tar release/Foliopair-${pkg.version}-linux-x64.tar.gz`
     )
   }
 

@@ -1,6 +1,6 @@
 # 第三方依赖与许可证
 
-核验日期：2026-10-27。PaperFlow 自有代码按根目录 `LICENSE` 与 `package.json` 声明为 **AGPL-3.0-only**；第三方组件保留各自条款，不统一改标为 AGPL。
+核验日期：2026-10-27。Foliopair（原名 PaperFlow）自有代码按根目录 `LICENSE` 与 `package.json` 声明为 **AGPL-3.0-only**；第三方组件保留各自条款，不统一改标为 AGPL。
 
 ## 核验依据与范围
 

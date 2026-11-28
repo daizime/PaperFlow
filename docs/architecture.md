@@ -1,6 +1,6 @@
-# PaperFlow 架构说明
+# Foliopair（原 PaperFlow）架构说明
 
-> 更新注记（`v0.2.0`，2026-11-27）：本文档保留 T01–T06 阶段核心架构与选区/坐标设计细节；当前主分支已扩展至 Preload **66** 个冻结 `window.paperflow` 业务 API、SQLite `PRAGMA user_version = 7` 七张表（在原有 4 张表基础上新增 `annotations`、`folders`、`chat_messages` 并扩展 `documents` 收藏/标签/分类/阅读状态字段），新增多级分类词库隔离、多篇并排分栏、AI 论文对话与学术技能（含 `.pptx` 导出）、OpenAlex/arXiv/Semantic Scholar 检索与引用补全，以及用量账单与 `.md`/`.pdf` 译文导出。安全沙盒策略、协议校验与 `--publish never` 构建约束保持不变。
+> 更新注记（`v0.2.1`，2026-11-28）：界面与品牌已更名为 **Foliopair**，同时保持底层 `PaperFlow` 数据目录（`appId: org.paperflow.desktop`、`userData/PaperFlow`、`paperflow.sqlite`、`paperflow-backup.json`）与 `window.paperflow` 桥接契约向后兼容；当前 Preload 已扩展至 **67** 个冻结 `window.paperflow` 业务 API（新增 `setWindowTheme` 联动无框主题标题栏）、SQLite `PRAGMA user_version = 7` 七张表（含 `doc.summary.v1:*` 文档摘要缓存），新增单/双栏版面保真分段翻译（右对齐与零遮挡重排）、跨页/跨批次语义上下文连贯翻译（`translation-context.ts`）、自定义快捷键、按 Base URL 绑定密钥及本机 CLI 执行系统授权确认。安全沙盒策略、协议校验与 `--publish never` 构建约束保持不变。
 
 本说明对应 PaperFlow T01–T06 基础架构与选区/坐标边界；描述实现边界，不替代测试结论。构建、实机与打包验收以 `implementation-notes.md` 与 `verification/summary.md` 的实际命令和结果为准。
 

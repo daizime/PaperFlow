@@ -1,7 +1,7 @@
-PaperFlow — THIRD-PARTY NOTICES
+Foliopair (formerly PaperFlow) — THIRD-PARTY NOTICES
 Recorded: 2026-10-27
 
-PaperFlow original code: AGPL-3.0-only. See the project root LICENSE.
+Foliopair (formerly PaperFlow) original code: AGPL-3.0-only. See the project root LICENSE.
 Third-party software and data retain their respective licenses.
 
 This notice is based on installed package versions and original license files.

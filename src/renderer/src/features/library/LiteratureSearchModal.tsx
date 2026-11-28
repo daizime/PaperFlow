@@ -487,7 +487,11 @@ export function LiteratureSearchModal({
                           type="button"
                           onClick={() => {
                             const url = item.landingUrl || item.pdfUrl
-                            if (url) void window.paperflow.openExternalUrl(url)
+                            if (!url) return
+                            setError(null)
+                            void window.paperflow.openExternalUrl(url).catch((err: unknown) => {
+                              setError(err instanceof Error ? err.message : '无法打开该学术链接。')
+                            })
                           }}
                         >
                           浏览器打开

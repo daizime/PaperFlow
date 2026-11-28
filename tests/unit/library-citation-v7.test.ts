@@ -155,7 +155,7 @@ describe('轨道三：DB v6->v7 阅读状态迁移、OpenAlex 引用精准校对
       const lit = new LiteratureSearchService({
         database: db,
         documents: docs,
-        openAlexBaseUrl: 'https://mock-openalex.local',
+        openAlexBaseUrl: 'https://mock-openalex.example.invalid',
         fetchImpl: (async (url: string) => {
           if (url.includes('/works/https://doi.org/10.1145/3514221')) {
             return new Response(

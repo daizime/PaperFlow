@@ -45,7 +45,7 @@ flowchart LR
 | `src/main/services/translation-export.ts` | 中英对照 / 纯中文 Markdown 导出，以及在隔离隐藏窗口中渲染排版 PDF |
 | `src/main/services/academic-skills.ts` · `custom-skills.ts` | 内置学术技能的提示词构建；自定义技能读写（`ai.customSkills.v1`） |
 | `src/main/services/pptx-builder.ts` | 原生 `.pptx` 生成、幻灯片 JSON 解析与 Markdown 预览格式化 |
-| `src/main/services/literature-search-service.ts` | OpenAlex / arXiv 受控检索、摘要 AI 速览、PDF 校验下载入库与 DOI 元数据补全；`validateExternalHttpsUrl` 负责外链校验 |
+| `src/main/services/literature-search-service.ts` · `literature-http.ts` | OpenAlex / arXiv 受控检索、摘要 AI 速览、PDF 校验下载入库与 DOI 元数据补全，含 URL 与连接地址校验 |
 | `src/main/services/backup-service.ts` · `zip-archive.ts` | 整库 `.zip` 备份/幂等恢复、目录结构导入、分类 PDF/批注导出与 BibTeX 生成；零外部依赖 PKZIP 引擎（CRC32、Zip-Slip 防护、体积/条目上限） |
 | `src/main/services/research-profile.ts` | 科研向导画像（`research.profile.v1`）与分类专属词库 / 全局词库的有效翻译作用域合并 |
 | `src/main/services/annotation-export.ts` | 批注 Markdown 格式化 |
@@ -76,12 +76,13 @@ flowchart LR
 
 - **API Key 按完整 Base URL 绑定**（`translation-credentials.ts`）：密钥经 Electron `safeStorage` 加密存于 `app_settings` 的 `translation.openaiCredentials.v2`，仅向前端暴露 `hasApiKey` 与 `apiKeyPreview`。保存设置时省略 `apiKey` 只能复用绑定至同一 Base URL 的密钥；更换地址后旧密钥不可见也不可用，需重新录入。旧版未绑定地址的 `translation.openaiApiKey.v1` 仅用于迁移。
 - **本机 CLI 系统授权**（`translation-cli-authorization.ts`）：首次使用某程序或变更程序 / 参数时，`saveTranslationSettings` 与 `testTranslationConnection` 先经 `authorizeCli` 弹出系统对话框列明程序、参数与最长运行时间；用户拒绝则整个请求失败。已确认的程序与参数记录于 `translation.cliAuthorizations.v1`。
-- **外部学术访问**（`validateExternalHttpsUrl`）：学术检索、摘要速览、PDF 下载、DOI 补全与 `openExternalUrl` 仅放行公网 HTTPS，拒绝内嵌凭据、`localhost`、`.local`、私有网段与回环地址的字面主机名；PDF 下载以 `redirect: 'manual'` 逐跳重新校验，最多 5 跳。仅在显式提供 `PAPERFLOW_TEST_LITERATURE_BASE` 时放行该测试基址的同源请求。
+- **主进程学术请求**。OpenAlex 和 arXiv 检索、OpenAlex 引用补全及 PDF 下载使用受控 GET，最多跟随五次重定向。请求和重定向逐跳校验 HTTPS、主机名和 DNS 解析结果，连接只使用已校验的公网 IPv4 或 IPv6 地址，并保留原主机的 TLS 校验。拒绝内嵌凭据和非公网地址。自动化测试可显式设置 `PAPERFLOW_TEST_LITERATURE_BASE`，仅放行对应环回服务的同源请求。摘要速览使用已配置的翻译引擎。
+- **在浏览器中打开链接**。`openExternalUrl` 在将初始 HTTPS 地址交给系统浏览器前校验其 DNS 解析结果。浏览器后续的 DNS 解析、连接和重定向由浏览器自行管理。
 - **备份恢复**（`zip-archive.ts`）：写出与读入共用 512 MiB 压缩包、5,000 个条目与 1 GiB 解包总量的硬上限，读入时校验 CRC32 并做 Zip-Slip 路径防护；备份包刻意不含加密 API Key。
 
 专用校验结果 handler 只接受对应隐藏窗口与精确校验 URL，随后校验返回结构。
 
-这些措施缩小权限边界，不意味着对所有恶意 PDF、Chromium 漏洞或资源耗尽已作形式化安全证明。外链校验针对 URL 字面主机名，主进程不做 DNS 解析后的地址复核，公网域名解析到内网地址的情形未单独防护。依赖升级仍需重新测试。
+这些措施缩小权限边界，不意味着对所有恶意 PDF、Chromium 漏洞或资源耗尽已作形式化安全证明。依赖升级时需重新验证上述安全边界。
 
 ## IPC 业务契约
 
@@ -192,7 +193,7 @@ flowchart LR
 | --- | --- | --- |
 | `exportBackup()` | `backup:export` | 无参数；系统保存框后将整库打包为单个 `.zip`（不含加密 API Key） |
 | `importBackup()` | `backup:import` | 无参数；系统文件框选择 `.zip`，写入前校验 512 MiB 体积上限后幂等恢复 |
-| `openExternalUrl(url)` | `system:open-external` | ≤1500 字符链接；经主进程公网 HTTPS 校验后交由系统浏览器打开 |
+| `openExternalUrl(url)` | `system:open-external` | ≤1500 字符链接，初始地址经主进程 HTTPS 和公网地址校验后交由系统浏览器打开 |
 | `copyText(text)` | `clipboard:write-text` | 1–200,000 字符文本；写入系统剪贴板 |
 | `copyImageDataUrl(dataUrl)` | `clipboard:write-image` | ≤12 MiB 的 `data:image/png;base64,` URL；转码为 PNG 后写入系统剪贴板 |
 | `getResearchProfile()` | `profile:get` | 无参数；返回科研向导画像或 null |
